@@ -717,6 +717,12 @@ select.form-control{cursor:pointer}
         </div>
         <div class="log-box" id="dbg-api">جارٍ الاختبار…</div>
       </div>
+      <!-- Security warnings -->
+      <div class="section">
+        <div class="section-title">🔐 الأمان</div>
+        <div id="dbg-sec-warnings">جارٍ التحميل…</div>
+      </div>
+
       <div class="section">
         <div class="section-title">🛠️ متغيرات البيئة</div>
         <div id="dbg-env">جارٍ التحميل…</div>
@@ -1217,8 +1223,13 @@ window.fetch = function(url, opts = {}) {
   }
   return _realFetch(url, opts).then(res => {
     if (res.status === 401 && String(url).includes('/admin') && !String(url).includes('/auth/login')) {
+      clearToken();                     // remove stale token
       showLogin('انتهت صلاحية الجلسة. أعد تسجيل الدخول.');
-      throw new Error('Unauthorized');
+      // Return a special error so callers can distinguish auth errors
+      // from real network errors — avoids unhandled rejections cascading
+      const err = new Error('Unauthorized');
+      err.isAuthError = true;
+      return Promise.reject(err);
     }
     return res;
   });
@@ -1250,15 +1261,26 @@ function startApp() {
 }
 
 // ── Check token, show login or start app ─────────────────────────────────────
-(function checkAuth() {
+// We do a lightweight /auth/verify call so an expired/invalid token (e.g. after
+// a Railway redeploy that changed ADMIN_SECRET) shows the login screen immediately
+// instead of a flash-then-redirect after the first real API call fails.
+(async function checkAuth() {
   const token = getToken();
-  if (!token) {
-    showLogin();
-  } else {
-    // Hide overlay and start (token will be validated by the first real API call)
-    document.getElementById('login-overlay').style.display = 'none';
-    startApp();
+  if (!token) { showLogin(); return; }
+
+  if (STORE_ID) {
+    try {
+      const res = await _realFetch(`/admin/${STORE_ID}/auth/verify`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) { clearToken(); showLogin('انتهت صلاحية الجلسة. أعد تسجيل الدخول.'); return; }
+    } catch(e) {
+      // Network error — assume token may still be ok, let first API call handle it
+    }
   }
+
+  document.getElementById('login-overlay').style.display = 'none';
+  startApp();
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1714,6 +1736,22 @@ async function loadDebug() {
       codeEl.textContent = 'HTTP ' + t.status_code;
       apiEl.innerHTML = `<span class="${ok?'log-ok':'log-err'}">HTTP ${t.status_code}</span>\n\n${esc(t.body_preview||'')}`;
     }
+    // Security warnings
+    const secWarns = [];
+    if (!env.ADMIN_SECRET_STABLE)
+      secWarns.push('⚠️ <strong>ADMIN_SECRET</strong> غير مضبوط — كل توكنات الأدمن تنتهي عند كل إعادة تشغيل للسيرفر. أضف <code>ADMIN_SECRET=&lt;نص_عشوائي&gt;</code> في Railway.');
+    if (env.SUPER_ADMIN_PASSWORD_IS_DEFAULT)
+      secWarns.push('🔴 <strong>SUPER_ADMIN_PASSWORD</strong> لا يزال القيمة الافتراضية <code>admin</code> — خطر أمني! غيّره فوراً في Railway.');
+    if (!env.DB_CONNECTED)
+      secWarns.push('⛔ <strong>DB_CONNECTED = false</strong> — البيانات ستُحذف عند كل deploy.');
+
+    const secWarnEl = document.getElementById('dbg-sec-warnings');
+    if (secWarnEl) {
+      secWarnEl.innerHTML = secWarns.length
+        ? secWarns.map(w => `<div class="alert alert-warn" style="margin-bottom:8px;font-size:13px">${w}</div>`).join('')
+        : '<div style="color:#16a34a;font-size:13px">✅ لا توجد تحذيرات أمنية</div>';
+    }
+
     document.getElementById('dbg-env').innerHTML = Object.entries(env).map(([k,v]) => {
       let badge;
       if (k === 'DB_CONNECTED') {

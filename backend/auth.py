@@ -13,9 +13,21 @@ import time
 import secrets
 from typing import Optional
 
-# Server-side signing secret — set ADMIN_SECRET in Railway env vars!
-# Falls back to a random secret (tokens invalidated on each restart).
-ADMIN_SECRET: str = os.getenv("ADMIN_SECRET", "") or secrets.token_hex(32)
+# ── Signing secret ────────────────────────────────────────────────────────────
+# MUST be set as ADMIN_SECRET in Railway environment variables.
+# If not set, a new random secret is generated on every restart — this
+# immediately invalidates ALL admin tokens, forcing every user to re-login
+# after each deploy.
+_secret_from_env: str = os.getenv("ADMIN_SECRET", "").strip()
+ADMIN_SECRET: str      = _secret_from_env or secrets.token_hex(32)
+ADMIN_SECRET_STABLE: bool = bool(_secret_from_env)   # exposed to /env-check
+
+if not ADMIN_SECRET_STABLE:
+    print("=" * 60)
+    print("⚠️  ADMIN_SECRET is NOT set!")
+    print("    Admin tokens will be INVALIDATED on every server restart.")
+    print("    Fix: add ADMIN_SECRET=<random_hex> to Railway env vars.")
+    print("=" * 60)
 
 TOKEN_EXPIRY_SECONDS = 60 * 60 * 24 * 7  # 7 days
 

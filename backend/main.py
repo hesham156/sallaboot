@@ -19,12 +19,33 @@ import hmac
 import hashlib
 
 import re as _re
+import time as _time
+import collections as _collections
 import store_manager as sm
 import auth as _auth
 import database as db
 from store_sync import sync_store
 from salla_oauth import get_auth_url, exchange_code, save_tokens
 import conversation_store as cs
+
+# ── Simple in-memory rate limiter for login endpoints ─────────────────────────
+_login_attempts: dict = _collections.defaultdict(list)   # ip → [timestamp, …]
+
+def _is_rate_limited(ip: str, max_attempts: int = 5, window: int = 300) -> bool:
+    """
+    Return True if *ip* has exceeded *max_attempts* login attempts in the
+    last *window* seconds.  Automatically ages out old entries.
+    """
+    now  = _time.monotonic()
+    past = [t for t in _login_attempts[ip] if now - t < window]
+    _login_attempts[ip] = past
+    if len(past) >= max_attempts:
+        return True
+    _login_attempts[ip].append(now)
+    return False
+
+# Store IDs that are reserved and must never be used as real Salla merchant IDs
+_RESERVED_IDS = {"super", "admin", "stores", "auth", "default"}
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
@@ -262,15 +283,18 @@ async def env_check():
         else:
             print("[startup] ⚠️  DATABASE_URL is set but DB connection failed — check Railway logs")
 
+    super_pass    = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
     return {
-        "GROQ_API_KEY":         bool(os.getenv("GROQ_API_KEY")),
-        "ANTHROPIC_API_KEY":    bool(os.getenv("ANTHROPIC_API_KEY")),
-        "SALLA_ACCESS_TOKEN":   bool(os.getenv("SALLA_ACCESS_TOKEN")),
-        "DATABASE_URL":         db_status["database_url"],
-        "DB_CONNECTED":         db_status["connected"],
-        "BASE_URL":             os.getenv("BASE_URL", "not set"),
-        "stores_registered":    len(stores),
-        "stores":               store_agents,
+        "GROQ_API_KEY":                    bool(os.getenv("GROQ_API_KEY")),
+        "ANTHROPIC_API_KEY":               bool(os.getenv("ANTHROPIC_API_KEY")),
+        "SALLA_ACCESS_TOKEN":              bool(os.getenv("SALLA_ACCESS_TOKEN")),
+        "DATABASE_URL":                    db_status["database_url"],
+        "DB_CONNECTED":                    db_status["connected"],
+        "ADMIN_SECRET_STABLE":             _auth.ADMIN_SECRET_STABLE,
+        "SUPER_ADMIN_PASSWORD_IS_DEFAULT": super_pass == "admin",
+        "BASE_URL":                        os.getenv("BASE_URL", "not set"),
+        "stores_registered":               len(stores),
+        "stores":                          store_agents,
     }
 
 
@@ -486,22 +510,43 @@ async def admin_store_page(store_id: str):
 
 # ── Auth: Super admin login ────────────────────────────────────────────────────
 @app.post("/admin/auth/login")
-async def super_login(req: LoginRequest):
+async def super_login(req: LoginRequest, request: Request):
+    ip         = request.client.host if request.client else "unknown"
     super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
+
+    # Warn once in logs if default password is still in use
+    if super_pass == "admin":
+        print("⚠️  [auth] SUPER_ADMIN_PASSWORD is still the default 'admin' — please change it!")
+
+    if _is_rate_limited(f"super:{ip}"):
+        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
+
     if not req.password or req.password != super_pass:
+        print(f"[auth] ❌ Failed super-admin login attempt from {ip}")
         raise HTTPException(401, "كلمة المرور غير صحيحة")
+
+    print(f"[auth] ✅ Super-admin login from {ip}")
     token = _auth.create_token("super", is_super=True)
     return {"token": token, "store_id": "super", "is_super": True}
 
 
 # ── Auth: Per-store login ──────────────────────────────────────────────────────
 @app.post("/admin/{store_id}/auth/login")
-async def store_login(store_id: str, req: LoginRequest):
+async def store_login(store_id: str, req: LoginRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+
+    if _is_rate_limited(f"{store_id}:{ip}"):
+        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
+
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
     stored_hash = sm.get_admin_password_hash(store_id)
     if not stored_hash or not _auth.check_password(req.password, stored_hash):
+        print(f"[auth] ❌ Failed login for store {store_id!r} from {ip}")
         raise HTTPException(401, "كلمة المرور غير صحيحة")
+
+    print(f"[auth] ✅ Store login: {store_id!r} from {ip}")
     token = _auth.create_token(store_id)
     info  = sm.get_store_info(store_id)
     return {
@@ -509,6 +554,23 @@ async def store_login(store_id: str, req: LoginRequest):
         "store_id":   store_id,
         "store_name": info.get("store_name", f"متجر {store_id}"),
     }
+
+
+# ── Auth: Token verify (lightweight — for client-side checkAuth) ──────────────
+@app.get("/admin/{store_id}/auth/verify")
+async def verify_store_token(store_id: str, request: Request):
+    """
+    Lightweight endpoint the admin SPA calls on page load to check whether
+    its stored token is still valid without triggering a heavy data load.
+    Returns 200 {ok: true} or 401.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims:
+        raise HTTPException(401, "توكن منتهي أو غير صحيح")
+    if not claims.get("su") and claims.get("s") != store_id:
+        raise HTTPException(403, "غير مصرح")
+    return {"ok": True, "store_id": store_id, "is_super": claims.get("su", False)}
 
 
 # ── Settings: AI config ────────────────────────────────────────────────────────
@@ -989,6 +1051,9 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     store_id = merchant_id or "default"
     if not access_token:
         print(f"[webhook] app.store.authorize for {store_id!r} — no token in payload")
+        return
+    if store_id.lower() in _RESERVED_IDS and store_id != "default":
+        print(f"[webhook] ⚠️ Reserved store_id {store_id!r} — ignoring authorize event")
         return
 
     # Compute expires_at ISO string for proactive refresh scheduling
