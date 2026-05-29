@@ -555,7 +555,13 @@
       hideTyping();
 
       if (!res.ok) {
-        appendMessage("bot", "عذراً، حدث خطأ مؤقت. حاول مرة أخرى.");
+        // Try to show server's Arabic message if available, otherwise generic
+        var errMsg = "عذراً، حدث خطأ مؤقت. حاول مرة أخرى.";
+        try {
+          var errData = await res.clone().json();
+          if (errData && errData.detail) errMsg = errData.detail;
+        } catch(ignored) {}
+        appendMessage("bot", errMsg);
       } else {
         if (data.session_id) sessionId = data.session_id;
 

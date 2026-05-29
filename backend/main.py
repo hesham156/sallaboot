@@ -40,6 +40,17 @@ app = FastAPI(title="Salla Printing Chatbot — Multi-tenant", version="2.0.0")
 async def startup_event():
     """Load all registered stores and trigger background sync for each."""
     sm.load_all_stores()
+
+    # Always register env-var token as "default" store — survives Railway restarts
+    env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
+    if env_token and not sm.is_registered("default"):
+        sm.register_store(
+            "default", env_token,
+            os.getenv("SALLA_REFRESH_TOKEN", ""),
+            {"name": "المتجر الافتراضي"},
+        )
+        print("[startup] Registered 'default' store from SALLA_ACCESS_TOKEN env var")
+
     for store in sm.list_stores():
         token = sm.get_access_token(store["store_id"])
         if token:
@@ -568,13 +579,36 @@ async def chat(req: ChatRequest):
 
     agent = sm.get_agent(store_id)
     if agent is None:
-        # Store not registered yet — register on the fly if env var is set
         env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
-        if env_token and store_id == "default":
-            sm.register_store("default", env_token, os.getenv("SALLA_REFRESH_TOKEN", ""))
-            agent = sm.get_agent("default")
+
+        # 1) Exact store not found — try env var fallback (any store_id)
+        if env_token:
+            sm.register_store(
+                "default", env_token,
+                os.getenv("SALLA_REFRESH_TOKEN", ""),
+                {"name": "المتجر الافتراضي"},
+            )
+            agent    = sm.get_agent("default")
+            store_id = "default"   # re-bind so session is tagged correctly
+
+        # 2) No env var — try first available registered store
         if agent is None:
-            raise HTTPException(404, f"المتجر '{store_id}' غير مسجل. يرجى ربط المتجر أولاً.")
+            stores = sm.list_stores()
+            if stores:
+                fallback_id = stores[0]["store_id"]
+                agent    = sm.get_agent(fallback_id)
+                store_id = fallback_id
+
+        # 3) Nothing works → friendly error (widget will show toast, not crash)
+        if agent is None:
+            return ChatResponse(
+                reply=(
+                    "عذراً، المتجر غير مُعدّ بعد. "
+                    "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
+                ),
+                session_id = session_id,
+                bot_enabled= False,
+            )
 
     try:
         reply = await agent.chat(message=req.message, session_id=session_id)
