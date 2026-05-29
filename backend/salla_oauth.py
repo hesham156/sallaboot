@@ -7,13 +7,33 @@ import os
 import json
 import httpx
 from pathlib import Path
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 
 load_dotenv()
 
 AUTH_URL = "https://accounts.salla.sa/oauth2/auth"
 TOKEN_URL = "https://accounts.salla.sa/oauth2/token"
-ENV_FILE = Path(__file__).parent / ".env"
+ENV_FILE   = Path(__file__).parent / ".env"
+TOKEN_FILE = Path(__file__).parent / "tokens.json"   # survives restarts within same deploy
+
+
+def _load_tokens_from_file():
+    """Load tokens from tokens.json into os.environ (called at startup)."""
+    try:
+        if TOKEN_FILE.exists():
+            data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+            # Only apply if not already set via Railway env vars
+            if not os.environ.get("SALLA_ACCESS_TOKEN") and data.get("access_token"):
+                os.environ["SALLA_ACCESS_TOKEN"] = data["access_token"]
+                print("[salla_oauth] Loaded access token from tokens.json")
+            if not os.environ.get("SALLA_REFRESH_TOKEN") and data.get("refresh_token"):
+                os.environ["SALLA_REFRESH_TOKEN"] = data["refresh_token"]
+    except Exception as e:
+        print(f"[salla_oauth] Could not load tokens.json: {e}")
+
+
+# Run immediately on import so tokens are available before anything else
+_load_tokens_from_file()
 
 
 def get_auth_url(redirect_uri: str) -> str:
@@ -70,18 +90,29 @@ async def refresh_access_token() -> str:
 
 
 def save_tokens(access_token: str, refresh_token: str):
-    # Update in-memory env first
+    """Persist tokens to in-memory env, tokens.json, and .env (if present)."""
+    # 1. Update in-memory env immediately
     os.environ["SALLA_ACCESS_TOKEN"] = access_token
     os.environ["SALLA_REFRESH_TOKEN"] = refresh_token
 
-    # Read .env file and replace token lines directly (more reliable than set_key)
+    # 2. Save to tokens.json — survives server restarts within the same deploy
     try:
-        env_path = ENV_FILE
-        if env_path.exists():
-            content = env_path.read_text(encoding="utf-8")
+        TOKEN_FILE.write_text(
+            json.dumps({"access_token": access_token, "refresh_token": refresh_token},
+                       ensure_ascii=False),
+            encoding="utf-8",
+        )
+        print(f"[salla_oauth] Tokens saved to tokens.json (token: {access_token[:8]}…)")
+    except Exception as e:
+        print(f"[salla_oauth] Warning: could not write tokens.json: {e}")
+
+    # 3. Also update .env if it exists locally (dev environment)
+    try:
+        if ENV_FILE.exists():
             import re
+            content = ENV_FILE.read_text(encoding="utf-8")
             content = re.sub(r"^SALLA_ACCESS_TOKEN=.*$", f"SALLA_ACCESS_TOKEN={access_token}", content, flags=re.MULTILINE)
             content = re.sub(r"^SALLA_REFRESH_TOKEN=.*$", f"SALLA_REFRESH_TOKEN={refresh_token}", content, flags=re.MULTILINE)
-            env_path.write_text(content, encoding="utf-8")
+            ENV_FILE.write_text(content, encoding="utf-8")
     except Exception as e:
-        print(f"Warning: could not write tokens to .env: {e}")
+        print(f"[salla_oauth] Warning: could not write .env: {e}")

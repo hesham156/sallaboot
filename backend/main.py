@@ -142,7 +142,7 @@ async def admin_debug():
 
     result = {
         "token_present": bool(token),
-        "token_preview": (token[:8] + "…") if token else None,
+        "token_preview": (token[:12] + "…") if token else None,
         "refresh_token_present": bool(refresh),
         "cached_products": store.get("products_count", 0),
         "cached_categories": len(store.get("categories", [])),
