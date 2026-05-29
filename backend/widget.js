@@ -22,6 +22,13 @@
   var pollTimer = null;           // setInterval handle for admin message polling
   var humanBannerShown = false;   // prevent duplicate "human took over" banners
 
+  // ── Salla Storefront SDK detection ───────────────────────────────────────────
+  // When the widget runs inside a Salla store page, window.salla is available.
+  // We use salla.cart.addItem() for real cart operations instead of our backend.
+  function sallaReady() {
+    return typeof window.salla !== "undefined" && window.salla && window.salla.cart;
+  }
+
   // ── Styles ────────────────────────────────────────────────────────────────────
   var styles = `
     #salla-chat-widget * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; }
@@ -377,12 +384,38 @@
       cardsHtml += '</div>';
       wrap.innerHTML = cardsHtml;
 
-      // Wire "أضف للسلة" buttons — disable while a request is in-flight
+      // Wire "أضف للسلة" buttons
       wrap.querySelectorAll(".card-add").forEach(function (btn) {
         btn.addEventListener("click", function () {
           if (isLoading) return;
+          var pid  = parseInt(btn.getAttribute("data-id"), 10);
           var name = btn.getAttribute("data-name");
-          sendMessage("أضف " + name + " للسلة");
+          var qty  = parseInt(btn.getAttribute("data-qty") || "1", 10);
+
+          if (sallaReady()) {
+            // ── Use Salla native cart ──────────────────────────────────────────
+            btn.disabled = true;
+            btn.textContent = "جارٍ الإضافة…";
+            window.salla.cart.addItem({ id: pid, quantity: qty })
+              .then(function (response) {
+                btn.textContent = "✅ تمت الإضافة";
+                // Sync cart badge from Salla response
+                var count = (response && response.data && response.data.count) ||
+                            (response && response.count) || 0;
+                if (count) updateCartBadge(count);
+                // Notify the AI so it can confirm and suggest more
+                sendMessage("أضفت " + name + " للسلة ✅");
+              })
+              .catch(function (err) {
+                btn.disabled = false;
+                btn.textContent = "أضف للسلة";
+                var errMsg = (err && (err.message || err.error || err)) || "خطأ غير معروف";
+                sendMessage("حاولت أضيف " + name + " بس واجهت مشكلة: " + errMsg);
+              });
+          } else {
+            // ── Fallback: let the AI agent handle cart via backend ─────────────
+            sendMessage("أضف " + name + " للسلة");
+          }
         });
       });
 
@@ -412,7 +445,20 @@
         '</div>'
       );
       wrap.querySelector(".cart-checkout-btn").addEventListener("click", function () {
-        sendMessage("أريد إتمام الطلب");
+        if (sallaReady()) {
+          // On Salla storefront — go straight to checkout
+          try {
+            if (typeof window.salla.cart.checkout === "function") {
+              window.salla.cart.checkout();
+            } else {
+              window.location.href = "/checkout";
+            }
+          } catch (e) {
+            window.location.href = "/checkout";
+          }
+        } else {
+          sendMessage("أريد إتمام الطلب");
+        }
       });
 
     } else if (component.type === "checkout") {
@@ -726,6 +772,41 @@
       });
       uploadFile(file);
     });
+
+    // ── Salla Storefront cart event listeners ──────────────────────────────────
+    // Keeps our cart badge in sync whenever items are added/removed from the
+    // native Salla cart (even outside the chatbot, e.g. via the store's own UI).
+    _bindSallaCartEvents();
+  }
+
+  function _bindSallaCartEvents() {
+    if (!sallaReady()) return;
+    var onAdd = function (response) {
+      var count = (response && response.data && response.data.count) ||
+                  (response && response.count) || 0;
+      if (count) updateCartBadge(count);
+    };
+    var onRemove = function (response) {
+      var count = (response && response.data && response.data.count) ||
+                  (response && response.count) || 0;
+      updateCartBadge(count); // may go to 0
+    };
+
+    // Pattern 1: salla.event.on — standard Salla Storefront SDK
+    if (window.salla.event && typeof window.salla.event.on === "function") {
+      try {
+        window.salla.event.on("cart::add",    onAdd);
+        window.salla.event.on("cart::remove", onRemove);
+        window.salla.event.on("cart::update", onAdd);
+      } catch (e) { /* ignore — non-critical */ }
+    }
+    // Pattern 2: salla.cart.event.onItemAdded — alternate SDK surface
+    else if (window.salla.cart.event) {
+      try {
+        if (typeof window.salla.cart.event.onItemAdded  === "function") window.salla.cart.event.onItemAdded(onAdd);
+        if (typeof window.salla.cart.event.onItemRemoved === "function") window.salla.cart.event.onItemRemoved(onRemove);
+      } catch (e) { /* ignore */ }
+    }
   }
 
   // Wait for DOM
