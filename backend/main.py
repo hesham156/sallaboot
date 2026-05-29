@@ -171,12 +171,25 @@ class RateRequest(BaseModel):
 # ── Utility endpoints ──────────────────────────────────────────────────────────
 @app.get("/env-check")
 async def env_check():
+    stores = sm.list_stores()
+    store_agents = []
+    for s in stores:
+        sid = s["store_id"]
+        a = sm.get_agent(sid)
+        store_agents.append({
+            "store_id":   sid,
+            "store_name": s.get("store_name", ""),
+            "agent_ok":   a is not None,
+            "has_ai_cfg": s.get("has_ai_config", False),
+        })
     return {
         "GROQ_API_KEY":       bool(os.getenv("GROQ_API_KEY")),
         "ANTHROPIC_API_KEY":  bool(os.getenv("ANTHROPIC_API_KEY")),
         "SALLA_ACCESS_TOKEN": bool(os.getenv("SALLA_ACCESS_TOKEN")),
+        "DATABASE_URL":       bool(os.getenv("DATABASE_URL")),
         "BASE_URL":           os.getenv("BASE_URL", "not set"),
-        "stores_registered":  len(sm.list_stores()),
+        "stores_registered":  len(stores),
+        "stores":             store_agents,
     }
 
 
@@ -1221,7 +1234,19 @@ async def chat(req: ChatRequest):
     try:
         reply = await agent.chat(message=req.message, session_id=session_id)
     except Exception as e:
-        raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
+        err_msg = str(e)
+        print(f"[chat] ❌ agent.chat error for store={store_id!r} session={session_id!r}: {type(e).__name__}: {err_msg}")
+        # Return a user-friendly Arabic message instead of raw 500
+        friendly = (
+            "عذراً، حدث خطأ مؤقت في معالجة طلبك. يرجى المحاولة مرة أخرى. 🙏"
+            if "API" not in err_msg and "key" not in err_msg.lower()
+            else "عذراً، هناك مشكلة في إعدادات الذكاء الاصطناعي. يرجى التواصل مع الدعم."
+        )
+        return ChatResponse(
+            reply=friendly,
+            session_id=session_id,
+            bot_enabled=False,
+        )
 
     # Pick up any rich UI component set by the agent tools this turn
     component  = cs.pop_last_component(session_id)

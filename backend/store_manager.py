@@ -242,7 +242,10 @@ def set_cache(store_id: str, data: dict):
 # ── Agent factory ──────────────────────────────────────────────────────────────
 
 def get_agent(store_id: str):
-    """Lazy-init a PrintingAgent instance per store."""
+    """
+    Lazy-init a PrintingAgent instance per store.
+    Returns None (never raises) so callers can show a friendly message instead of 500.
+    """
     from agent import PrintingAgent
 
     store_id = str(store_id)
@@ -250,7 +253,11 @@ def get_agent(store_id: str):
         return None
     if _registry[store_id]["agent"] is None:
         token = get_access_token(store_id)
-        _registry[store_id]["agent"] = PrintingAgent(store_id=store_id, access_token=token)
+        try:
+            _registry[store_id]["agent"] = PrintingAgent(store_id=store_id, access_token=token)
+        except Exception as e:
+            print(f"[store_manager] ❌ Failed to init agent for {store_id!r}: {e}")
+            return None   # caller will show friendly error
     return _registry[store_id]["agent"]
 
 
