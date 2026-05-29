@@ -64,12 +64,8 @@ async def refresh_access_token() -> str:
     new_token = data.get("access_token", "")
     new_refresh = data.get("refresh_token", refresh_token)
 
-    # Persist updated tokens
-    set_key(str(ENV_FILE), "SALLA_ACCESS_TOKEN", new_token)
-    set_key(str(ENV_FILE), "SALLA_REFRESH_TOKEN", new_refresh)
-    os.environ["SALLA_ACCESS_TOKEN"] = new_token
-    os.environ["SALLA_REFRESH_TOKEN"] = new_refresh
-
+    # Use save_tokens so Railway in-memory env + .env file are both updated
+    save_tokens(new_token, new_refresh)
     return new_token
 
 

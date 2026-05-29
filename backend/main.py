@@ -113,7 +113,7 @@ async def admin_sync():
     """Manually trigger a full store sync. Call this after updating products."""
     token = os.getenv("SALLA_ACCESS_TOKEN", "")
     if not token:
-        raise HTTPException(status_code=400, detail="لم يتم ربط المتجر بعد. SALLA_ACCESS_TOKEN غير موجود.")
+        raise HTTPException(status_code=400, detail="SALLA_ACCESS_TOKEN is missing.")
     try:
         data = await sync_store(token)
         return {
@@ -122,9 +122,51 @@ async def admin_sync():
             "categories_count": len(data.get("categories", [])),
             "articles_count": len(data.get("articles", [])),
             "last_sync": data.get("last_sync"),
+            "errors": data.get("last_sync_errors", []),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"فشل المزامنة: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+@app.get("/admin/debug")
+async def admin_debug():
+    """
+    Diagnose Salla connection and store sync status.
+    Tests the API directly and returns raw status — use this when products are not loading.
+    """
+    import httpx as _httpx
+
+    token = os.getenv("SALLA_ACCESS_TOKEN", "")
+    refresh = os.getenv("SALLA_REFRESH_TOKEN", "")
+    store = get_store_data()
+
+    result = {
+        "token_present": bool(token),
+        "token_preview": (token[:8] + "…") if token else None,
+        "refresh_token_present": bool(refresh),
+        "cached_products": store.get("products_count", 0),
+        "cached_categories": len(store.get("categories", [])),
+        "last_sync": store.get("last_sync", "never"),
+        "last_sync_errors": store.get("last_sync_errors", []),
+        "salla_api_test": None,
+    }
+
+    if token:
+        try:
+            async with _httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    "https://api.salla.dev/admin/v2/products",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    params={"per_page": 3, "page": 1},
+                )
+                result["salla_api_test"] = {
+                    "status_code": r.status_code,
+                    "body_preview": r.text[:500],
+                }
+        except Exception as e:
+            result["salla_api_test"] = {"error": f"{type(e).__name__}: {e}"}
+
+    return result
 
 
 # ── Salla Webhook (Easy Mode) ──────────────────────────────────────────────────

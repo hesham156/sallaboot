@@ -21,8 +21,13 @@ def get_store_data() -> dict:
     return _store_data
 
 
-async def _fetch_all_pages(client: httpx.AsyncClient, url: str, headers: dict) -> list:
-    """Fetch all pages from a paginated Salla endpoint (50 items/page)."""
+async def _fetch_all_pages(
+    client: httpx.AsyncClient, url: str, headers: dict
+) -> tuple[list, str | None]:
+    """
+    Fetch all pages from a paginated Salla endpoint (50 items/page).
+    Returns (items, error_message). error_message is None on success.
+    """
     items = []
     page = 1
     while True:
@@ -33,22 +38,23 @@ async def _fetch_all_pages(client: httpx.AsyncClient, url: str, headers: dict) -
                 params={"per_page": 50, "page": page},
                 timeout=20,
             )
+            if r.status_code == 401:
+                return items, f"401 Unauthorized — token expired or invalid (url={url})"
             if r.status_code != 200:
-                break
+                return items, f"HTTP {r.status_code} from {url}: {r.text[:200]}"
             data = r.json()
             batch = data.get("data", [])
             if not batch:
                 break
             items.extend(batch)
-            # Salla pagination uses camelCase: totalPages
             pagination = data.get("pagination") or {}
             total_pages = pagination.get("totalPages", 1)
             if page >= total_pages:
                 break
             page += 1
-        except Exception:
-            break
-    return items
+        except Exception as e:
+            return items, f"Exception fetching {url} page {page}: {type(e).__name__}: {e}"
+    return items, None
 
 
 def _format_product(p: dict) -> dict:
@@ -133,13 +139,20 @@ async def sync_store(access_token: str) -> dict:
     }
     base = "https://api.salla.dev/admin/v2"
 
+    errors = []
+
     async with httpx.AsyncClient(timeout=30) as client:
         # Fetch products and categories in parallel
-        products_raw, categories_raw = await asyncio.gather(
+        (products_raw, prod_err), (categories_raw, cats_err) = await asyncio.gather(
             _fetch_all_pages(client, f"{base}/products", headers),
             _fetch_all_pages(client, f"{base}/categories", headers),
-            return_exceptions=True,
         )
+        if prod_err:
+            print(f"[store_sync] products error: {prod_err}")
+            errors.append(prod_err)
+        if cats_err:
+            print(f"[store_sync] categories error: {cats_err}")
+            errors.append(cats_err)
 
         # Fetch blog articles (try multiple known endpoints)
         articles_raw = []
@@ -150,16 +163,13 @@ async def sync_store(access_token: str) -> dict:
                     articles_raw = r.json().get("data", [])
                     if articles_raw:
                         break
-            except Exception:
-                continue
+            except Exception as e:
+                print(f"[store_sync] articles error ({endpoint}): {e}")
 
-    products = [
-        _format_product(p)
-        for p in (products_raw if isinstance(products_raw, list) else [])
-    ]
+    products = [_format_product(p) for p in (products_raw or [])]
     categories = [
         {"id": c.get("id"), "name": c.get("name", "")}
-        for c in (categories_raw if isinstance(categories_raw, list) else [])
+        for c in (categories_raw or [])
         if c.get("name")
     ]
     articles = [_format_article(a) for a in articles_raw]
@@ -171,6 +181,7 @@ async def sync_store(access_token: str) -> dict:
         "articles": articles,
         "products_count": len(products),
         "last_sync": datetime.datetime.utcnow().isoformat(),
+        "last_sync_errors": errors,
     }
 
     # Persist to file
