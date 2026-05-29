@@ -2061,10 +2061,10 @@ async function loadAnalytics() {
 
   let data;
   try {
-    const res = await apiFetch(`${API}/analytics`);
+    const res = await fetch(`${API}/analytics`);
     data = await res.json();
     if (!res.ok) { toast(data.detail || 'خطأ في تحميل الإحصائيات', 'err'); return; }
-  } catch(e) { toast('تعذّر الاتصال', 'err'); return; }
+  } catch(e) { toast('تعذّر الاتصال: ' + e.message, 'err'); return; }
 
   document.getElementById('analytics-loading').style.display = 'none';
   document.getElementById('analytics-body').style.display    = 'block';
