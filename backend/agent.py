@@ -1,6 +1,7 @@
 import os
 import json
 import anthropic
+from groq import Groq
 from salla_client import SallaClient
 
 SYSTEM_PROMPT = """أنت مساعد ذكي لمتجر طباعة احترافي على منصة سلة. اسمك "مساعد المتجر".
@@ -115,10 +116,20 @@ ORDER_STATUS_AR = {
 
 class PrintingAgent:
     def __init__(self):
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY is not set. Please add it to your environment variables.")
-        self.ai = anthropic.Anthropic(api_key=api_key)
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+        if groq_key:
+            self.provider = "groq"
+            self.groq_client = Groq(api_key=groq_key)
+            self.ai = None
+        elif anthropic_key:
+            self.provider = "anthropic"
+            self.ai = anthropic.Anthropic(api_key=anthropic_key)
+            self.groq_client = None
+        else:
+            raise RuntimeError("يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY في متغيرات البيئة.")
+
         token = os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token) if token else None
         # session_id -> list of messages
@@ -255,6 +266,66 @@ class PrintingAgent:
         return "العملية غير معروفة."
 
     async def chat(self, message: str, session_id: str) -> str:
+        if self.provider == "groq":
+            return await self._chat_groq(message, session_id)
+        return await self._chat_anthropic(message, session_id)
+
+    # ── Groq (Llama 3) ────────────────────────────────────────────────────────────
+    async def _chat_groq(self, message: str, session_id: str) -> str:
+        history = self.conversations.setdefault(session_id, [])
+        history.append({"role": "user", "content": message})
+
+        # Convert TOOLS to Groq format (OpenAI-compatible)
+        groq_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"],
+                },
+            }
+            for t in TOOLS
+        ]
+
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+            {"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else str(m["content"])}
+            for m in history
+        ]
+
+        while True:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                tools=groq_tools,
+                tool_choice="auto",
+                max_tokens=1024,
+            )
+
+            msg = response.choices[0].message
+
+            if msg.tool_calls:
+                messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
+                    {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in msg.tool_calls
+                ]})
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except Exception:
+                        args = {}
+                    result = await self._run_tool(tc.function.name, args)
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                continue
+
+            reply = msg.content or "عذراً، لم أستطع معالجة طلبك."
+            history.append({"role": "assistant", "content": reply})
+            if len(history) > 30:
+                self.conversations[session_id] = history[-30:]
+            return reply
+
+    # ── Anthropic (Claude) ────────────────────────────────────────────────────────
+    async def _chat_anthropic(self, message: str, session_id: str) -> str:
         history = self.conversations.setdefault(session_id, [])
         history.append({"role": "user", "content": message})
 
@@ -279,12 +350,8 @@ class PrintingAgent:
                 history.append({"role": "user", "content": tool_results})
                 continue
 
-            # Final text response
             reply = "".join(b.text for b in response.content if hasattr(b, "text"))
             history.append({"role": "assistant", "content": response.content})
-
-            # Keep last 30 turns to avoid context overflow
             if len(history) > 30:
                 self.conversations[session_id] = history[-30:]
-
             return reply
