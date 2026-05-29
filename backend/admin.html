@@ -43,17 +43,12 @@ body{font-family:'Tajawal',sans-serif;background:#f1f5f9;color:#1e293b;min-heigh
 .nav-section{padding:16px 18px 6px;font-size:10px;color:#334155;
   text-transform:uppercase;letter-spacing:1px;font-weight:700}
 
-.sidebar-footer{
-  padding:14px 18px;border-top:1px solid #1e293b;
-}
+.sidebar-footer{padding:14px 18px;border-top:1px solid #1e293b;}
 .conn-badge{
   display:flex;align-items:center;gap:8px;padding:10px 12px;
   background:#1e293b;border-radius:8px;font-size:13px;
 }
-.dot{
-  width:8px;height:8px;border-radius:50%;flex-shrink:0;
-  transition:background .3s;
-}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .3s;}
 .dot.green{background:#22c55e;box-shadow:0 0 6px #22c55e80}
 .dot.red{background:#ef4444}
 .dot.yellow{background:#f59e0b;animation:pulse 1.5s infinite}
@@ -91,13 +86,14 @@ body{font-family:'Tajawal',sans-serif;background:#f1f5f9;color:#1e293b;min-heigh
   display:inline-flex;align-items:center;gap:7px;
   padding:9px 18px;border-radius:8px;border:none;
   font-family:'Tajawal',sans-serif;font-size:14px;font-weight:600;
-  cursor:pointer;transition:all .15s;white-space:nowrap;
+  cursor:pointer;transition:all .15s;white-space:nowrap;text-decoration:none;
 }
 .btn-primary{background:#3b82f6;color:#fff}
 .btn-primary:hover{background:#2563eb}
 .btn-primary:disabled{background:#93c5fd;cursor:not-allowed}
 .btn-success{background:#22c55e;color:#fff}
 .btn-success:hover{background:#16a34a}
+.btn-danger{background:#ef4444;color:#fff}
 .btn-outline{background:#fff;color:#374151;border:1px solid #e2e8f0}
 .btn-outline:hover{background:#f8fafc}
 .btn-sm{padding:7px 14px;font-size:13px}
@@ -124,27 +120,16 @@ body{font-family:'Tajawal',sans-serif;background:#f1f5f9;color:#1e293b;min-heigh
   display:flex;align-items:center;background:#f8fafc;
   border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;gap:7px;min-width:220px;
 }
-.search-box input{
-  border:none;background:none;outline:none;
-  font-family:'Tajawal',sans-serif;font-size:14px;width:100%;
-}
+.search-box input{border:none;background:none;outline:none;font-family:'Tajawal',sans-serif;font-size:14px;width:100%;}
 table{width:100%;border-collapse:collapse}
-th{
-  background:#f8fafc;padding:11px 16px;text-align:right;
-  font-size:11px;font-weight:700;color:#64748b;
-  text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;
-}
+th{background:#f8fafc;padding:11px 16px;text-align:right;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;}
 td{padding:13px 16px;border-top:1px solid #f8fafc;font-size:14px;vertical-align:top}
 tr:hover td{background:#fafbfc}
 .product-name{font-weight:600;color:#1e293b}
-.product-desc{font-size:12px;color:#94a3b8;margin-top:3px;display:-webkit-box;
-  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.product-desc{font-size:12px;color:#94a3b8;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 /* ── Badges ── */
-.badge{
-  display:inline-block;padding:3px 9px;border-radius:20px;
-  font-size:11px;font-weight:700;white-space:nowrap;
-}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;}
 .badge-green{background:#dcfce7;color:#15803d}
 .badge-red{background:#fee2e2;color:#dc2626}
 .badge-yellow{background:#fef9c3;color:#a16207}
@@ -152,11 +137,7 @@ tr:hover td{background:#fafbfc}
 .badge-gray{background:#f1f5f9;color:#475569}
 
 /* ── Alerts ── */
-.alert{
-  padding:12px 16px;border-radius:8px;font-size:14px;
-  margin-bottom:12px;display:flex;gap:10px;align-items:flex-start;
-  line-height:1.5;
-}
+.alert{padding:12px 16px;border-radius:8px;font-size:14px;margin-bottom:12px;display:flex;gap:10px;align-items:flex-start;line-height:1.5;}
 .alert:last-child{margin-bottom:0}
 .alert-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e}
 .alert-success{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d}
@@ -164,11 +145,7 @@ tr:hover td{background:#fafbfc}
 .alert-info{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
 
 /* ── Log box ── */
-.log-box{
-  background:#0f172a;color:#94a3b8;border-radius:8px;
-  padding:16px;font-family:monospace;font-size:12px;
-  max-height:280px;overflow-y:auto;line-height:1.8;white-space:pre-wrap;word-break:break-all;
-}
+.log-box{background:#0f172a;color:#94a3b8;border-radius:8px;padding:16px;font-family:monospace;font-size:12px;max-height:280px;overflow-y:auto;line-height:1.8;white-space:pre-wrap;word-break:break-all;}
 .log-ok{color:#4ade80}.log-err{color:#f87171}.log-info{color:#60a5fa}.log-dim{color:#475569}
 
 /* ── Progress ── */
@@ -176,22 +153,13 @@ tr:hover td{background:#fafbfc}
 .progress-fill{height:100%;background:#3b82f6;border-radius:3px;transition:width .4s ease}
 
 /* ── Spinner ── */
-.spin{
-  display:inline-block;width:16px;height:16px;border-radius:50%;
-  border:2px solid rgba(255,255,255,.3);border-top-color:#fff;
-  animation:spin .6s linear infinite;flex-shrink:0;
-}
+.spin{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;animation:spin .6s linear infinite;flex-shrink:0;}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin-blue{border-color:#bfdbfe;border-top-color:#3b82f6}
 
 /* ── Toast ── */
 #toasts{position:fixed;bottom:24px;left:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{
-  display:flex;align-items:center;gap:10px;
-  padding:12px 18px;border-radius:10px;font-size:14px;font-weight:500;
-  background:#1e293b;color:#f1f5f9;min-width:260px;max-width:360px;
-  animation:toastIn .3s ease;box-shadow:0 4px 20px rgba(0,0,0,.3);
-}
+.toast{display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:500;background:#1e293b;color:#f1f5f9;min-width:260px;max-width:360px;animation:toastIn .3s ease;box-shadow:0 4px 20px rgba(0,0,0,.3);}
 .toast.ok{border-right:4px solid #22c55e}
 .toast.err{border-right:4px solid #ef4444}
 .toast.warn{border-right:4px solid #f59e0b}
@@ -208,41 +176,25 @@ tr:hover td{background:#fafbfc}
 .empty p{font-size:13px}
 
 /* ── KV row ── */
-.kv{display:flex;justify-content:space-between;align-items:center;
-  padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px}
+.kv{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px}
 .kv:last-child{border:none}
 .kv-key{color:#64748b;font-weight:500}
 .kv-val{font-weight:700;color:#1e293b}
 
-/* ── Bot toggle switch ── */
+/* ── Toggle switch ── */
 .toggle-wrap{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600}
 .toggle{position:relative;width:44px;height:24px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0}
-.toggle-slider{
-  position:absolute;inset:0;background:#cbd5e1;border-radius:24px;
-  cursor:pointer;transition:.2s;
-}
-.toggle-slider:before{
-  content:'';position:absolute;width:18px;height:18px;
-  left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;
-}
+.toggle-slider{position:absolute;inset:0;background:#cbd5e1;border-radius:24px;cursor:pointer;transition:.2s;}
+.toggle-slider:before{content:'';position:absolute;width:18px;height:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;}
 .toggle input:checked + .toggle-slider{background:#22c55e}
 .toggle input:checked + .toggle-slider:before{transform:translateX(20px)}
 
 /* ── Conversations layout ── */
 .conv-layout{display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 140px);min-height:500px}
-.conv-list{
-  border:1px solid #e2e8f0;border-radius:12px 0 0 12px;
-  background:#fff;overflow-y:auto;
-}
-.conv-list-header{
-  padding:14px 16px;border-bottom:1px solid #f1f5f9;
-  font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;
-}
-.conv-item{
-  padding:12px 16px;border-bottom:1px solid #f8fafc;
-  cursor:pointer;transition:background .1s;
-}
+.conv-list{border:1px solid #e2e8f0;border-radius:12px 0 0 12px;background:#fff;overflow-y:auto;}
+.conv-list-header{padding:14px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;}
+.conv-item{padding:12px 16px;border-bottom:1px solid #f8fafc;cursor:pointer;transition:background .1s;}
 .conv-item:hover{background:#f8fafc}
 .conv-item.active{background:#eff6ff;border-right:3px solid #3b82f6}
 .conv-item.unread .conv-preview{color:#1e293b;font-weight:600}
@@ -251,57 +203,47 @@ tr:hover td{background:#fafbfc}
 .conv-time{font-size:11px;color:#94a3b8}
 .conv-preview{font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
 .conv-badges{display:flex;gap:4px;margin-top:4px}
-
-.conv-thread{
-  border:1px solid #e2e8f0;border-left:none;border-radius:0 12px 12px 0;
-  background:#f8fafc;display:flex;flex-direction:column;overflow:hidden;
-}
-.conv-thread-header{
-  background:#fff;border-bottom:1px solid #e2e8f0;padding:12px 16px;
-  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;
-}
+.conv-thread{border:1px solid #e2e8f0;border-left:none;border-radius:0 12px 12px 0;background:#f8fafc;display:flex;flex-direction:column;overflow:hidden;}
+.conv-thread-header{background:#fff;border-bottom:1px solid #e2e8f0;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;}
 .conv-thread-title{font-weight:700;font-size:14px;font-family:monospace}
 .conv-thread-sub{font-size:12px;color:#64748b;margin-top:2px}
 .conv-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
 .conv-messages::-webkit-scrollbar{width:4px}
 .conv-messages::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}
-
-/* Message bubbles in admin view */
 .msg-row{display:flex;gap:8px;max-width:80%}
 .msg-row.user{align-self:flex-end;flex-direction:row-reverse}
-.msg-row.assistant{align-self:flex-start}
-.msg-row.admin{align-self:flex-start}
-.msg-avatar{
-  width:28px;height:28px;border-radius:50%;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;font-size:13px;
-}
+.msg-row.assistant,.msg-row.admin{align-self:flex-start}
+.msg-avatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;}
 .msg-row.user .msg-avatar{background:#dbeafe;color:#1d4ed8}
 .msg-row.assistant .msg-avatar{background:#f1f5f9;color:#475569}
 .msg-row.admin .msg-avatar{background:#dcfce7;color:#166534}
-.msg-bubble{
-  padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.5;
-  max-width:100%;word-break:break-word;white-space:pre-wrap;
-}
+.msg-bubble{padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.5;max-width:100%;word-break:break-word;white-space:pre-wrap;}
 .msg-row.user .msg-bubble{background:#3b82f6;color:#fff;border-bottom-left-radius:4px}
 .msg-row.assistant .msg-bubble{background:#fff;color:#1e293b;border-bottom-right-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .msg-row.admin .msg-bubble{background:#dcfce7;color:#14532d;border-bottom-right-radius:4px;border:1px solid #bbf7d0}
 .msg-ts{font-size:10px;color:#94a3b8;margin-top:3px;text-align:left}
-
-.conv-reply-bar{
-  background:#fff;border-top:1px solid #e2e8f0;padding:12px 16px;
-  display:flex;gap:8px;align-items:flex-end;flex-shrink:0;
-}
-.conv-reply-input{
-  flex:1;resize:none;border:1.5px solid #e2e8f0;border-radius:10px;
-  padding:9px 13px;font-family:'Tajawal',sans-serif;font-size:14px;
-  outline:none;max-height:120px;overflow-y:auto;direction:rtl;
-  transition:border-color .15s;
-}
+.conv-reply-bar{background:#fff;border-top:1px solid #e2e8f0;padding:12px 16px;display:flex;gap:8px;align-items:flex-end;flex-shrink:0;}
+.conv-reply-input{flex:1;resize:none;border:1.5px solid #e2e8f0;border-radius:10px;padding:9px 13px;font-family:'Tajawal',sans-serif;font-size:14px;outline:none;max-height:120px;overflow-y:auto;direction:rtl;transition:border-color .15s;}
 .conv-reply-input:focus{border-color:#3b82f6}
-.conv-empty{
-  flex:1;display:flex;align-items:center;justify-content:center;
-  flex-direction:column;gap:12px;color:#94a3b8;font-size:14px;
+.conv-empty{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#94a3b8;font-size:14px;}
+
+/* ── Store cards (super admin) ── */
+.stores-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px;margin-top:8px}
+.store-card{
+  background:#fff;border-radius:14px;padding:20px 22px;
+  box-shadow:0 1px 4px rgba(0,0,0,.07);
+  transition:transform .15s,box-shadow .15s;
+  border:2px solid transparent;
+  display:flex;flex-direction:column;gap:12px;
 }
+.store-card:hover{transform:translateY(-3px);box-shadow:0 6px 20px rgba(0,0,0,.1);border-color:#bfdbfe}
+.store-card-header{display:flex;align-items:center;gap:12px}
+.store-avatar{width:46px;height:46px;border-radius:12px;background:#eff6ff;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;}
+.store-avatar img{width:100%;height:100%;object-fit:cover;border-radius:12px}
+.store-card-name{font-weight:700;font-size:15px;color:#1e293b}
+.store-card-domain{font-size:12px;color:#64748b;margin-top:2px;font-family:monospace}
+.store-card-stats{display:flex;gap:14px;font-size:13px;color:#64748b;border-top:1px solid #f1f5f9;padding-top:10px}
+.store-card-stat{display:flex;align-items:center;gap:5px}
 
 /* ── Responsive ── */
 @media(max-width:900px){
@@ -312,9 +254,7 @@ tr:hover td{background:#fafbfc}
   .conv-list{border-radius:12px;margin-bottom:12px;max-height:240px}
   .conv-thread{border-radius:12px;border:1px solid #e2e8f0}
 }
-@media(max-width:540px){
-  .cards{grid-template-columns:1fr}
-}
+@media(max-width:540px){.cards{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -325,12 +265,22 @@ tr:hover td{background:#fafbfc}
   <div class="sidebar-logo">
     <div class="logo-icon">🤖</div>
     <div>
-      <div class="logo-text">بوت المتجر</div>
-      <div class="logo-sub">لوحة التحكم</div>
+      <div class="logo-text" id="sidebar-store-name">بوت المتاجر</div>
+      <div class="logo-sub" id="sidebar-store-sub">لوحة التحكم</div>
     </div>
   </div>
 
-  <nav class="nav">
+  <nav class="nav" id="nav-super" style="display:none">
+    <div class="nav-section">الإدارة العامة</div>
+    <div class="nav-item active" onclick="showSuperPage('stores',this)">
+      <span class="nav-icon">🏪</span> المتاجر المتصلة
+    </div>
+  </nav>
+
+  <nav class="nav" id="nav-store" style="display:none">
+    <div class="nav-item" onclick="window.location='/admin'" style="border-bottom:1px solid #1e293b;margin-bottom:8px;color:#64748b;font-size:13px">
+      <span class="nav-icon">←</span> جميع المتاجر
+    </div>
     <div class="nav-section">القائمة الرئيسية</div>
     <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard',this)">
       <span class="nav-icon">📊</span> الرئيسية
@@ -338,7 +288,6 @@ tr:hover td{background:#fafbfc}
     <div class="nav-item" data-page="products" onclick="showPage('products',this)">
       <span class="nav-icon">📦</span> المنتجات
     </div>
-
     <div class="nav-section">الإدارة</div>
     <div class="nav-item" data-page="conversations" onclick="showPage('conversations',this)">
       <span class="nav-icon">💬</span> المحادثات
@@ -366,226 +315,216 @@ tr:hover td{background:#fafbfc}
 <!-- ═══════════════════════════ MAIN ═══════════════════════════════ -->
 <div class="main">
 
-  <!-- ══ DASHBOARD ══════════════════════════════════════════════════ -->
-  <div class="page active" id="page-dashboard">
-    <div class="page-header">
-      <div>
-        <div class="page-title">الرئيسية</div>
-        <div class="page-sub">نظرة عامة على حالة البوت والمتجر</div>
-      </div>
-      <button class="btn btn-primary" id="sync-btn-dash" onclick="doSync(this)">
-        🔄 مزامنة الآن
-      </button>
-    </div>
+  <!-- ══════════════════ SUPER ADMIN VIEWS ══════════════════════════ -->
+  <div id="super-view" style="display:none">
 
-    <div id="dash-alert"></div>
-
-    <div class="cards">
-      <div class="card card-sm">
-        <div class="card-icon">🔗</div>
-        <div class="card-label">حالة الاتصال</div>
-        <div class="card-value" id="c-conn" style="font-size:16px;margin-top:8px">—</div>
-      </div>
-      <div class="card">
-        <div class="card-icon">📦</div>
-        <div class="card-label">المنتجات</div>
-        <div class="card-value" id="c-prods">—</div>
-        <div class="card-sub" id="c-cats">— تصنيف</div>
-      </div>
-      <div class="card">
-        <div class="card-icon">📰</div>
-        <div class="card-label">المقالات</div>
-        <div class="card-value" id="c-arts">—</div>
-      </div>
-      <div class="card card-sm">
-        <div class="card-icon">⏱️</div>
-        <div class="card-label">آخر مزامنة</div>
-        <div class="card-value" id="c-sync" style="font-size:13px;margin-top:8px">—</div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">🌐 اختبار الاتصال بـ API سلة</div>
-      <div id="api-status">
-        <div style="color:#94a3b8;font-size:14px;display:flex;align-items:center;gap:8px">
-          <span class="spin spin-blue"></span> جارٍ الاختبار…
+    <div class="super-page active" id="super-page-stores">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🏪 المتاجر المتصلة</div>
+          <div class="page-sub">جميع متاجر سلة المرتبطة بالخدمة</div>
         </div>
       </div>
-    </div>
 
-    <div class="section" id="err-section" style="display:none">
-      <div class="section-title">⚠️ أخطاء آخر مزامنة</div>
-      <div id="err-list"></div>
-    </div>
-  </div>
+      <div id="stores-alert"></div>
 
-  <!-- ══ PRODUCTS ════════════════════════════════════════════════════ -->
-  <div class="page" id="page-products">
-    <div class="page-header">
-      <div>
-        <div class="page-title">المنتجات</div>
-        <div class="page-sub" id="prods-sub">قائمة المنتجات المتزامنة من المتجر</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇️ تصدير CSV</button>
-        <button class="btn btn-primary btn-sm" id="sync-btn-prods" onclick="doSync(this)">🔄 تحديث</button>
-      </div>
-    </div>
-
-    <div class="table-wrap">
-      <div class="table-toolbar">
-        <div class="table-toolbar-title">
-          المنتجات
-          <span class="badge badge-blue" id="prods-count"></span>
+      <div class="section">
+        <div class="section-title">📡 كيف يتصل متجر جديد؟</div>
+        <div style="font-size:14px;color:#64748b;line-height:1.9">
+          <p>١. صاحب المتجر يثبّت تطبيقك من متجر تطبيقات سلة</p>
+          <p>٢. سلة ترسل <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">app.store.authorize</code> webhook إلى <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">/webhook/salla</code></p>
+          <p>٣. يُسجَّل المتجر تلقائياً ويُجلَب كتالوجه في الخلفية</p>
+          <p>٤. كود التضمين في المتجر: <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">window.SallaChatConfig = &#123; storeId: "STORE_ID" &#125;</code></p>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="status-filter" onchange="filterProducts()"
-            style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;
-                   font-family:'Tajawal',sans-serif;font-size:13px;background:#f8fafc">
-            <option value="">كل الحالات</option>
-            <option value="sale">للبيع</option>
-            <option value="out">نفد المخزون</option>
-            <option value="hidden">مخفي</option>
-          </select>
-          <div class="search-box">
-            <span style="color:#94a3b8">🔍</span>
-            <input type="text" id="search-input" placeholder="ابحث عن منتج…" oninput="filterProducts()">
+      </div>
+
+      <div id="stores-grid-wrap">
+        <div class="empty"><div class="ei"><span class="spin spin-blue" style="width:32px;height:32px;border-width:3px"></span></div><h3>جارٍ التحميل…</h3></div>
+      </div>
+    </div>
+
+  </div><!-- /super-view -->
+
+  <!-- ══════════════════ PER-STORE VIEWS ════════════════════════════ -->
+  <div id="store-view" style="display:none">
+
+    <!-- ── DASHBOARD ── -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <div>
+          <div class="page-title">الرئيسية</div>
+          <div class="page-sub">نظرة عامة على حالة البوت والمتجر</div>
+        </div>
+        <button class="btn btn-primary" id="sync-btn-dash" onclick="doSync(this)">🔄 مزامنة الآن</button>
+      </div>
+      <div id="dash-alert"></div>
+      <div class="cards">
+        <div class="card card-sm">
+          <div class="card-icon">🔗</div>
+          <div class="card-label">حالة الاتصال</div>
+          <div class="card-value" id="c-conn" style="font-size:16px;margin-top:8px">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">📦</div>
+          <div class="card-label">المنتجات</div>
+          <div class="card-value" id="c-prods">—</div>
+          <div class="card-sub" id="c-cats">— تصنيف</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">📰</div>
+          <div class="card-label">المقالات</div>
+          <div class="card-value" id="c-arts">—</div>
+        </div>
+        <div class="card card-sm">
+          <div class="card-icon">⏱️</div>
+          <div class="card-label">آخر مزامنة</div>
+          <div class="card-value" id="c-sync" style="font-size:13px;margin-top:8px">—</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">🌐 اختبار الاتصال بـ API سلة</div>
+        <div id="api-status"><div style="color:#94a3b8;font-size:14px;display:flex;align-items:center;gap:8px"><span class="spin spin-blue"></span> جارٍ الاختبار…</div></div>
+      </div>
+      <div class="section" id="err-section" style="display:none">
+        <div class="section-title">⚠️ أخطاء آخر مزامنة</div>
+        <div id="err-list"></div>
+      </div>
+    </div>
+
+    <!-- ── PRODUCTS ── -->
+    <div class="page" id="page-products">
+      <div class="page-header">
+        <div>
+          <div class="page-title">المنتجات</div>
+          <div class="page-sub" id="prods-sub">قائمة المنتجات المتزامنة من المتجر</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇️ تصدير CSV</button>
+          <button class="btn btn-primary btn-sm" id="sync-btn-prods" onclick="doSync(this)">🔄 تحديث</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <div class="table-toolbar-title">المنتجات <span class="badge badge-blue" id="prods-count"></span></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="status-filter" onchange="filterProducts()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-family:'Tajawal',sans-serif;font-size:13px;background:#f8fafc">
+              <option value="">كل الحالات</option>
+              <option value="sale">للبيع</option>
+              <option value="out">نفد المخزون</option>
+              <option value="hidden">مخفي</option>
+            </select>
+            <div class="search-box">
+              <span style="color:#94a3b8">🔍</span>
+              <input type="text" id="search-input" placeholder="ابحث عن منتج…" oninput="filterProducts()">
+            </div>
           </div>
         </div>
-      </div>
-      <div id="prods-table">
-        <div class="empty"><div class="ei">📦</div><h3>جارٍ التحميل…</h3></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══ CONVERSATIONS ════════════════════════════════════════════════ -->
-  <div class="page" id="page-conversations">
-    <div class="page-header">
-      <div>
-        <div class="page-title">المحادثات</div>
-        <div class="page-sub">راقب محادثات العملاء وتولَّ الرد مباشرةً</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <div class="toggle-wrap">
-          <span>البوت</span>
-          <label class="toggle">
-            <input type="checkbox" id="global-bot-toggle" checked onchange="toggleGlobalBot(this.checked)">
-            <span class="toggle-slider"></span>
-          </label>
-          <span id="global-bot-label" style="color:#16a34a">مفعّل</span>
-        </div>
-        <button class="btn btn-outline btn-sm" onclick="loadConversations()">🔁 تحديث</button>
+        <div id="prods-table"><div class="empty"><div class="ei">📦</div><h3>جارٍ التحميل…</h3></div></div>
       </div>
     </div>
 
-    <div class="conv-layout">
-      <!-- Sessions list -->
-      <div class="conv-list">
-        <div class="conv-list-header">
-          المحادثات
-          <span class="badge badge-blue" id="conv-count">0</span>
+    <!-- ── CONVERSATIONS ── -->
+    <div class="page" id="page-conversations">
+      <div class="page-header">
+        <div>
+          <div class="page-title">المحادثات</div>
+          <div class="page-sub">راقب محادثات العملاء وتولَّ الرد مباشرةً</div>
         </div>
-        <div id="conv-list-body">
-          <div class="empty" style="padding:40px 20px">
-            <div class="ei">💬</div>
-            <h3>لا توجد محادثات بعد</h3>
-            <p>ستظهر هنا عندما يبدأ العملاء المحادثة</p>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div class="toggle-wrap">
+            <span>البوت</span>
+            <label class="toggle">
+              <input type="checkbox" id="global-bot-toggle" checked onchange="toggleGlobalBot(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="global-bot-label" style="color:#16a34a">مفعّل</span>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="loadConversations()">🔁 تحديث</button>
+        </div>
+      </div>
+      <div class="conv-layout">
+        <div class="conv-list">
+          <div class="conv-list-header">المحادثات <span class="badge badge-blue" id="conv-count">0</span></div>
+          <div id="conv-list-body">
+            <div class="empty" style="padding:40px 20px">
+              <div class="ei">💬</div><h3>لا توجد محادثات بعد</h3>
+              <p>ستظهر هنا عندما يبدأ العملاء المحادثة</p>
+            </div>
           </div>
         </div>
-      </div>
-
-      <!-- Message thread -->
-      <div class="conv-thread" id="conv-thread">
-        <div class="conv-empty">
-          <span style="font-size:40px">💬</span>
-          <span>اختر محادثة للعرض</span>
+        <div class="conv-thread" id="conv-thread">
+          <div class="conv-empty"><span style="font-size:40px">💬</span><span>اختر محادثة للعرض</span></div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- ══ SYNC ═════════════════════════════════════════════════════════ -->
-  <div class="page" id="page-sync">
-    <div class="page-header">
-      <div>
-        <div class="page-title">المزامنة</div>
-        <div class="page-sub">تحديث قاعدة معرفة البوت من متجر سلة</div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">🔄 مزامنة يدوية</div>
-      <p style="font-size:14px;color:#64748b;margin-bottom:16px;line-height:1.7">
-        يقوم البوت بمزامنة المتجر تلقائياً عند كل إعادة تشغيل للسيرفر. يمكنك أيضاً تشغيل
-        المزامنة يدوياً بعد إضافة أو تعديل المنتجات.
-      </p>
-      <button class="btn btn-primary" id="sync-btn-page" onclick="doSync(this)">
-        🔄 ابدأ المزامنة الآن
-      </button>
-
-      <div id="sync-progress-wrap" style="display:none;margin-top:16px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:14px;color:#374151">
-          <span class="spin spin-blue"></span>
-          <span id="sync-step">جارٍ الاتصال بسلة…</span>
+    <!-- ── SYNC ── -->
+    <div class="page" id="page-sync">
+      <div class="page-header">
+        <div>
+          <div class="page-title">المزامنة</div>
+          <div class="page-sub">تحديث قاعدة معرفة البوت من متجر سلة</div>
         </div>
-        <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
       </div>
-
-      <div id="sync-result" style="margin-top:16px"></div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">📋 آخر نتيجة مزامنة</div>
-      <div id="last-sync-detail" style="color:#64748b;font-size:14px">جارٍ التحميل…</div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">ℹ️ كيف تعمل المزامنة؟</div>
-      <div style="font-size:14px;color:#64748b;line-height:1.8">
-        <p>١. يتصل البوت بـ API سلة باستخدام Access Token المخزّن</p>
-        <p>٢. يجلب جميع المنتجات (صفحة صفحة، 50 منتج في كل مرة)</p>
-        <p>٣. يجلب التصنيفات والمقالات</p>
-        <p>٤. يحفظ البيانات في ملف <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">store_cache.json</code></p>
-        <p>٥. يُضمّن ملخص المنتجات في System Prompt الخاص بالبوت</p>
+      <div class="section">
+        <div class="section-title">🔄 مزامنة يدوية</div>
+        <p style="font-size:14px;color:#64748b;margin-bottom:16px;line-height:1.7">
+          يقوم البوت بمزامنة المتجر تلقائياً عند كل إعادة تشغيل للسيرفر. يمكنك أيضاً تشغيل
+          المزامنة يدوياً بعد إضافة أو تعديل المنتجات.
+        </p>
+        <button class="btn btn-primary" id="sync-btn-page" onclick="doSync(this)">🔄 ابدأ المزامنة الآن</button>
+        <div id="sync-progress-wrap" style="display:none;margin-top:16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:14px;color:#374151">
+            <span class="spin spin-blue"></span><span id="sync-step">جارٍ الاتصال بسلة…</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
+        </div>
+        <div id="sync-result" style="margin-top:16px"></div>
       </div>
-    </div>
-  </div>
-
-  <!-- ══ DEBUG ════════════════════════════════════════════════════════ -->
-  <div class="page" id="page-debug">
-    <div class="page-header">
-      <div>
-        <div class="page-title">التشخيص</div>
-        <div class="page-sub">معلومات تقنية لتشخيص المشاكل</div>
+      <div class="section">
+        <div class="section-title">📋 آخر نتيجة مزامنة</div>
+        <div id="last-sync-detail" style="color:#64748b;font-size:14px">جارٍ التحميل…</div>
       </div>
-      <button class="btn btn-outline btn-sm" onclick="loadDebug()">🔁 تحديث</button>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px">
-      <div class="section" style="margin:0">
-        <div class="section-title">🔑 التوكن والمصادقة</div>
-        <div id="dbg-token">جارٍ التحميل…</div>
-      </div>
-      <div class="section" style="margin:0">
-        <div class="section-title">💾 الكاش المحلي</div>
-        <div id="dbg-cache">جارٍ التحميل…</div>
+      <div class="section">
+        <div class="section-title">🧩 كود تضمين الويدجت</div>
+        <div style="font-size:14px;color:#64748b;margin-bottom:12px">ضع هذا الكود قبل <code>&lt;/body&gt;</code> في صفحات متجرك على سلة:</div>
+        <div id="widget-embed-code" class="log-box" style="font-size:13px;user-select:all"></div>
       </div>
     </div>
 
-    <div class="section">
-      <div class="section-title" style="justify-content:space-between">
-        <span>📡 استجابة API سلة المباشرة</span>
-        <span id="dbg-api-code" class="badge"></span>
+    <!-- ── DEBUG ── -->
+    <div class="page" id="page-debug">
+      <div class="page-header">
+        <div>
+          <div class="page-title">التشخيص</div>
+          <div class="page-sub">معلومات تقنية لتشخيص المشاكل</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="loadDebug()">🔁 تحديث</button>
       </div>
-      <div class="log-box" id="dbg-api">جارٍ الاختبار…</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px">
+        <div class="section" style="margin:0">
+          <div class="section-title">🔑 التوكن والمصادقة</div>
+          <div id="dbg-token">جارٍ التحميل…</div>
+        </div>
+        <div class="section" style="margin:0">
+          <div class="section-title">💾 الكاش المحلي</div>
+          <div id="dbg-cache">جارٍ التحميل…</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title" style="justify-content:space-between">
+          <span>📡 استجابة API سلة المباشرة</span>
+          <span id="dbg-api-code" class="badge"></span>
+        </div>
+        <div class="log-box" id="dbg-api">جارٍ الاختبار…</div>
+      </div>
+      <div class="section">
+        <div class="section-title">🛠️ متغيرات البيئة</div>
+        <div id="dbg-env">جارٍ التحميل…</div>
+      </div>
     </div>
 
-    <div class="section">
-      <div class="section-title">🛠️ متغيرات البيئة</div>
-      <div id="dbg-env">جارٍ التحميل…</div>
-    </div>
-  </div>
+  </div><!-- /store-view -->
 
 </div><!-- /main -->
 </div><!-- /layout -->
@@ -594,21 +533,63 @@ tr:hover td{background:#fafbfc}
 
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-// State
+// URL routing: detect store_id from path
+// /admin         → super admin
+// /admin/123456  → per-store admin for store "123456"
 // ─────────────────────────────────────────────────────────────────────────────
-let allProducts = [];
+const PATH   = window.location.pathname.replace(/\/$/, '');
+const PARTS  = PATH.split('/').filter(Boolean);
+// PARTS[0] = 'admin', PARTS[1] = store_id (if present)
+const STORE_ID = (PARTS.length > 1) ? PARTS[1] : null;
+const API      = STORE_ID ? `/admin/${STORE_ID}` : '/admin';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Navigation
+// Init: show the right view
+// ─────────────────────────────────────────────────────────────────────────────
+(function init() {
+  if (STORE_ID) {
+    document.getElementById('store-view').style.display = 'block';
+    document.getElementById('nav-store').style.display  = 'block';
+    document.getElementById('sidebar-store-sub').textContent = `متجر: ${STORE_ID}`;
+    // Show embed code
+    const embedEl = document.getElementById('widget-embed-code');
+    if (embedEl) {
+      embedEl.textContent =
+        `<script>\n  window.SallaChatConfig = {\n    storeId: "${STORE_ID}"\n  };\n<\/script>\n<script src="${location.origin}/widget.js"><\/script>`;
+    }
+    loadDashboard();
+    setInterval(loadDashboard, 30000);
+    setInterval(() => {
+      if (document.getElementById('page-conversations').classList.contains('active')) {
+        loadConversations();
+      }
+    }, 5000);
+  } else {
+    document.getElementById('super-view').style.display = 'block';
+    document.getElementById('nav-super').style.display  = 'block';
+    loadStores();
+    setInterval(loadStores, 15000);
+  }
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigation helpers
 // ─────────────────────────────────────────────────────────────────────────────
 function showPage(name, el) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('#store-view .page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#nav-store .nav-item[data-page]').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   if (el) el.classList.add('active');
-  if (name === 'products') loadProducts();
-  if (name === 'debug')    loadDebug();
-  if (name === 'sync')     loadSyncInfo();
+  if (name === 'products')      loadProducts();
+  if (name === 'debug')         loadDebug();
+  if (name === 'sync')          loadSyncInfo();
+  if (name === 'conversations') loadConversations();
+}
+function showSuperPage(name, el) {
+  document.querySelectorAll('.super-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#nav-super .nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('super-page-' + name).classList.add('active');
+  if (el) el.classList.add('active');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -624,48 +605,106 @@ function toast(msg, type = 'ok') {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dashboard
+// Super admin: load stores
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadStores() {
+  try {
+    const data   = await fetch('/admin/stores').then(r => r.json());
+    const stores = data.stores || [];
+
+    // Update sidebar
+    document.getElementById('s-dot').className = 'dot ' + (stores.length ? 'green' : 'yellow');
+    document.getElementById('s-title').textContent = `${stores.length} متجر متصل`;
+    document.getElementById('s-sub').textContent   = '';
+
+    const wrap = document.getElementById('stores-grid-wrap');
+
+    if (!stores.length) {
+      wrap.innerHTML = `
+        <div class="empty">
+          <div class="ei">🏪</div>
+          <h3>لا توجد متاجر متصلة بعد</h3>
+          <p>لما متجر يثبّت تطبيقك من سلة، يظهر هنا تلقائياً</p>
+        </div>`;
+      document.getElementById('stores-alert').innerHTML = `
+        <div class="alert alert-info" style="margin-bottom:20px">
+          ℹ️ لا يوجد متاجر مسجّلة. تأكد من إعداد webhook URL في لوحة تطويرك على سلة.
+        </div>`;
+      return;
+    }
+
+    document.getElementById('stores-alert').innerHTML = '';
+    wrap.innerHTML = `<div class="stores-grid">${stores.map(s => storeCard(s)).join('')}</div>`;
+  } catch(e) {
+    document.getElementById('stores-grid-wrap').innerHTML =
+      `<div class="alert alert-danger">❌ تعذّر الاتصال بالسيرفر: ${e.message}</div>`;
+  }
+}
+
+function storeCard(s) {
+  const avatar = s.store_avatar
+    ? `<img src="${esc(s.store_avatar)}" onerror="this.style.display='none'">`
+    : '🏪';
+  const synced = (s.last_sync && s.last_sync !== 'never')
+    ? fmtDate(new Date(s.last_sync))
+    : 'لم تتم بعد';
+  return `
+    <div class="store-card" onclick="window.location='/admin/${esc(s.store_id)}'">
+      <div class="store-card-header">
+        <div class="store-avatar">${avatar}</div>
+        <div>
+          <div class="store-card-name">${esc(s.store_name)}</div>
+          <div class="store-card-domain">${esc(s.store_domain || s.store_id)}</div>
+        </div>
+      </div>
+      <div class="store-card-stats">
+        <div class="store-card-stat">📦 <strong>${s.products_count}</strong> منتج</div>
+        <div class="store-card-stat" style="font-size:11px;color:#94a3b8">آخر sync: ${synced}</div>
+      </div>
+      <a class="btn btn-primary btn-sm" href="/admin/${esc(s.store_id)}" onclick="event.stopPropagation()">
+        فتح اللوحة →
+      </a>
+    </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-store: Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    const [health, dbg, store] = await Promise.all([
-      fetch('/health').then(r => r.json()),
-      fetch('/admin/debug').then(r => r.json()),
-      fetch('/admin/products').then(r => r.json()),
+    const [dbg, store] = await Promise.all([
+      fetch(`${API}/debug`).then(r => r.json()),
+      fetch(`${API}/products`).then(r => r.json()),
     ]);
 
-    // Sidebar status
-    const dot = document.getElementById('s-dot');
-    const connected = health.salla_connected;
-    dot.className = 'dot ' + (connected ? 'green' : 'red');
-    document.getElementById('s-title').textContent = connected ? 'متصل بسلة ✅' : 'غير متصل ❌';
-    document.getElementById('s-sub').textContent = health.products_synced
-      ? health.products_synced + ' منتج متزامن'
+    // Update sidebar
+    const connected = dbg.token_present;
+    document.getElementById('s-dot').className = 'dot ' + (connected ? 'green' : 'red');
+    document.getElementById('s-title').textContent = dbg.store_name || (connected ? 'متصل بسلة ✅' : 'غير متصل ❌');
+    document.getElementById('sidebar-store-name').textContent = dbg.store_name || 'المتجر';
+    document.getElementById('s-sub').textContent = dbg.cached_products
+      ? dbg.cached_products + ' منتج متزامن'
       : 'لا توجد منتجات';
 
     // Cards
     document.getElementById('c-conn').innerHTML = connected
       ? '<span style="color:#16a34a">✅ متصل</span>'
       : '<span style="color:#dc2626">❌ غير متصل</span>';
-    document.getElementById('c-prods').textContent = health.products_synced ?? 0;
-    document.getElementById('c-cats').textContent = (dbg.cached_categories ?? 0) + ' تصنيف';
-    document.getElementById('c-arts').textContent = store.articles?.length ?? 0;
+    document.getElementById('c-prods').textContent = dbg.cached_products ?? 0;
+    document.getElementById('c-cats').textContent  = (dbg.cached_categories ?? 0) + ' تصنيف';
+    document.getElementById('c-arts').textContent  = store.articles?.length ?? 0;
 
-    const ls = health.last_sync;
+    const ls = dbg.last_sync;
     document.getElementById('c-sync').textContent =
       (ls && ls !== 'never') ? fmtDate(new Date(ls)) : 'لم تتم بعد';
 
     // Alert banner
     const alertDiv = document.getElementById('dash-alert');
-    if (!dbg.token_present) {
-      alertDiv.innerHTML = `
-        <div class="alert alert-warn" style="margin-bottom:20px">
+    alertDiv.innerHTML = !dbg.token_present
+      ? `<div class="alert alert-warn" style="margin-bottom:20px">
           ⚠️ <strong>التوكن غير موجود.</strong>
-          روح متجرك على سلة ← التطبيقات ← ألغِ تثبيت تطبيقك ثم أعد تثبيته لاستقبال التوكن عبر webhook.
-        </div>`;
-    } else {
-      alertDiv.innerHTML = '';
-    }
+          روح متجرك على سلة ← التطبيقات ← ألغِ تثبيت تطبيقك ثم أعد تثبيته.
+        </div>` : '';
 
     // API test
     const apiDiv = document.getElementById('api-status');
@@ -675,80 +714,70 @@ async function loadDashboard() {
     } else if (!t) {
       apiDiv.innerHTML = `<div class="alert alert-warn">⚠️ لم يتم الاختبار بعد.</div>`;
     } else if (t.error) {
-      apiDiv.innerHTML = `<div class="alert alert-danger">❌ خطأ في الاتصال: ${t.error}</div>`;
+      apiDiv.innerHTML = `<div class="alert alert-danger">❌ خطأ: ${esc(t.error)}</div>`;
     } else if (t.status_code === 200) {
-      apiDiv.innerHTML = `<div class="alert alert-success">✅ الاتصال بسلة يعمل. رمز الاستجابة: <strong>200 OK</strong></div>`;
+      apiDiv.innerHTML = `<div class="alert alert-success">✅ الاتصال يعمل — HTTP 200 OK</div>`;
     } else if (t.status_code === 401) {
-      apiDiv.innerHTML = `<div class="alert alert-danger">❌ التوكن منتهي الصلاحية (401). أعد تثبيت التطبيق على متجرك.</div>`;
+      apiDiv.innerHTML = `<div class="alert alert-danger">❌ التوكن منتهي الصلاحية (401). أعد تثبيت التطبيق.</div>`;
     } else {
-      apiDiv.innerHTML = `<div class="alert alert-warn">⚠️ رمز الاستجابة: ${t.status_code}</div>`;
+      apiDiv.innerHTML = `<div class="alert alert-warn">⚠️ HTTP ${t.status_code}</div>`;
     }
 
-    // Errors
+    // Sync errors
     const errs = dbg.last_sync_errors ?? [];
     if (errs.length) {
       document.getElementById('err-section').style.display = 'block';
       document.getElementById('err-list').innerHTML =
-        errs.map(e => `<div class="alert alert-danger">❌ ${e}</div>`).join('');
+        errs.map(e => `<div class="alert alert-danger">❌ ${esc(e)}</div>`).join('');
     } else {
       document.getElementById('err-section').style.display = 'none';
     }
 
   } catch(e) {
     document.getElementById('dash-alert').innerHTML =
-      `<div class="alert alert-danger" style="margin-bottom:20px">❌ تعذّر الاتصال بالسيرفر: ${e.message}</div>`;
+      `<div class="alert alert-danger" style="margin-bottom:20px">❌ تعذّر الاتصال: ${e.message}</div>`;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Products
+// Per-store: Products
 // ─────────────────────────────────────────────────────────────────────────────
+let allProducts = [];
 async function loadProducts() {
   document.getElementById('prods-table').innerHTML =
     `<div class="empty"><div class="ei">⏳</div><h3>جارٍ التحميل…</h3></div>`;
   try {
-    const data = await fetch('/admin/products').then(r => r.json());
+    const data = await fetch(`${API}/products`).then(r => r.json());
     allProducts = data.products ?? [];
-    document.getElementById('prods-sub').textContent =
-      `${allProducts.length} منتج متزامن من المتجر`;
+    document.getElementById('prods-sub').textContent = `${allProducts.length} منتج متزامن`;
     document.getElementById('prods-count').textContent = allProducts.length;
     renderTable(allProducts);
   } catch(e) {
     document.getElementById('prods-table').innerHTML =
-      `<div class="empty"><div class="ei">❌</div><h3>فشل التحميل: ${e.message}</h3></div>`;
+      `<div class="empty"><div class="ei">❌</div><h3>فشل: ${e.message}</h3></div>`;
   }
 }
-
 function renderTable(prods) {
   const el = document.getElementById('prods-table');
   if (!prods.length) {
-    el.innerHTML = `<div class="empty">
-      <div class="ei">📦</div>
-      <h3>لا توجد منتجات</h3>
-      <p>اضغط "مزامنة الآن" لجلب المنتجات من المتجر</p>
-    </div>`;
+    el.innerHTML = `<div class="empty"><div class="ei">📦</div><h3>لا توجد منتجات</h3><p>اضغط "مزامنة الآن"</p></div>`;
     return;
   }
-
   const rows = prods.map(p => {
     const sc = p.status === 'sale' ? 'badge-green' : p.status === 'out' ? 'badge-red' : 'badge-gray';
     const st = p.status === 'sale' ? 'للبيع' : p.status === 'out' ? 'نفد' : 'مخفي';
     const pr = p.price ? `<strong>${p.price}</strong> <span style="color:#94a3b8;font-size:12px">${p.currency}</span>` : '—';
     const sale = (p.sale_price && +p.sale_price > 0 && +p.sale_price < +p.price)
       ? `<br><span style="color:#16a34a;font-size:12px">🏷️ ${p.sale_price}</span>` : '';
-    const cats = p.categories?.join('، ') || '<span style="color:#94a3b8">—</span>';
+    const cats = p.categories?.join('، ') || '—';
     const opts = p.options?.length
       ? p.options.map(o => `<span style="font-size:11px;color:#64748b">${o.option}: ${o.values.slice(0,4).join('، ')}</span>`).join('<br>')
-      : '<span style="color:#e2e8f0">—</span>';
+      : '—';
     const qty = p.unlimited_quantity
       ? '<span style="color:#16a34a;font-size:12px">∞</span>'
       : `<span style="font-size:13px">${p.quantity ?? 0}</span>`;
-
     return `<tr>
-      <td>
-        <div class="product-name">${esc(p.name)}</div>
-        ${p.description ? `<div class="product-desc">${esc(p.description.substring(0,100))}</div>` : ''}
-      </td>
+      <td><div class="product-name">${esc(p.name)}</div>${p.description?`<div class="product-desc">${esc(p.description.substring(0,100))}</div>`:''}</td>
       <td>${pr}${sale}</td>
       <td><span class="badge ${sc}">${st}</span></td>
       <td style="font-size:13px">${cats}</td>
@@ -756,16 +785,10 @@ function renderTable(prods) {
       <td style="text-align:center">${qty}</td>
     </tr>`;
   }).join('');
-
-  el.innerHTML = `<table>
-    <thead><tr>
-      <th>المنتج</th><th>السعر</th><th>الحالة</th>
-      <th>التصنيف</th><th>الخيارات</th><th>المخزون</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
+  el.innerHTML = `<table><thead><tr>
+    <th>المنتج</th><th>السعر</th><th>الحالة</th><th>التصنيف</th><th>الخيارات</th><th>المخزون</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
 }
-
 function filterProducts() {
   const q  = document.getElementById('search-input').value.toLowerCase();
   const st = document.getElementById('status-filter').value;
@@ -778,80 +801,59 @@ function filterProducts() {
   );
   renderTable(list);
 }
-
 function exportCSV() {
   if (!allProducts.length) { toast('لا توجد منتجات للتصدير', 'warn'); return; }
   const header = ['الاسم','السعر','العملة','الحالة','التصنيفات','الوصف'];
   const rows = allProducts.map(p => [
-    `"${(p.name||'').replace(/"/g,'""')}"`,
-    p.price||'',
-    p.currency||'SAR',
-    p.status||'',
-    `"${(p.categories||[]).join('، ')}"`,
+    `"${(p.name||'').replace(/"/g,'""')}"`, p.price||'', p.currency||'SAR',
+    p.status||'', `"${(p.categories||[]).join('، ')}"`,
     `"${(p.description||'').replace(/"/g,'""').substring(0,200)}"`,
   ]);
   const csv = '﻿' + [header, ...rows].map(r => r.join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'}));
-  a.download = 'products.csv';
+  a.download = `products_${STORE_ID||'store'}.csv`;
   a.click();
   toast('تم تصدير ' + allProducts.length + ' منتج');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sync
+// Per-store: Sync
 // ─────────────────────────────────────────────────────────────────────────────
 async function doSync(btn) {
-  // Disable all sync buttons
   document.querySelectorAll('[id^="sync-btn"]').forEach(b => {
     b.innerHTML = `<span class="spin"></span> جارٍ المزامنة…`;
     b.disabled = true;
   });
-
   const progWrap = document.getElementById('sync-progress-wrap');
   const progFill = document.getElementById('prog-fill');
   const stepEl   = document.getElementById('sync-step');
   const resultEl = document.getElementById('sync-result');
-
   if (progWrap) progWrap.style.display = 'block';
-
   const steps = ['جارٍ الاتصال بسلة…','جارٍ جلب المنتجات…','جارٍ جلب التصنيفات…','جارٍ المعالجة…'];
-  let si = 0, prog = 0;
+  let prog = 0;
   const timer = setInterval(() => {
     prog = Math.min(prog + 7, 88);
     if (progFill) progFill.style.width = prog + '%';
-    if (stepEl && si < steps.length) stepEl.textContent = steps[Math.floor(prog / 25)];
+    if (stepEl) stepEl.textContent = steps[Math.min(Math.floor(prog/25), steps.length-1)];
   }, 220);
-
   try {
-    const res = await fetch('/admin/sync', {method:'POST'});
+    const res  = await fetch(`${API}/sync`, {method:'POST'});
     const data = await res.json();
     clearInterval(timer);
     if (progFill) progFill.style.width = '100%';
-
     if (!res.ok) {
       toast('فشلت المزامنة: ' + (data.detail || ''), 'err');
-      if (resultEl) resultEl.innerHTML = `<div class="alert alert-danger">❌ ${data.detail || 'فشلت المزامنة'}</div>`;
+      if (resultEl) resultEl.innerHTML = `<div class="alert alert-danger">❌ ${esc(data.detail||'')}</div>`;
     } else if (data.errors?.length) {
       toast('تمت المزامنة مع أخطاء', 'warn');
-      if (resultEl) resultEl.innerHTML = `
-        <div class="alert alert-warn">
-          ⚠️ تمت المزامنة مع أخطاء:<br>${data.errors.map(e=>'• '+e).join('<br>')}
-        </div>`;
+      if (resultEl) resultEl.innerHTML = `<div class="alert alert-warn">⚠️ ${data.errors.map(e=>'• '+e).join('<br>')}</div>`;
     } else {
       toast(`تمت المزامنة — ${data.products_count} منتج ✅`);
-      if (resultEl) resultEl.innerHTML = `
-        <div class="alert alert-success">
-          ✅ تمت المزامنة بنجاح!<br>
-          📦 المنتجات: <strong>${data.products_count}</strong> &nbsp;|&nbsp;
-          🗂️ التصنيفات: <strong>${data.categories_count}</strong> &nbsp;|&nbsp;
-          📰 المقالات: <strong>${data.articles_count}</strong>
-        </div>`;
+      if (resultEl) resultEl.innerHTML = `<div class="alert alert-success">✅ تمت المزامنة بنجاح!<br>📦 ${data.products_count} منتج | 🗂️ ${data.categories_count} تصنيف | 📰 ${data.articles_count} مقال</div>`;
     }
-    // Refresh data
     loadDashboard();
     if (document.getElementById('page-products').classList.contains('active')) loadProducts();
-
   } catch(e) {
     clearInterval(timer);
     toast('خطأ: ' + e.message, 'err');
@@ -871,7 +873,7 @@ async function doSync(btn) {
 async function loadSyncInfo() {
   const el = document.getElementById('last-sync-detail');
   try {
-    const d = await fetch('/admin/debug').then(r => r.json());
+    const d = await fetch(`${API}/debug`).then(r => r.json());
     if (!d.last_sync || d.last_sync === 'never') {
       el.innerHTML = `<div class="alert alert-warn">⚠️ لم تتم أي مزامنة بعد.</div>`;
       return;
@@ -893,55 +895,41 @@ async function loadSyncInfo() {
         </div>
       </div>
       ${errs.length
-        ? errs.map(e=>`<div class="alert alert-danger" style="font-size:13px">❌ ${e}</div>`).join('')
-        : '<div class="alert alert-success">✅ لا توجد أخطاء في آخر مزامنة</div>'
-      }`;
-  } catch(e) {
-    el.textContent = 'فشل التحميل: ' + e.message;
-  }
+        ? errs.map(e=>`<div class="alert alert-danger">❌ ${esc(e)}</div>`).join('')
+        : '<div class="alert alert-success">✅ لا توجد أخطاء في آخر مزامنة</div>'}`;
+  } catch(e) { el.textContent = 'فشل: ' + e.message; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Debug
+// Per-store: Debug
 // ─────────────────────────────────────────────────────────────────────────────
 async function loadDebug() {
   try {
     const [d, env] = await Promise.all([
-      fetch('/admin/debug').then(r => r.json()),
+      fetch(`${API}/debug`).then(r => r.json()),
       fetch('/env-check').then(r => r.json()),
     ]);
-
-    // Token
     document.getElementById('dbg-token').innerHTML = `
       <div class="kv"><span class="kv-key">Access Token</span>
         <span>${d.token_present
           ? `<span class="badge badge-green">موجود</span> <code style="font-size:11px;color:#64748b">${d.token_preview}</code>`
-          : '<span class="badge badge-red">غير موجود</span>'}</span>
-      </div>
+          : '<span class="badge badge-red">غير موجود</span>'}</span></div>
       <div class="kv"><span class="kv-key">Refresh Token</span>
         <span>${d.refresh_token_present
           ? '<span class="badge badge-green">موجود</span>'
-          : '<span class="badge badge-yellow">غير موجود</span>'}</span>
-      </div>`;
-
-    // Cache
+          : '<span class="badge badge-yellow">غير موجود</span>'}</span></div>`;
     document.getElementById('dbg-cache').innerHTML = `
       <div class="kv"><span class="kv-key">المنتجات</span><span class="kv-val">${d.cached_products}</span></div>
       <div class="kv"><span class="kv-key">التصنيفات</span><span class="kv-val">${d.cached_categories}</span></div>
       <div class="kv"><span class="kv-key">آخر sync</span>
-        <span class="kv-val" style="font-size:13px">${d.last_sync === 'never' ? 'لم يتم' : fmtDate(new Date(d.last_sync))}</span>
-      </div>`;
-
-    // API test
+        <span class="kv-val" style="font-size:13px">${d.last_sync === 'never' ? 'لم يتم' : fmtDate(new Date(d.last_sync))}</span></div>`;
     const t = d.salla_api_test;
     const codeEl = document.getElementById('dbg-api-code');
     const apiEl  = document.getElementById('dbg-api');
     if (!t) {
-      codeEl.innerHTML = '';
-      apiEl.innerHTML = '<span class="log-dim">لا يوجد توكن — تعذّر الاختبار</span>';
+      codeEl.innerHTML = ''; apiEl.innerHTML = '<span class="log-dim">لا يوجد توكن</span>';
     } else if (t.error) {
-      codeEl.className = 'badge badge-red';
-      codeEl.textContent = 'خطأ';
+      codeEl.className = 'badge badge-red'; codeEl.textContent = 'خطأ';
       apiEl.innerHTML = `<span class="log-err">❌ ${esc(t.error)}</span>`;
     } else {
       const ok = t.status_code === 200;
@@ -949,135 +937,95 @@ async function loadDebug() {
       codeEl.textContent = 'HTTP ' + t.status_code;
       apiEl.innerHTML = `<span class="${ok?'log-ok':'log-err'}">HTTP ${t.status_code}</span>\n\n${esc(t.body_preview||'')}`;
     }
-
-    // Env
     document.getElementById('dbg-env').innerHTML = Object.entries(env).map(([k,v]) =>
       `<div class="kv">
-        <span class="kv-key" style="font-family:monospace;font-size:13px">${k}</span>
-        <span>${v === true ? '<span class="badge badge-green">✅ موجود</span>'
-                : v === false ? '<span class="badge badge-red">❌ غير موجود</span>'
-                : `<span class="badge badge-blue">${esc(String(v))}</span>`}</span>
-      </div>`
-    ).join('');
-
-  } catch(e) {
-    document.getElementById('dbg-token').textContent = 'فشل: ' + e.message;
-  }
+        <span class="kv-key" style="font-family:monospace;font-size:13px">${esc(k)}</span>
+        <span>${v===true?'<span class="badge badge-green">✅ موجود</span>'
+                :v===false?'<span class="badge badge-red">❌ غير موجود</span>'
+                :`<span class="badge badge-blue">${esc(String(v))}</span>`}</span>
+      </div>`).join('');
+  } catch(e) { document.getElementById('dbg-token').textContent = 'فشل: ' + e.message; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-function fmtDate(d) {
-  try {
-    return d.toLocaleDateString('ar-SA', {
-      year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'
-    });
-  } catch { return d.toISOString(); }
-}
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Conversations
+// Per-store: Conversations
 // ─────────────────────────────────────────────────────────────────────────────
 let activeSession = null;
-let convPollTimer = null;
 
 async function loadConversations() {
   try {
-    // Load bot global status
-    const bs = await fetch('/admin/bot/status').then(r => r.json());
+    const bs = await fetch(`${API}/bot/status`).then(r => r.json());
     const tog = document.getElementById('global-bot-toggle');
     const lbl = document.getElementById('global-bot-label');
     if (tog) {
       tog.checked = bs.bot_globally_enabled;
       lbl.textContent = bs.bot_globally_enabled ? 'مفعّل' : 'موقوف';
-      lbl.style.color = bs.bot_globally_enabled ? '#16a34a' : '#dc2626';
+      lbl.style.color  = bs.bot_globally_enabled ? '#16a34a' : '#dc2626';
     }
-
-    const data = await fetch('/admin/conversations').then(r => r.json());
+    const data  = await fetch(`${API}/conversations`).then(r => r.json());
     const convs = data.conversations || [];
     document.getElementById('conv-count').textContent = convs.length;
-
-    // Unread badge in sidebar
     const unread = convs.filter(c => c.unread).length;
-    const badge = document.getElementById('unread-badge');
-    if (badge) {
-      badge.textContent = unread;
-      badge.style.display = unread ? 'inline-block' : 'none';
-    }
-
+    const badge  = document.getElementById('unread-badge');
+    if (badge) { badge.textContent = unread; badge.style.display = unread ? 'inline-block' : 'none'; }
     const body = document.getElementById('conv-list-body');
     if (!convs.length) {
-      body.innerHTML = `<div class="empty" style="padding:40px 20px">
-        <div class="ei">💬</div><h3>لا توجد محادثات بعد</h3>
-        <p>ستظهر هنا عندما يبدأ العملاء المحادثة</p>
-      </div>`;
+      body.innerHTML = `<div class="empty" style="padding:40px 20px"><div class="ei">💬</div><h3>لا توجد محادثات بعد</h3><p>ستظهر هنا عند بدء العملاء المحادثة</p></div>`;
       return;
     }
-
     body.innerHTML = convs.map(c => {
       const lastMsg = c.last_message;
       const preview = lastMsg
-        ? (lastMsg.role === 'user' ? '👤 ' : lastMsg.role === 'admin' ? '👨‍💼 ' : '🤖 ') + esc(lastMsg.content.substring(0, 50))
+        ? (lastMsg.role==='user'?'👤 ':lastMsg.role==='admin'?'👨‍💼 ':'🤖 ') + esc(lastMsg.content.substring(0,50))
         : 'لا توجد رسائل';
-      const timeAgo = lastMsg ? relTime(lastMsg.ts) : '';
+      const timeAgo  = lastMsg ? relTime(lastMsg.ts) : '';
       const isActive = activeSession === c.session_id;
       const botBadge = c.bot_enabled
         ? '<span class="badge badge-green" style="font-size:10px">بوت</span>'
         : '<span class="badge badge-yellow" style="font-size:10px">أدمن</span>';
-      return `<div class="conv-item ${isActive ? 'active' : ''} ${c.unread ? 'unread' : ''}"
+      return `<div class="conv-item ${isActive?'active':''} ${c.unread?'unread':''}"
                    onclick="openConversation('${c.session_id}')">
         <div class="conv-meta">
-          <span class="conv-id">${c.session_id.substring(0, 12)}…</span>
+          <span class="conv-id">${c.session_id.substring(0,12)}…</span>
           <span class="conv-time">${timeAgo}</span>
         </div>
         <div class="conv-preview">${preview}</div>
         <div class="conv-badges">${botBadge}
           <span class="badge badge-gray" style="font-size:10px">${c.messages_count} رسالة</span>
-          ${c.unread ? '<span class="badge badge-red" style="font-size:10px">جديد</span>' : ''}
+          ${c.unread?'<span class="badge badge-red" style="font-size:10px">جديد</span>':''}
         </div>
       </div>`;
     }).join('');
-
-    // Re-open active session if it was open
-    if (activeSession) renderThread(
-      (await fetch(`/admin/conversations/${activeSession}`).then(r => r.json()))
-    );
-
-  } catch(e) {
-    console.error('loadConversations:', e);
-  }
+    if (activeSession) {
+      const conv = await fetch(`${API}/conversations/${activeSession}`).then(r => r.json());
+      renderThread(conv);
+    }
+  } catch(e) { console.error('loadConversations:', e); }
 }
 
 async function openConversation(sid) {
   activeSession = sid;
-  const conv = await fetch(`/admin/conversations/${sid}`).then(r => r.json());
+  const conv = await fetch(`${API}/conversations/${sid}`).then(r => r.json());
   renderThread(conv);
-  // Refresh list to clear unread badge
   loadConversations();
 }
 
 function renderThread(conv) {
-  const sid = conv.session_id;
+  const sid   = conv.session_id;
   const botOn = conv.bot_enabled;
-  const msgs = conv.messages || [];
-
+  const msgs  = conv.messages || [];
   const msgsHtml = msgs.map(m => {
-    const icons = { user: '👤', assistant: '🤖', admin: '👨‍💼' };
-    const labels = { user: 'عميل', assistant: 'بوت', admin: 'أدمن' };
+    const icons  = {user:'👤', assistant:'🤖', admin:'👨‍💼'};
+    const labels = {user:'عميل', assistant:'بوت', admin:'أدمن'};
     return `<div class="msg-row ${m.role}">
-      <div class="msg-avatar">${icons[m.role] || '?'}</div>
+      <div class="msg-avatar">${icons[m.role]||'?'}</div>
       <div>
-        <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">${labels[m.role] || m.role}</div>
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">${labels[m.role]||m.role}</div>
         <div class="msg-bubble">${esc(m.content)}</div>
         <div class="msg-ts">${fmtDate(new Date(m.ts))}</div>
       </div>
     </div>`;
   }).join('');
-
   document.getElementById('conv-thread').innerHTML = `
     <div class="conv-thread-header">
       <div>
@@ -1086,12 +1034,11 @@ function renderThread(conv) {
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${botOn
-          ? `<button class="btn btn-primary btn-sm" onclick="takeover('${sid}')">🙋 استلام المحادثة</button>`
-          : `<button class="btn btn-success btn-sm" onclick="handback('${sid}')">🤖 إعادة للبوت</button>`
-        }
+          ? `<button class="btn btn-primary btn-sm" onclick="takeover('${sid}')">🙋 استلام</button>`
+          : `<button class="btn btn-success btn-sm" onclick="handback('${sid}')">🤖 إعادة للبوت</button>`}
       </div>
     </div>
-    <div class="conv-messages" id="thread-msgs">${msgsHtml || '<div style="color:#94a3b8;text-align:center;padding:40px">لا توجد رسائل</div>'}</div>
+    <div class="conv-messages" id="thread-msgs">${msgsHtml||'<div style="color:#94a3b8;text-align:center;padding:40px">لا توجد رسائل</div>'}</div>
     <div class="conv-reply-bar">
       <textarea class="conv-reply-input" id="admin-reply-input" rows="1"
         placeholder="اكتب ردك هنا… (Enter للإرسال)"
@@ -1099,17 +1046,12 @@ function renderThread(conv) {
         oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
       <button class="btn btn-primary" onclick="sendAdminReply('${sid}')">إرسال ✉️</button>
     </div>`;
-
-  // Scroll to bottom
   const msgEl = document.getElementById('thread-msgs');
   if (msgEl) msgEl.scrollTop = msgEl.scrollHeight;
 }
 
 function handleReplyKey(e, sid) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendAdminReply(sid);
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAdminReply(sid); }
 }
 
 async function sendAdminReply(sid) {
@@ -1117,74 +1059,59 @@ async function sendAdminReply(sid) {
   if (!input) return;
   const msg = input.value.trim();
   if (!msg) return;
-  input.value = '';
-  input.style.height = 'auto';
-
+  input.value = ''; input.style.height = 'auto';
   try {
-    await fetch(`/admin/conversations/${sid}/reply`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+    await fetch(`${API}/conversations/${sid}/reply`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({message: msg}),
     });
     toast('تم إرسال الرد ✅');
     openConversation(sid);
-  } catch(e) {
-    toast('فشل الإرسال: ' + e.message, 'err');
-  }
+  } catch(e) { toast('فشل الإرسال: ' + e.message, 'err'); }
 }
 
 async function takeover(sid) {
-  await fetch(`/admin/conversations/${sid}/takeover`, {method:'POST'});
+  await fetch(`${API}/conversations/${sid}/takeover`, {method:'POST'});
   toast('استلمت المحادثة — البوت موقوف لهذه الجلسة 🙋', 'warn');
-  openConversation(sid);
-  loadConversations();
+  openConversation(sid); loadConversations();
 }
 
 async function handback(sid) {
-  await fetch(`/admin/conversations/${sid}/handback`, {method:'POST'});
+  await fetch(`${API}/conversations/${sid}/handback`, {method:'POST'});
   toast('تم تسليم المحادثة للبوت ✅');
-  openConversation(sid);
-  loadConversations();
+  openConversation(sid); loadConversations();
 }
 
 async function toggleGlobalBot(enabled) {
   const lbl = document.getElementById('global-bot-label');
-  await fetch('/admin/bot/toggle', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
+  await fetch(`${API}/bot/toggle`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({enabled}),
   });
-  if (lbl) {
-    lbl.textContent = enabled ? 'مفعّل' : 'موقوف';
-    lbl.style.color = enabled ? '#16a34a' : '#dc2626';
-  }
-  toast(enabled ? '✅ البوت مفعّل لجميع المحادثات' : '⏸️ البوت موقوف — الردود اليدوية فقط', 'warn');
+  if (lbl) { lbl.textContent = enabled ? 'مفعّل' : 'موقوف'; lbl.style.color = enabled ? '#16a34a' : '#dc2626'; }
+  toast(enabled ? '✅ البوت مفعّل لجميع المحادثات' : '⏸️ البوت موقوف', 'warn');
 }
 
-// Relative time helper
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function fmtDate(d) {
+  try {
+    return d.toLocaleDateString('ar-SA', {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  } catch { return d.toISOString(); }
+}
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function relTime(iso) {
   if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
+  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (m < 1) return 'الآن';
   if (m < 60) return `${m}د`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}س`;
   return `${Math.floor(h/24)}ي`;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Init
-// ─────────────────────────────────────────────────────────────────────────────
-loadDashboard();
-setInterval(loadDashboard, 30000);        // dashboard auto-refresh every 30s
-
-// Auto-refresh conversations list every 5s when on that page
-setInterval(() => {
-  if (document.getElementById('page-conversations').classList.contains('active')) {
-    loadConversations();
-  }
-}, 5000);
 </script>
 </body>
 </html>

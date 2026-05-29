@@ -16,37 +16,41 @@ from typing import Optional
 import hmac
 import hashlib
 
-from agent import PrintingAgent
+import store_manager as sm
+from store_sync import sync_store
 from salla_oauth import get_auth_url, exchange_code, save_tokens
-from store_sync import sync_store, load_cache, get_store_data
 import conversation_store as cs
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "20"))
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
-
+MAX_FILE_MB        = int(os.getenv("MAX_FILE_SIZE_MB", "20"))
 ALLOWED_EXTENSIONS = {
     ".pdf", ".ai", ".eps", ".psd", ".png", ".jpg", ".jpeg",
     ".svg", ".tiff", ".tif", ".cdr", ".zip",
 }
 
-app = FastAPI(title="Salla Printing Chatbot", version="1.0.0")
+app = FastAPI(title="Salla Printing Chatbot — Multi-tenant", version="2.0.0")
 
 
 @app.on_event("startup")
 async def startup_event():
-    """Load cached store data and attempt a live sync on startup."""
-    load_cache()  # Always load cache first (instant)
-    token = os.getenv("SALLA_ACCESS_TOKEN", "")
-    if token:
-        try:
-            await sync_store(token)
-            print("✅ Store sync completed on startup")
-        except Exception as e:
-            print(f"⚠️ Store sync failed on startup: {e}")
+    """Load all registered stores and trigger background sync for each."""
+    sm.load_all_stores()
+    for store in sm.list_stores():
+        token = sm.get_access_token(store["store_id"])
+        if token:
+            asyncio.create_task(_sync_task(store["store_id"], token))
+
+
+async def _sync_task(store_id: str, token: str):
+    try:
+        await sync_store(token, store_id)
+        print(f"✅ Store sync completed for {store_id!r}")
+    except Exception as e:
+        print(f"⚠️ Store sync failed for {store_id!r}: {e}")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,20 +62,14 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-# Lazy-init: don't crash on startup if env vars are missing
-_agent = None
-
-def get_agent() -> PrintingAgent:
-    global _agent
-    if _agent is None:
-        _agent = PrintingAgent()
-    return _agent
+_ADMIN_HTML = Path(__file__).parent / "admin.html"
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    store_id: Optional[str] = "default"
 
 
 class ChatResponse(BaseModel):
@@ -88,157 +86,113 @@ class BotToggleRequest(BaseModel):
     enabled: bool
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── Utility endpoints ──────────────────────────────────────────────────────────
 @app.get("/env-check")
 async def env_check():
-    """Debug: show which API keys are configured (values hidden)."""
     return {
-        "GROQ_API_KEY": bool(os.getenv("GROQ_API_KEY")),
-        "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "GROQ_API_KEY":       bool(os.getenv("GROQ_API_KEY")),
+        "ANTHROPIC_API_KEY":  bool(os.getenv("ANTHROPIC_API_KEY")),
         "SALLA_ACCESS_TOKEN": bool(os.getenv("SALLA_ACCESS_TOKEN")),
-        "BASE_URL": os.getenv("BASE_URL", "not set"),
+        "BASE_URL":           os.getenv("BASE_URL", "not set"),
+        "stores_registered":  len(sm.list_stores()),
     }
 
 
 @app.get("/widget.js")
 async def serve_widget():
-    """Serve the chat widget JS file."""
     widget_path = Path(__file__).parent / "widget.js"
     return FileResponse(widget_path, media_type="application/javascript")
 
 
 @app.get("/health")
 async def health():
-    has_token = bool(os.getenv("SALLA_ACCESS_TOKEN"))
-    store = get_store_data()
+    stores = sm.list_stores()
+    total_products = sum(s.get("products_count", 0) for s in stores)
     return {
-        "status": "ok",
-        "service": "salla-printing-chatbot",
-        "salla_connected": has_token,
-        "products_synced": store.get("products_count", 0),
-        "last_sync": store.get("last_sync", "never"),
+        "status":           "ok",
+        "service":          "salla-printing-chatbot",
+        "version":          "2.0.0",
+        "stores_count":     len(stores),
+        "total_products":   total_products,
     }
 
 
-@app.post("/admin/sync")
-async def admin_sync():
-    """Manually trigger a full store sync. Call this after updating products."""
-    token = os.getenv("SALLA_ACCESS_TOKEN", "")
+# ── Admin HTML ─────────────────────────────────────────────────────────────────
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_index():
+    """Super-admin dashboard (lists all connected stores)."""
+    return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/admin/stores")
+async def admin_list_stores():
+    """Return JSON list of all registered stores."""
+    return {"stores": sm.list_stores()}
+
+
+# NOTE: /admin/{store_id} must come AFTER /admin/stores so FastAPI matches
+# the literal 'stores' path first.
+@app.get("/admin/{store_id}", response_class=HTMLResponse)
+async def admin_store_page(store_id: str):
+    """Per-store admin dashboard. Same HTML; JS reads the store_id from the URL."""
+    return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
+
+
+# ── Per-store sync ─────────────────────────────────────────────────────────────
+@app.post("/admin/{store_id}/sync")
+async def store_sync_endpoint(store_id: str):
+    token = sm.get_access_token(store_id)
     if not token:
-        raise HTTPException(status_code=400, detail="SALLA_ACCESS_TOKEN is missing.")
+        raise HTTPException(400, f"No access token for store '{store_id}'.")
     try:
-        data = await sync_store(token)
+        data = await sync_store(token, store_id)
         return {
-            "status": "ok",
-            "products_count": data.get("products_count", 0),
+            "status":           "ok",
+            "products_count":   data.get("products_count", 0),
             "categories_count": len(data.get("categories", [])),
-            "articles_count": len(data.get("articles", [])),
-            "last_sync": data.get("last_sync"),
-            "errors": data.get("last_sync_errors", []),
+            "articles_count":   len(data.get("articles", [])),
+            "last_sync":        data.get("last_sync"),
+            "errors":           data.get("last_sync_errors", []),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+        raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
 
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_panel():
-    """Serve the admin dashboard."""
-    html_path = Path(__file__).parent / "admin.html"
-    return HTMLResponse(html_path.read_text(encoding="utf-8"))
-
-
-@app.get("/admin/products")
-async def admin_products():
-    """Return all cached products, categories and articles."""
-    store = get_store_data()
+# ── Per-store products ─────────────────────────────────────────────────────────
+@app.get("/admin/{store_id}/products")
+async def store_products(store_id: str):
+    cache = sm.get_cache(store_id)
     return {
-        "products":   store.get("products", []),
-        "categories": store.get("categories", []),
-        "articles":   store.get("articles", []),
-        "products_count": store.get("products_count", 0),
-        "last_sync":  store.get("last_sync", "never"),
-        "errors":     store.get("last_sync_errors", []),
+        "products":        cache.get("products", []),
+        "categories":      cache.get("categories", []),
+        "articles":        cache.get("articles", []),
+        "products_count":  cache.get("products_count", 0),
+        "last_sync":       cache.get("last_sync", "never"),
+        "errors":          cache.get("last_sync_errors", []),
     }
 
 
-# ── Admin: Bot global toggle ────────────────────────────────────────────────
-@app.get("/admin/bot/status")
-async def bot_status():
-    return {"bot_globally_enabled": cs.get_bot_globally()}
-
-
-@app.post("/admin/bot/toggle")
-async def bot_toggle(req: BotToggleRequest):
-    cs.set_bot_globally(req.enabled)
-    return {"bot_globally_enabled": cs.get_bot_globally()}
-
-
-# ── Admin: Conversations ──────────────────────────────────────────────────────
-@app.get("/admin/conversations")
-async def admin_conversations():
-    """List all active conversations with summary."""
-    return {"conversations": cs.summary_list()}
-
-
-@app.get("/admin/conversations/{session_id}")
-async def admin_conversation_detail(session_id: str):
-    """Get full message history for a session."""
-    cs.mark_admin_read(session_id)
-    conv = cs.all_conversations().get(session_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="المحادثة غير موجودة")
-    return conv
-
-
-@app.post("/admin/conversations/{session_id}/reply")
-async def admin_reply(session_id: str, req: AdminReplyRequest):
-    """Admin sends a manual message to a specific session."""
-    if not req.message.strip():
-        raise HTTPException(status_code=400, detail="الرسالة فارغة")
-    msg = cs.add_message(session_id, "admin", req.message.strip())
-    cs.mark_admin_read(session_id)
-    return {"status": "sent", "message": msg}
-
-
-@app.post("/admin/conversations/{session_id}/takeover")
-async def admin_takeover(session_id: str):
-    """Admin disables bot for this session and takes over the conversation."""
-    cs.set_session_bot(session_id, False)
-    cs.mark_admin_read(session_id)
-    return {"status": "ok", "bot_enabled": False, "session_id": session_id}
-
-
-@app.post("/admin/conversations/{session_id}/handback")
-async def admin_handback(session_id: str):
-    """Admin hands conversation back to the bot."""
-    cs.set_session_bot(session_id, True)
-    # Notify the widget
-    cs.add_message(session_id, "admin",
-                   "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟")
-    return {"status": "ok", "bot_enabled": True, "session_id": session_id}
-
-
-@app.get("/admin/debug")
-async def admin_debug():
-    """
-    Diagnose Salla connection and store sync status.
-    Tests the API directly and returns raw status — use this when products are not loading.
-    """
+# ── Per-store debug ────────────────────────────────────────────────────────────
+@app.get("/admin/{store_id}/debug")
+async def store_debug(store_id: str):
     import httpx as _httpx
 
-    token = os.getenv("SALLA_ACCESS_TOKEN", "")
-    refresh = os.getenv("SALLA_REFRESH_TOKEN", "")
-    store = get_store_data()
+    token   = sm.get_access_token(store_id)
+    refresh = sm.get_refresh_token(store_id)
+    info    = sm.get_store_info(store_id)
+    cache   = sm.get_cache(store_id)
 
     result = {
-        "token_present": bool(token),
-        "token_preview": (token[:12] + "…") if token else None,
+        "store_id":              store_id,
+        "store_name":            info.get("store_name", "—"),
+        "token_present":         bool(token),
+        "token_preview":         (token[:12] + "…") if token else None,
         "refresh_token_present": bool(refresh),
-        "cached_products": store.get("products_count", 0),
-        "cached_categories": len(store.get("categories", [])),
-        "last_sync": store.get("last_sync", "never"),
-        "last_sync_errors": store.get("last_sync_errors", []),
-        "salla_api_test": None,
+        "cached_products":       cache.get("products_count", 0),
+        "cached_categories":     len(cache.get("categories", [])),
+        "last_sync":             cache.get("last_sync", "never"),
+        "last_sync_errors":      cache.get("last_sync_errors", []),
+        "salla_api_test":        None,
     }
 
     if token:
@@ -259,96 +213,191 @@ async def admin_debug():
     return result
 
 
-# ── Salla Webhook (Easy Mode) ──────────────────────────────────────────────────
+# ── Per-store bot toggle ───────────────────────────────────────────────────────
+@app.get("/admin/{store_id}/bot/status")
+async def store_bot_status(store_id: str):
+    return {"bot_globally_enabled": cs.get_bot_globally()}
+
+
+@app.post("/admin/{store_id}/bot/toggle")
+async def store_bot_toggle(store_id: str, req: BotToggleRequest):
+    cs.set_bot_globally(req.enabled)
+    return {"bot_globally_enabled": cs.get_bot_globally()}
+
+
+# ── Per-store conversations ────────────────────────────────────────────────────
+@app.get("/admin/{store_id}/conversations")
+async def store_conversations(store_id: str):
+    return {"conversations": cs.summary_list(store_id)}
+
+
+@app.get("/admin/{store_id}/conversations/{session_id}")
+async def store_conversation_detail(store_id: str, session_id: str):
+    cs.mark_admin_read(session_id)
+    conv = cs.all_conversations().get(session_id)
+    if not conv:
+        raise HTTPException(404, "المحادثة غير موجودة")
+    return conv
+
+
+@app.post("/admin/{store_id}/conversations/{session_id}/reply")
+async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyRequest):
+    if not req.message.strip():
+        raise HTTPException(400, "الرسالة فارغة")
+    msg = cs.add_message(session_id, "admin", req.message.strip(), store_id)
+    cs.mark_admin_read(session_id)
+    return {"status": "sent", "message": msg}
+
+
+@app.post("/admin/{store_id}/conversations/{session_id}/takeover")
+async def store_takeover(store_id: str, session_id: str):
+    cs.set_session_bot(session_id, False)
+    cs.mark_admin_read(session_id)
+    return {"status": "ok", "bot_enabled": False, "session_id": session_id}
+
+
+@app.post("/admin/{store_id}/conversations/{session_id}/handback")
+async def store_handback(store_id: str, session_id: str):
+    cs.set_session_bot(session_id, True)
+    cs.add_message(session_id, "admin",
+                   "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
+                   store_id)
+    return {"status": "ok", "bot_enabled": True, "session_id": session_id}
+
+
+# ── Backward-compat admin aliases (for single-store setups) ───────────────────
+@app.post("/admin/sync")
+async def admin_sync_compat():
+    return await store_sync_endpoint("default")
+
+
+@app.get("/admin/products")
+async def admin_products_compat():
+    return await store_products("default")
+
+
+@app.get("/admin/debug")
+async def admin_debug_compat():
+    return await store_debug("default")
+
+
+@app.get("/admin/bot/status")
+async def admin_bot_status_compat():
+    return await store_bot_status("default")
+
+
+@app.post("/admin/bot/toggle")
+async def admin_bot_toggle_compat(req: BotToggleRequest):
+    return await store_bot_toggle("default", req)
+
+
+@app.get("/admin/conversations")
+async def admin_conversations_compat():
+    return await store_conversations("default")
+
+
+@app.get("/admin/conversations/{session_id}")
+async def admin_conversation_detail_compat(session_id: str):
+    return await store_conversation_detail("default", session_id)
+
+
+@app.post("/admin/conversations/{session_id}/reply")
+async def admin_reply_compat(session_id: str, req: AdminReplyRequest):
+    return await store_admin_reply("default", session_id, req)
+
+
+@app.post("/admin/conversations/{session_id}/takeover")
+async def admin_takeover_compat(session_id: str):
+    return await store_takeover("default", session_id)
+
+
+@app.post("/admin/conversations/{session_id}/handback")
+async def admin_handback_compat(session_id: str):
+    return await store_handback("default", session_id)
+
+
+# ── Salla Webhook ──────────────────────────────────────────────────────────────
 @app.post("/webhook/salla")
 async def salla_webhook(request: Request):
-    """
-    Receives Salla webhook events.
-    Verifies HMAC signature when SALLA_WEBHOOK_SECRET is set.
-    On app.store.authorize: saves the access_token and refresh_token.
-    """
     body = await request.body()
 
-    # Verify Salla signature if secret is configured
     webhook_secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
     if webhook_secret:
         sig_header = request.headers.get("X-Salla-Signature", "")
         expected = hmac.new(
-            webhook_secret.encode("utf-8"),
-            body,
-            hashlib.sha256,
+            webhook_secret.encode("utf-8"), body, hashlib.sha256
         ).hexdigest()
         if sig_header and not hmac.compare_digest(expected, sig_header):
-            print(f"[webhook] Invalid signature — rejected")
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+            print("[webhook] Invalid signature — rejected")
+            raise HTTPException(401, "Invalid webhook signature")
 
     import json as _json
     try:
         payload = _json.loads(body)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        raise HTTPException(400, f"Invalid JSON: {e}")
 
-    event = payload.get("event", "")
-    print(f"[webhook] Received event: {event}")
+    event       = payload.get("event", "")
+    merchant_id = str(payload.get("merchant", ""))
+    print(f"[webhook] Event: {event!r}  merchant: {merchant_id or '(none)'}")
 
     if event == "app.store.authorize":
-        data = payload.get("data", {})
-        access_token = data.get("access_token", "")
+        data          = payload.get("data", {})
+        access_token  = data.get("access_token", "")
         refresh_token = data.get("refresh_token", "")
+        store_info    = data.get("store", {})
 
-        if access_token:
+        if access_token and merchant_id:
+            sm.register_store(
+                store_id      = merchant_id,
+                access_token  = access_token,
+                refresh_token = refresh_token,
+                store_info    = store_info,
+            )
+            # Trigger background sync for the newly connected store
+            asyncio.create_task(_sync_task(merchant_id, access_token))
+            print(f"[webhook] ✅ Store {merchant_id!r} registered and sync triggered")
+            return {"status": "ok", "store_id": merchant_id, "message": "Store registered"}
+
+        elif access_token and not merchant_id:
+            # Fallback: save as default (single-store backward compat)
             save_tokens(access_token, refresh_token)
-            print(f"[webhook] ✅ Access token received and saved! (preview: {access_token[:12]}…)")
-            # Update running agent's Salla client if initialized
-            try:
-                a = get_agent()
-                if a.salla:
-                    a.salla.headers["Authorization"] = f"Bearer {access_token}"
-                else:
-                    from salla_client import SallaClient
-                    a.salla = SallaClient(access_token)
-            except Exception:
-                pass
-            # Trigger background store sync with new token
-            asyncio.create_task(sync_store(access_token))
-            print(f"[webhook] ✅ Store sync triggered in background")
-            return {"status": "ok", "message": "Token saved successfully"}
+            sm.register_store("default", access_token, refresh_token, store_info)
+            asyncio.create_task(_sync_task("default", access_token))
+            return {"status": "ok", "store_id": "default"}
 
-    # Log other events silently
     return {"status": "ok", "event": event}
 
 
 # ── Salla OAuth ────────────────────────────────────────────────────────────────
 @app.get("/auth/salla")
-async def salla_auth(request_url: str = ""):
-    """Redirect to Salla authorization page."""
-    base = os.getenv("BASE_URL", "http://localhost:8000")
+async def salla_auth():
+    base         = os.getenv("BASE_URL", "http://localhost:8000")
     redirect_uri = f"{base}/auth/callback"
-    url = get_auth_url(redirect_uri)
-    return RedirectResponse(url)
+    return RedirectResponse(get_auth_url(redirect_uri))
 
 
 @app.get("/auth/callback")
 async def salla_callback(code: str = "", error: str = ""):
-    """Salla OAuth callback — exchanges code for access token."""
     if error or not code:
         return HTMLResponse(
             "<h2 style='color:red;font-family:Arial'>فشل التفويض. أعد المحاولة.</h2>",
             status_code=400,
         )
-    base = os.getenv("BASE_URL", "http://localhost:8000")
+    base         = os.getenv("BASE_URL", "http://localhost:8000")
     redirect_uri = f"{base}/auth/callback"
     try:
-        tokens = await exchange_code(code, redirect_uri)
-        save_tokens(tokens["access_token"], tokens.get("refresh_token", ""))
-        # Reinitialize agent with new token
-        a = get_agent()
-        if a.salla:
-            a.salla.headers["Authorization"] = f"Bearer {tokens['access_token']}"
+        tokens        = await exchange_code(code, redirect_uri)
+        access_token  = tokens["access_token"]
+        refresh_token = tokens.get("refresh_token", "")
+        save_tokens(access_token, refresh_token)
+        sm.register_store("default", access_token, refresh_token)
+        asyncio.create_task(_sync_task("default", access_token))
         return HTMLResponse("""
         <html><body style='font-family:Arial;text-align:center;padding:60px;direction:rtl'>
           <h2 style='color:#16a34a'>✅ تم ربط المتجر بنجاح!</h2>
           <p>يمكنك إغلاق هذه الصفحة والعودة لاستخدام الشات بوت.</p>
+          <a href='/admin' style='color:#3b82f6'>← فتح لوحة التحكم</a>
         </body></html>
         """)
     except Exception as e:
@@ -358,30 +407,39 @@ async def salla_callback(code: str = "", error: str = ""):
         )
 
 
+# ── Chat ───────────────────────────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if not req.message.strip():
-        raise HTTPException(status_code=400, detail="الرسالة فارغة")
+        raise HTTPException(400, "الرسالة فارغة")
 
+    store_id   = req.store_id or "default"
     session_id = req.session_id or str(uuid.uuid4())
-    bot_on = cs.is_bot_enabled(session_id)
+    bot_on     = cs.is_bot_enabled(session_id)
 
     if not bot_on:
-        # Admin has taken over — store user message but don't auto-reply
-        cs.add_message(session_id, "user", req.message)
+        cs.add_message(session_id, "user", req.message, store_id)
         return ChatResponse(
             reply="شكراً لرسالتك، سيتواصل معك أحد أعضاء فريق الدعم قريباً. 👨‍💼",
             session_id=session_id,
             bot_enabled=False,
         )
 
+    agent = sm.get_agent(store_id)
+    if agent is None:
+        # Store not registered yet — register on the fly if env var is set
+        env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
+        if env_token and store_id == "default":
+            sm.register_store("default", env_token, os.getenv("SALLA_REFRESH_TOKEN", ""))
+            agent = sm.get_agent("default")
+        if agent is None:
+            raise HTTPException(404, f"المتجر '{store_id}' غير مسجل. يرجى ربط المتجر أولاً.")
+
     try:
-        reply = await get_agent().chat(message=req.message, session_id=session_id)
+        reply = await agent.chat(message=req.message, session_id=session_id)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"{type(e).__name__}: {str(e)}"
-        )
+        raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
+
     return ChatResponse(reply=reply, session_id=session_id, bot_enabled=True)
 
 
@@ -389,50 +447,44 @@ async def chat(req: ChatRequest):
 async def chat_poll(session_id: str):
     """Widget polls this endpoint to receive admin messages in real time."""
     pending = cs.pop_pending_for_widget(session_id)
-    bot_on = cs.is_bot_enabled(session_id)
-    return {
-        "messages": pending,
-        "bot_enabled": bot_on,
-    }
+    bot_on  = cs.is_bot_enabled(session_id)
+    return {"messages": pending, "bot_enabled": bot_on}
 
 
+# ── File upload ────────────────────────────────────────────────────────────────
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    session_id: str = Form(default=""),
+    session_id: str  = Form(default=""),
+    store_id: str    = Form(default="default"),
 ):
-    # Validate extension
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
-            status_code=400,
-            detail=f"نوع الملف غير مدعوم. الأنواع المسموحة: {', '.join(ALLOWED_EXTENSIONS)}",
+            400,
+            f"نوع الملف غير مدعوم. الأنواع المسموحة: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
-    # Validate size
     contents = await file.read()
     if len(contents) > MAX_FILE_MB * 1024 * 1024:
-        raise HTTPException(
-            status_code=413,
-            detail=f"حجم الملف يتجاوز الحد المسموح ({MAX_FILE_MB} MB)",
-        )
+        raise HTTPException(413, f"حجم الملف يتجاوز الحد المسموح ({MAX_FILE_MB} MB)")
 
-    # Save file with unique name
-    file_id = str(uuid.uuid4())
+    file_id   = str(uuid.uuid4())
     save_path = UPLOAD_DIR / f"{file_id}{suffix}"
     async with aiofiles.open(save_path, "wb") as f:
         await f.write(contents)
 
-    # Notify agent about the file
     if session_id:
         notification = (
             f"[العميل أرسل ملف تصميم: {file.filename} — "
             f"تم حفظه بنجاح، سيتم مراجعته من فريق التصميم]"
         )
-        await get_agent().chat(message=notification, session_id=session_id)
+        agent = sm.get_agent(store_id)
+        if agent:
+            await agent.chat(message=notification, session_id=session_id)
 
     return {
-        "message": "تم رفع الملف بنجاح! سيتم مراجعته من فريق التصميم وسنتواصل معك قريباً.",
-        "file_id": file_id,
+        "message":  "تم رفع الملف بنجاح! سيتم مراجعته من فريق التصميم وسنتواصل معك قريباً.",
+        "file_id":  file_id,
         "filename": file.filename,
     }

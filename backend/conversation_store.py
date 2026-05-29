@@ -29,10 +29,11 @@ def _now() -> str:
 # Conversation CRUD
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_or_create(session_id: str) -> dict:
+def get_or_create(session_id: str, store_id: str = "default") -> dict:
     if session_id not in _conversations:
         _conversations[session_id] = {
             "session_id": session_id,
+            "store_id": store_id,      # which store this session belongs to
             "messages": [],            # full history (all roles)
             "bot_enabled": True,       # per-session flag
             "created_at": _now(),
@@ -43,12 +44,12 @@ def get_or_create(session_id: str) -> dict:
     return _conversations[session_id]
 
 
-def add_message(session_id: str, role: str, content: str) -> dict:
+def add_message(session_id: str, role: str, content: str, store_id: str = "default") -> dict:
     """
     Append a message to the conversation.
     role: 'user' | 'assistant' | 'admin'
     """
-    conv = get_or_create(session_id)
+    conv = get_or_create(session_id, store_id)
     msg = {"role": role, "content": content, "ts": _now()}
     conv["messages"].append(msg)
     conv["last_activity"] = _now()
@@ -133,10 +134,12 @@ def all_conversations() -> dict:
     return _conversations
 
 
-def summary_list() -> list:
-    """Conversation summaries for admin panel list view."""
+def summary_list(store_id: str = None) -> list:
+    """Conversation summaries for admin panel list view. Filter by store_id if provided."""
     result = []
     for sid, conv in _conversations.items():
+        if store_id and conv.get("store_id", "default") != store_id:
+            continue
         msgs = conv["messages"]
         last = msgs[-1] if msgs else None
         user_count = sum(1 for m in msgs if m["role"] == "user")

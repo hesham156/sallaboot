@@ -15,6 +15,13 @@ env/
 # Uploads folder
 backend/uploads/
 
+# Multi-tenant store data (contains access tokens — never commit)
+backend/data/
+
+# Legacy single-store token file
+backend/tokens.json
+backend/store_cache.json
+
 # IDE
 .vscode/
 .idea/

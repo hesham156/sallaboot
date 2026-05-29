@@ -4,6 +4,7 @@
   // ── Configuration ────────────────────────────────────────────────────────────
   var _defaults = {
     apiUrl: "https://sallaboot-t.up.railway.app",
+    storeId: "default",           // Each store sets its own ID: window.SallaChatConfig = { storeId: "12345" }
     primaryColor: "#1a56db",
     storeName: "متجر الطباعة",
     welcomeMessage: "مرحباً! 👋 أنا مساعد متجرنا للطباعة. كيف أقدر أساعدك اليوم؟",
@@ -298,7 +299,7 @@
   async function pollAdmin() {
     if (!sessionId) return;
     try {
-      var res = await fetch(CONFIG.apiUrl + "/chat/poll?session_id=" + encodeURIComponent(sessionId));
+      var res = await fetch(CONFIG.apiUrl + "/chat/poll?session_id=" + encodeURIComponent(sessionId) + "&store_id=" + encodeURIComponent(CONFIG.storeId));
       if (!res.ok) return;
       var data = await res.json();
 
@@ -340,7 +341,7 @@
       var res = await fetch(CONFIG.apiUrl + "/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: message, session_id: sessionId }),
+        body: JSON.stringify({ message: message, session_id: sessionId, store_id: CONFIG.storeId }),
       });
       var data = await res.json();
       hideTyping();
@@ -389,6 +390,7 @@
     var formData = new FormData();
     formData.append("file", file);
     formData.append("session_id", sessionId || "");
+    formData.append("store_id", CONFIG.storeId);
 
     try {
       var res = await fetch(CONFIG.apiUrl + "/upload", {
