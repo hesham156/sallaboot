@@ -2,6 +2,8 @@ import os
 import uuid
 import asyncio
 import aiofiles
+import collections
+import datetime as _dt
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -81,7 +83,7 @@ _ADMIN_HTML = Path(__file__).parent / "admin.html"
 # ── Auth middleware ────────────────────────────────────────────────────────────
 # Protects all per-store admin API routes (not the HTML pages or auth endpoints).
 _PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks)"
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
@@ -468,57 +470,202 @@ async def admin_handback_compat(session_id: str):
     return await store_handback("default", session_id)
 
 
-# ── Salla Webhook ──────────────────────────────────────────────────────────────
+# ── Webhook infrastructure ─────────────────────────────────────────────────────
+
+# In-memory log of the last 200 webhook events (per-process; lost on restart).
+# Key: store_id → deque of event dicts.
+_webhook_log: dict = collections.defaultdict(lambda: collections.deque(maxlen=200))
+
+# Idempotency: remember (event, merchant_id, event_id) tuples we already handled.
+# Salla retries up to 3× every 5 min — we must not double-process.
+_seen_events: collections.deque = collections.deque(maxlen=1000)
+
+
+def _log_event(store_id: str, event: str, status: str, detail: str = ""):
+    _webhook_log[store_id].appendleft({
+        "event":   event,
+        "status":  status,
+        "detail":  detail,
+        "ts":      _dt.datetime.utcnow().isoformat() + "Z",
+    })
+
+
+def _already_seen(dedup_key: str) -> bool:
+    if dedup_key in _seen_events:
+        return True
+    _seen_events.append(dedup_key)
+    return False
+
+
+def _verify_signature(body: bytes, headers) -> bool:
+    """
+    Verify X-Salla-Signature using HMAC-SHA256.
+    Returns False (reject) if the secret is set but signature is missing or wrong.
+    Returns True (accept) if secret is not configured (dev mode).
+    """
+    secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
+    if not secret:
+        return True          # No secret configured — accept all (dev/test mode)
+
+    sig = headers.get("X-Salla-Signature", "")
+    if not sig:
+        print("[webhook] ⛔ Missing X-Salla-Signature — rejected")
+        return False
+
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        print(f"[webhook] ⛔ Signature mismatch — rejected (got {sig[:16]}…)")
+        return False
+
+    return True
+
+
+# ── Per-event async handlers ───────────────────────────────────────────────────
+
+async def _handle_store_authorize(merchant_id: str, data: dict):
+    """app.store.authorize — store installs / reinstalls the app."""
+    access_token  = data.get("access_token", "")
+    refresh_token = data.get("refresh_token", "")
+    expires       = data.get("expires", 0)       # unix timestamp (2-week expiry)
+    store_info    = data.get("store", {})
+
+    store_id = merchant_id or "default"
+    if not access_token:
+        print(f"[webhook] app.store.authorize for {store_id!r} — no token in payload")
+        return
+
+    sm.register_store(
+        store_id=store_id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        store_info=store_info,
+    )
+    asyncio.create_task(_sync_task(store_id, access_token))
+    _log_event(store_id, "app.store.authorize", "ok",
+               f"token …{access_token[-6:]}  expires={expires}")
+    print(f"[webhook] ✅ Store {store_id!r} authorized, sync triggered")
+
+
+async def _handle_product_event(event: str, merchant_id: str, data: dict):
+    """
+    product.created / product.updated / product.deleted /
+    product.status.updated / product.price.updated / product.image.updated /
+    product.category.updated / product.brand.updated / product.tags.updated /
+    product.available / product.quantity.low
+    → Incremental cache patch instead of full re-sync.
+    """
+    from store_sync import patch_product_in_cache
+
+    store_id   = merchant_id or "default"
+    product_id = data.get("id") or data.get("product_id", "")
+    if not product_id:
+        return
+
+    is_delete = event == "product.deleted"
+    ok = await patch_product_in_cache(store_id, product_id, delete=is_delete)
+    status = "ok" if ok else "skip"
+    _log_event(store_id, event, status, f"product_id={product_id}")
+
+    # Also reset the agent so the updated catalogue is reflected in the next chat
+    if ok:
+        sm._registry.get(store_id, {}).update({"agent": None})
+
+
+async def _handle_order_event(event: str, merchant_id: str, data: dict):
+    """
+    order.created / order.updated / order.status.updated / order.cancelled …
+    Logs the event; could be extended to send admin notifications.
+    """
+    store_id    = merchant_id or "default"
+    order_id    = str(data.get("id", ""))
+    order_ref   = str(data.get("reference_id", ""))
+    status_info = (data.get("status") or {})
+    status_name = status_info.get("name", "") if isinstance(status_info, dict) else str(status_info)
+    total_info  = (data.get("total") or {})
+    total_amt   = total_info.get("amount", "") if isinstance(total_info, dict) else str(total_info)
+    currency    = total_info.get("currency", "SAR") if isinstance(total_info, dict) else "SAR"
+
+    detail = f"order_id={order_id}  ref={order_ref}  status={status_name}  total={total_amt} {currency}"
+    _log_event(store_id, event, "ok", detail)
+    print(f"[webhook] {event!r} — {detail}")
+
+
+async def _handle_customer_event(event: str, merchant_id: str, data: dict):
+    store_id    = merchant_id or "default"
+    customer_id = str(data.get("id", ""))
+    _log_event(store_id, event, "ok", f"customer_id={customer_id}")
+    print(f"[webhook] {event!r} customer={customer_id} store={store_id}")
+
+
+# ── Salla Webhook endpoint ─────────────────────────────────────────────────────
 @app.post("/webhook/salla")
 async def salla_webhook(request: Request):
+    """
+    Central Salla webhook receiver.
+    • Verifies HMAC-SHA256 signature (strict — rejects missing signatures when secret is set)
+    • Deduplicates retries (Salla retries up to 3× every 5 min)
+    • Routes to per-event async handlers and always returns 200 within the 30 s timeout
+    """
     body = await request.body()
 
-    webhook_secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
-    if webhook_secret:
-        sig_header = request.headers.get("X-Salla-Signature", "")
-        expected = hmac.new(
-            webhook_secret.encode("utf-8"), body, hashlib.sha256
-        ).hexdigest()
-        if sig_header and not hmac.compare_digest(expected, sig_header):
-            print("[webhook] Invalid signature — rejected")
-            raise HTTPException(401, "Invalid webhook signature")
+    # ── 1. Signature verification ──────────────────────────────────────────────
+    if not _verify_signature(body, request.headers):
+        raise HTTPException(401, "Invalid or missing webhook signature")
 
+    # ── 2. Parse JSON ──────────────────────────────────────────────────────────
     import json as _json
     try:
         payload = _json.loads(body)
-    except Exception as e:
-        raise HTTPException(400, f"Invalid JSON: {e}")
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid JSON: {exc}")
 
     event       = payload.get("event", "")
     merchant_id = str(payload.get("merchant", ""))
-    print(f"[webhook] Event: {event!r}  merchant: {merchant_id or '(none)'}")
+    data        = payload.get("data", {})
+    created_at  = payload.get("created_at", "")
 
+    print(f"[webhook] {event!r}  merchant={merchant_id or '—'}  ts={created_at}")
+
+    # ── 3. Idempotency — skip duplicate deliveries ─────────────────────────────
+    dedup_key = f"{event}:{merchant_id}:{created_at}"
+    if _already_seen(dedup_key):
+        print(f"[webhook] Duplicate event skipped: {dedup_key}")
+        return {"status": "ok", "duplicate": True}
+
+    # ── 4. Route to handler ────────────────────────────────────────────────────
     if event == "app.store.authorize":
-        data          = payload.get("data", {})
-        access_token  = data.get("access_token", "")
-        refresh_token = data.get("refresh_token", "")
-        store_info    = data.get("store", {})
+        # Handle synchronously so the store is registered before we return
+        await _handle_store_authorize(merchant_id, data)
 
-        if access_token and merchant_id:
-            sm.register_store(
-                store_id      = merchant_id,
-                access_token  = access_token,
-                refresh_token = refresh_token,
-                store_info    = store_info,
-            )
-            # Trigger background sync for the newly connected store
-            asyncio.create_task(_sync_task(merchant_id, access_token))
-            print(f"[webhook] ✅ Store {merchant_id!r} registered and sync triggered")
-            return {"status": "ok", "store_id": merchant_id, "message": "Store registered"}
+    elif event == "app.updated":
+        # Salla will immediately follow up with app.store.authorize containing
+        # new tokens — nothing to do here except log it.
+        _log_event(merchant_id or "default", event, "ok", "awaiting app.store.authorize")
+        print(f"[webhook] app.updated for merchant {merchant_id} — new tokens incoming")
 
-        elif access_token and not merchant_id:
-            # Fallback: save as default (single-store backward compat)
-            save_tokens(access_token, refresh_token)
-            sm.register_store("default", access_token, refresh_token, store_info)
-            asyncio.create_task(_sync_task("default", access_token))
-            return {"status": "ok", "store_id": "default"}
+    elif event.startswith("product."):
+        asyncio.create_task(_handle_product_event(event, merchant_id, data))
+
+    elif event.startswith("order."):
+        asyncio.create_task(_handle_order_event(event, merchant_id, data))
+
+    elif event.startswith("customer."):
+        asyncio.create_task(_handle_customer_event(event, merchant_id, data))
+
+    else:
+        # Unknown / unhandled event — log and acknowledge
+        _log_event(merchant_id or "default", event, "unhandled")
+        print(f"[webhook] Unhandled event: {event!r}")
 
     return {"status": "ok", "event": event}
+
+
+# ── Webhook events log (per-store) ─────────────────────────────────────────────
+@app.get("/admin/{store_id}/webhooks/log")
+async def store_webhook_log(store_id: str):
+    """Return the last 200 webhook events received for this store."""
+    events = list(_webhook_log.get(store_id, []))
+    return {"store_id": store_id, "count": len(events), "events": events}
 
 
 # ── Salla OAuth ────────────────────────────────────────────────────────────────

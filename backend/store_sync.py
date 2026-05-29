@@ -13,6 +13,8 @@ import httpx
 
 import store_manager as sm
 
+BASE_API = "https://api.salla.dev/admin/v2"
+
 
 # ── Salla API helpers ──────────────────────────────────────────────────────────
 
@@ -222,6 +224,84 @@ def get_store_data(store_id: str = "default") -> dict:
 def load_cache(store_id: str = "default") -> dict:
     """Backward-compat stub — store_manager handles all cache loading at startup."""
     return sm.get_cache(store_id)
+
+
+# ── Incremental product cache updates ─────────────────────────────────────────
+
+async def patch_product_in_cache(
+    store_id: str,
+    product_id,
+    *,
+    delete: bool = False,
+) -> bool:
+    """
+    Update **one product** in the store cache without a full re-sync.
+
+    Called by webhook handlers for product.created / product.updated /
+    product.deleted / product.status.updated / product.price.updated.
+
+    Returns True if the cache was changed.
+    """
+    cache    = sm.get_cache(store_id)
+    products = list(cache.get("products", []))
+    pid_str  = str(product_id)
+
+    if delete:
+        before = len(products)
+        products = [p for p in products if str(p.get("id")) != pid_str]
+        if len(products) == before:
+            return False  # wasn't in cache anyway
+    else:
+        # Fetch fresh data from Salla
+        access_token = sm.get_access_token(store_id)
+        if not access_token:
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    f"{BASE_API}/products/{pid_str}",
+                    headers=headers,
+                )
+                if r.status_code == 401:
+                    # Token expired — refresh and retry once
+                    from salla_oauth import refresh_access_token
+                    new_tok = await refresh_access_token(store_id)
+                    headers["Authorization"] = f"Bearer {new_tok}"
+                    r = await client.get(
+                        f"{BASE_API}/products/{pid_str}",
+                        headers=headers,
+                    )
+                if r.status_code == 404:
+                    # Product was deleted on Salla side
+                    products = [p for p in products if str(p.get("id")) != pid_str]
+                elif r.status_code == 200:
+                    raw = r.json().get("data", {})
+                    new_product = _format_product(raw)
+                    idx = next(
+                        (i for i, p in enumerate(products) if str(p.get("id")) == pid_str),
+                        -1,
+                    )
+                    if idx >= 0:
+                        products[idx] = new_product
+                    else:
+                        products.append(new_product)
+                else:
+                    return False
+        except Exception as e:
+            print(f"[store_sync:{store_id}] patch_product error for {pid_str}: {e}")
+            return False
+
+    cache["products"]       = products
+    cache["products_count"] = len(products)
+    sm.set_cache(store_id, cache)
+    action = "deleted" if delete else "patched"
+    print(f"[store_sync:{store_id}] ✅ Product {pid_str} {action} (cache now {len(products)} products)")
+    return True
 
 
 # ── Knowledge summary ──────────────────────────────────────────────────────────
