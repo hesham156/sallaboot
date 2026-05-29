@@ -457,15 +457,22 @@
       wrap.querySelectorAll(".card-add").forEach(function (btn) {
         btn.addEventListener("click", function () {
           if (isLoading) return;
-          var pid  = parseInt(btn.getAttribute("data-id"), 10);
+          // Keep ID as a string to avoid precision loss for large Salla IDs
+          // (JS parseInt caps at Number.MAX_SAFE_INTEGER ≈ 9×10¹⁵, but still
+          //  better to let Salla's SDK handle the type conversion itself).
+          var pidStr = btn.getAttribute("data-id") || "";
+          var pid    = parseInt(pidStr, 10);
+          // If parsing failed or lost precision, fall back to the original string
+          var safeId = (!isNaN(pid) && String(pid) === pidStr) ? pid : pidStr;
           var name = btn.getAttribute("data-name");
           var qty  = parseInt(btn.getAttribute("data-qty") || "1", 10);
+          if (isNaN(qty) || qty < 1) qty = 1;
 
           if (sallaReady()) {
             // ── Use Salla native cart ──────────────────────────────────────────
             btn.disabled = true;
             btn.textContent = "جارٍ الإضافة…";
-            window.salla.cart.addItem({ id: pid, quantity: qty })
+            window.salla.cart.addItem({ id: safeId, quantity: qty })
               .then(function (response) {
                 btn.textContent = "✅ تمت الإضافة";
                 // Sync cart badge from Salla response
@@ -483,7 +490,7 @@
               });
           } else {
             // ── Fallback: let the AI agent handle cart via backend ─────────────
-            sendMessage("أضف " + name + " للسلة");
+            sendMessage("أضف " + esc(name) + " للسلة");
           }
         });
       });

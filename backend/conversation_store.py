@@ -281,8 +281,21 @@ async def load_conversations_from_db():
     print(f"[conversation_store] Restored {loaded} conversation(s) from DB")
 
 
-def summary_list(store_id: str = None) -> list:
-    """Conversation summaries for admin panel list view. Filter by store_id if provided."""
+def summary_list(
+    store_id: str = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """
+    Conversation summaries for admin panel list view.
+    Filter by store_id if provided; paginated via limit/offset.
+
+    Returns:
+        {
+            "total":         int   — total conversations matching the filter,
+            "conversations": list  — slice [offset : offset+limit] sorted newest-first,
+        }
+    """
     result = []
     for sid, conv in _conversations.items():
         if store_id and conv.get("store_id", "default") != store_id:
@@ -292,15 +305,17 @@ def summary_list(store_id: str = None) -> list:
         user_count = sum(1 for m in msgs if m["role"] == "user")
         unread = has_unread_user_messages(sid)
         result.append({
-            "session_id": sid,
-            "messages_count": len(msgs),
+            "session_id":         sid,
+            "messages_count":     len(msgs),
             "user_messages_count": user_count,
-            "last_message": last,
-            "bot_enabled": conv["bot_enabled"],
-            "last_activity": conv["last_activity"],
-            "created_at": conv["created_at"],
-            "unread": unread,
-            "rating": conv.get("rating"),
+            "last_message":       last,
+            "bot_enabled":        conv["bot_enabled"],
+            "last_activity":      conv["last_activity"],
+            "created_at":         conv["created_at"],
+            "unread":             unread,
+            "rating":             conv.get("rating"),
         })
     result.sort(key=lambda x: x["last_activity"], reverse=True)
-    return result
+    total = len(result)
+    page  = result[offset : offset + limit] if limit > 0 else result
+    return {"total": total, "conversations": page}

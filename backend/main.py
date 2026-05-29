@@ -263,13 +263,20 @@ class RateRequest(BaseModel):
 
 # ── Utility endpoints ──────────────────────────────────────────────────────────
 @app.get("/env-check")
-async def env_check():
-    stores = sm.list_stores()
+async def env_check(request: Request):
+    """
+    Health / diagnostics endpoint.
+    Basic info is public (needed to debug widget issues).
+    Security-sensitive flags (default password, ADMIN_SECRET stability) are
+    ONLY returned to authenticated super-admins to avoid leaking the security
+    posture to unauthenticated callers.
+    """
+    stores    = sm.list_stores()
     db_status = db.get_status()
     store_agents = []
     for s in stores:
         sid = s["store_id"]
-        a = sm.get_agent(sid)
+        a   = sm.get_agent(sid)
         store_agents.append({
             "store_id":   sid,
             "store_name": s.get("store_name", ""),
@@ -283,19 +290,27 @@ async def env_check():
         else:
             print("[startup] ⚠️  DATABASE_URL is set but DB connection failed — check Railway logs")
 
-    super_pass    = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
-    return {
-        "GROQ_API_KEY":                    bool(os.getenv("GROQ_API_KEY")),
-        "ANTHROPIC_API_KEY":               bool(os.getenv("ANTHROPIC_API_KEY")),
-        "SALLA_ACCESS_TOKEN":              bool(os.getenv("SALLA_ACCESS_TOKEN")),
-        "DATABASE_URL":                    db_status["database_url"],
-        "DB_CONNECTED":                    db_status["connected"],
-        "ADMIN_SECRET_STABLE":             _auth.ADMIN_SECRET_STABLE,
-        "SUPER_ADMIN_PASSWORD_IS_DEFAULT": super_pass == "admin",
-        "BASE_URL":                        os.getenv("BASE_URL", "not set"),
-        "stores_registered":               len(stores),
-        "stores":                          store_agents,
+    result: dict = {
+        "GROQ_API_KEY":           bool(os.getenv("GROQ_API_KEY")),
+        "ANTHROPIC_API_KEY":      bool(os.getenv("ANTHROPIC_API_KEY")),
+        "SALLA_ACCESS_TOKEN":     bool(os.getenv("SALLA_ACCESS_TOKEN")),
+        "SALLA_WEBHOOK_SECRET":   bool(os.getenv("SALLA_WEBHOOK_SECRET")),
+        "DATABASE_URL":           db_status["database_url"],
+        "DB_CONNECTED":           db_status["connected"],
+        "BASE_URL":               os.getenv("BASE_URL", "not set"),
+        "stores_registered":      len(stores),
+        "stores":                 store_agents,
     }
+
+    # Security-sensitive diagnostics — only visible to authenticated super-admins
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if claims and claims.get("su"):
+        super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
+        result["ADMIN_SECRET_STABLE"]             = _auth.ADMIN_SECRET_STABLE
+        result["SUPER_ADMIN_PASSWORD_IS_DEFAULT"] = (super_pass == "admin")
+
+    return result
 
 
 @app.post("/admin/force-db-sync")
@@ -688,10 +703,22 @@ async def store_sync_endpoint(store_id: str):
 
 # ── Per-store products ─────────────────────────────────────────────────────────
 @app.get("/admin/{store_id}/products")
-async def store_products(store_id: str):
-    cache = sm.get_cache(store_id)
+async def store_products(
+    store_id: str,
+    limit:  int = 500,
+    offset: int = 0,
+):
+    """
+    Return cached products for a store.
+    ?limit=500&offset=0 for pagination.
+    """
+    cache    = sm.get_cache(store_id)
+    products = cache.get("products", [])
+    total    = len(products)
+    page     = products[offset : offset + limit] if limit > 0 else products
     return {
-        "products":        cache.get("products", []),
+        "products":        page,
+        "total_products":  total,
         "categories":      cache.get("categories", []),
         "articles":        cache.get("articles", []),
         "products_count":  cache.get("products_count", 0),
@@ -885,8 +912,17 @@ async def store_bot_toggle(store_id: str, req: BotToggleRequest):
 
 # ── Per-store conversations ────────────────────────────────────────────────────
 @app.get("/admin/{store_id}/conversations")
-async def store_conversations(store_id: str):
-    return {"conversations": cs.summary_list(store_id)}
+async def store_conversations(
+    store_id: str,
+    limit:  int = 100,
+    offset: int = 0,
+):
+    """
+    List conversation summaries for a store.
+    ?limit=100&offset=0 — paginated, newest-first.
+    Response: {total: int, conversations: [...]}
+    """
+    return cs.summary_list(store_id, limit=limit, offset=offset)
 
 
 @app.get("/admin/{store_id}/conversations/{session_id}")
@@ -951,8 +987,8 @@ async def admin_bot_toggle_compat(req: BotToggleRequest):
 
 
 @app.get("/admin/conversations")
-async def admin_conversations_compat():
-    return await store_conversations("default")
+async def admin_conversations_compat(limit: int = 100, offset: int = 0):
+    return await store_conversations("default", limit=limit, offset=offset)
 
 
 @app.get("/admin/conversations/{session_id}")
@@ -1018,8 +1054,11 @@ def _verify_signature(body: bytes, headers) -> tuple:
     Behaviour:
     - No secret configured → accept (dev mode).
     - Secret configured + signature present → verify strictly.
-    - Secret configured + signature ABSENT → accept with warning.
-      (Some Salla easy-mode events don't include the header.)
+    - Secret configured + signature ABSENT:
+        • Default (lenient): accept with warning — some Salla easy-mode events
+          legitimately omit the header.
+        • Strict mode (WEBHOOK_REQUIRE_SIGNATURE=true env var): reject — use
+          this in production once you've confirmed all events carry a signature.
     """
     secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
     if not secret:
@@ -1027,7 +1066,10 @@ def _verify_signature(body: bytes, headers) -> tuple:
 
     sig = headers.get("X-Salla-Signature", "")
     if not sig:
-        print("[webhook] ⚠️ Missing X-Salla-Signature — accepted with warning")
+        if os.getenv("WEBHOOK_REQUIRE_SIGNATURE", "false").lower() == "true":
+            print("[webhook] ⛔ Missing X-Salla-Signature — rejected (strict mode)")
+            return False, "signature_required_but_absent"
+        print("[webhook] ⚠️ Missing X-Salla-Signature — accepted with warning (set WEBHOOK_REQUIRE_SIGNATURE=true to harden)")
         return True, "signature_absent_accepted"
 
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -1108,9 +1150,9 @@ async def _handle_product_event(event: str, merchant_id: str, data: dict):
     status = "ok" if ok else "skip"
     _log_event(store_id, event, status, f"product_id={product_id}")
 
-    # Also reset the agent so the updated catalogue is reflected in the next chat
+    # Reset the cached agent so the updated catalogue is picked up on next chat
     if ok:
-        sm._registry.get(store_id, {}).update({"agent": None})
+        sm.reset_agent(store_id)
 
 
 async def _handle_order_event(event: str, merchant_id: str, data: dict):
@@ -1370,19 +1412,24 @@ async def store_order_detail(store_id: str, order_id: str):
         raise HTTPException(500, f"{type(e).__name__}: {e}")
 
 
-# ── Webhook raw attempts debug (no auth — shows last 50 raw attempts) ──────────
+# ── Webhook raw attempts debug (super-admin only) ─────────────────────────────
 @app.get("/webhook/salla/debug")
-async def webhook_debug():
+async def webhook_debug(request: Request):
     """
-    Public debug endpoint — shows last 50 raw webhook attempts.
-    Useful for diagnosing whether Salla webhooks are reaching the server.
-    Remove or protect in production once confirmed working.
+    Diagnostics endpoint — shows last 50 raw webhook attempts.
+    Requires super-admin authentication to avoid leaking merchant IDs to
+    unauthenticated callers.
     """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
     return {
-        "webhook_url":     f"{os.getenv('BASE_URL','http://localhost:8000')}/webhook/salla",
-        "secret_set":      bool(os.getenv("SALLA_WEBHOOK_SECRET", "")),
-        "total_attempts":  len(_raw_attempts),
-        "attempts":        list(_raw_attempts),
+        "webhook_url":    f"{os.getenv('BASE_URL','http://localhost:8000')}/webhook/salla",
+        "secret_set":     bool(os.getenv("SALLA_WEBHOOK_SECRET", "")),
+        "total_attempts": len(_raw_attempts),
+        "attempts":       list(_raw_attempts),
     }
 
 

@@ -268,6 +268,17 @@ def get_agent(store_id: str):
     return _registry[store_id]["agent"]
 
 
+def reset_agent(store_id: str):
+    """
+    Force the per-store agent to be re-created on the next call to get_agent().
+    Call this after product cache updates, token refreshes, or AI config changes
+    so the new state is picked up immediately.
+    """
+    store_id = str(store_id)
+    if store_id in _registry:
+        _registry[store_id]["agent"] = None
+
+
 # ── Query helpers ──────────────────────────────────────────────────────────────
 
 def is_registered(store_id: str) -> bool:

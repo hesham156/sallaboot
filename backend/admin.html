@@ -423,7 +423,7 @@ select.form-control{cursor:pointer}
           <p>٤. كود التضمين في المتجر: <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">window.SallaChatConfig = &#123; storeId: "STORE_ID" &#125;</code></p>
         </div>
         <div style="margin-top:12px">
-          <a href="/webhook/salla/debug" target="_blank" class="btn btn-outline btn-sm">🔍 فحص وصول الـ Webhooks</a>
+          <button class="btn btn-outline btn-sm" onclick="showWebhookDebugModal()">🔍 فحص وصول الـ Webhooks</button>
         </div>
       </div>
 
@@ -1217,12 +1217,14 @@ function doLogout() {
 // ── Intercept all fetch calls to add auth header + handle 401 ────────────────
 const _realFetch = window.fetch.bind(window);
 window.fetch = function(url, opts = {}) {
-  const token = getToken();
-  if (token && String(url).includes('/admin')) {
+  const token  = getToken();
+  const urlStr = String(url);
+  // Add token to /admin/* AND /env-check (which shows security flags when authenticated)
+  if (token && (urlStr.includes('/admin') || urlStr.startsWith('/env-check'))) {
     opts = { ...opts, headers: { ...(opts.headers || {}), 'Authorization': `Bearer ${token}` } };
   }
   return _realFetch(url, opts).then(res => {
-    if (res.status === 401 && String(url).includes('/admin') && !String(url).includes('/auth/login')) {
+    if (res.status === 401 && urlStr.includes('/admin') && !urlStr.includes('/auth/login')) {
       clearToken();                     // remove stale token
       showLogin('انتهت صلاحية الجلسة. أعد تسجيل الدخول.');
       // Return a special error so callers can distinguish auth errors
@@ -1824,6 +1826,55 @@ async function loadWebhooks() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Super-admin: Webhook raw-attempts debug modal
+// ─────────────────────────────────────────────────────────────────────────────
+async function showWebhookDebugModal() {
+  try {
+    const res  = await fetch('/webhook/salla/debug');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      toast(err.detail || 'يجب تسجيل الدخول كمدير عام للوصول لهذه البيانات', 'err');
+      return;
+    }
+    const data     = await res.json();
+    const attempts = data.attempts || [];
+    const html     = attempts.length
+      ? attempts.map(a => `<div style="font-size:12px;font-family:monospace;background:#0f172a;color:#e2e8f0;border-radius:6px;padding:10px;margin-bottom:8px;word-break:break-all">
+          <div><strong style="color:#93c5fd">ts:</strong> ${esc(a.ts)}</div>
+          <div><strong style="color:#93c5fd">event:</strong> ${esc(a.event||'—')}  <strong style="color:#93c5fd">merchant:</strong> ${esc(a.merchant_id||'—')}</div>
+          <div><strong style="color:#93c5fd">sig:</strong> ${esc(a.sig)}</div>
+          <div><strong style="color:#93c5fd">body:</strong> ${esc(a.body_head||'')}</div>
+        </div>`).join('')
+      : '<div style="color:#64748b;text-align:center;padding:32px">لا توجد محاولات وصول مسجّلة بعد</div>';
+
+    // Show in a simple overlay
+    let overlay = document.getElementById('wh-debug-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'wh-debug-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+      overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:14px;padding:24px;max-width:740px;width:100%;max-height:80vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h3 style="margin:0;font-size:16px">🔍 آخر ${attempts.length} محاولة Webhook</h3>
+          <button onclick="document.getElementById('wh-debug-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+        </div>
+        <div><strong style="font-size:12px;color:#64748b">Webhook URL: </strong><code style="font-size:12px">${esc(data.webhook_url)}</code></div>
+        <div style="margin-bottom:16px;font-size:12px;color:#64748b">
+          Secret مضبوط: ${data.secret_set ? '✅' : '❌'} &nbsp;|&nbsp; إجمالي المحاولات: ${data.total_attempts}
+        </div>
+        ${html}
+      </div>`;
+    overlay.style.display = 'flex';
+  } catch(e) {
+    toast('خطأ: ' + e.message, 'err');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Per-store: Conversations
 // ─────────────────────────────────────────────────────────────────────────────
 let activeSession = null;
@@ -1838,9 +1889,10 @@ async function loadConversations() {
       lbl.textContent = bs.bot_globally_enabled ? 'مفعّل' : 'موقوف';
       lbl.style.color  = bs.bot_globally_enabled ? '#16a34a' : '#dc2626';
     }
-    const data  = await fetch(`${API}/conversations`).then(r => r.json());
+    const data  = await fetch(`${API}/conversations?limit=100&offset=0`).then(r => r.json());
     const convs = data.conversations || [];
-    document.getElementById('conv-count').textContent = convs.length;
+    // Use server-reported total (may be larger than the current page)
+    document.getElementById('conv-count').textContent = data.total != null ? data.total : convs.length;
     const unread = convs.filter(c => c.unread).length;
     const badge  = document.getElementById('unread-badge');
     if (badge) { badge.textContent = unread; badge.style.display = unread ? 'inline-block' : 'none'; }

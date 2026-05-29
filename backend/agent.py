@@ -333,8 +333,19 @@ class PrintingAgent:
                 lines = [f"وجدت {len(top)} منتجات تناسب طلبك:"]
                 for p in top:
                     price_str = f"{p.get('price')} {p.get('currency','SAR')}"
-                    if p.get("sale_price") and float(p["sale_price"] or 0) < float(p.get("price") or 0):
-                        price_str = f"~~{p['price']}~~ → {p['sale_price']} {p.get('currency','SAR')}"
+                    # Safe price comparison — price may be string, int, float, or dict
+                    try:
+                        raw_price = p.get("price") or 0
+                        raw_sale  = p.get("sale_price") or 0
+                        # Salla API sometimes nests price as {"amount": n, "currency": "SAR"}
+                        if isinstance(raw_price, dict):
+                            raw_price = raw_price.get("amount", 0)
+                        if isinstance(raw_sale, dict):
+                            raw_sale = raw_sale.get("amount", 0)
+                        if raw_sale and float(raw_sale) < float(raw_price):
+                            price_str = f"~~{p['price']}~~ → {p['sale_price']} {p.get('currency','SAR')}"
+                    except (ValueError, TypeError):
+                        pass   # keep original price_str
                     avail = "✅" if (p.get("unlimited_quantity") or (p.get("quantity", 0) > 0)) else "⛔"
                     lines.append(f"• [{p['id']}] {p['name']} — {price_str} {avail}")
 
@@ -869,8 +880,12 @@ class PrintingAgent:
     # ── Anthropic (Claude) ────────────────────────────────────────────────────
     async def _chat_anthropic(self, message: str, session_id: str) -> str:
         cs.add_message(session_id, "user", message)
+        # get_groq_history returns [{role, content: str}] — valid for Anthropic too
+        # (Anthropic accepts plain string content; tool-call turns are ephemeral
+        #  per request and are NOT persisted to the conversation store)
         history = cs.get_groq_history(session_id)
 
+        tool_rounds = 0
         while True:
             response = await self.ai.messages.create(
                 model=self._anthropic_model,
@@ -880,7 +895,8 @@ class PrintingAgent:
                 messages=history,
             )
 
-            if response.stop_reason == "tool_use":
+            if response.stop_reason == "tool_use" and tool_rounds < 5:
+                tool_rounds += 1
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
@@ -890,11 +906,17 @@ class PrintingAgent:
                             "tool_use_id": block.id,
                             "content": result,
                         })
+                # Append assistant turn (with tool_use blocks) + tool results in
+                # Anthropic format so the model sees what it called and got back
                 history.append({"role": "assistant", "content": response.content})
                 history.append({"role": "user",      "content": tool_results})
                 continue
 
-            reply = "".join(b.text for b in response.content if hasattr(b, "text"))
+            # Extract text from the final response (may be empty on edge cases)
+            reply = "".join(b.text for b in response.content if hasattr(b, "text")).strip()
+            if not reply:
+                reply = "عذراً، لم أستطع معالجة طلبك. حاول مرة أخرى."
+
             cs.add_message(session_id, "assistant", reply)
             return reply
 
@@ -906,7 +928,13 @@ def _product_card(p: dict) -> dict:
     price_display = f"{p.get('price','')} {p.get('currency','SAR')}"
     if p.get("sale_price"):
         try:
-            if float(p["sale_price"]) < float(p.get("price") or 0):
+            raw_price = p.get("price") or 0
+            raw_sale  = p.get("sale_price") or 0
+            if isinstance(raw_price, dict):
+                raw_price = raw_price.get("amount", 0)
+            if isinstance(raw_sale, dict):
+                raw_sale = raw_sale.get("amount", 0)
+            if float(raw_sale) < float(raw_price):
                 price_display = f"{p['sale_price']} {p.get('currency','SAR')}"
         except (ValueError, TypeError):
             pass
