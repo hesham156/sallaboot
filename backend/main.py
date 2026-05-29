@@ -67,6 +67,10 @@ async def startup_event():
         if token:
             asyncio.create_task(_sync_task(store["store_id"], token))
 
+    # Start background proactive token refresh (checks every hour)
+    asyncio.create_task(_token_refresh_loop())
+    print("[startup] 🔄 Token auto-refresh loop started")
+
 
 async def _sync_task(store_id: str, token: str):
     try:
@@ -74,6 +78,56 @@ async def _sync_task(store_id: str, token: str):
         print(f"✅ Store sync completed for {store_id!r}")
     except Exception as e:
         print(f"⚠️ Store sync failed for {store_id!r}: {e}")
+
+
+# ── Proactive token refresh ────────────────────────────────────────────────────
+
+async def _check_expiring_tokens():
+    """
+    Proactively refresh any store token that expires within 2 days.
+    Called by _token_refresh_loop() every hour and can also be triggered manually.
+    """
+    from salla_oauth import refresh_access_token
+
+    now       = _dt.datetime.utcnow()
+    threshold = now + _dt.timedelta(days=2)
+    refreshed = 0
+
+    for store in sm.list_stores():
+        sid            = store["store_id"]
+        expires_at_str = sm.get_token_expires_at(sid)
+        if not expires_at_str:
+            continue  # no expiry data yet — rely on reactive 401 refresh
+        try:
+            expires_at = _dt.datetime.fromisoformat(expires_at_str)
+        except Exception:
+            continue
+        if expires_at <= threshold:
+            days_left = max(0, (expires_at - now).days)
+            print(f"[token_refresh] 🔄 Store {sid!r} expires in {days_left}d — proactive refresh …")
+            try:
+                await refresh_access_token(sid)
+                print(f"[token_refresh] ✅ Proactive refresh OK for {sid!r}")
+                refreshed += 1
+            except Exception as exc:
+                print(f"[token_refresh] ❌ Proactive refresh FAILED for {sid!r}: {exc}")
+
+    if refreshed:
+        print(f"[token_refresh] {refreshed} store(s) refreshed proactively")
+
+
+async def _token_refresh_loop():
+    """
+    Background task: check for expiring tokens every hour.
+    Waits 2 minutes after startup to let the app fully initialise first.
+    """
+    await asyncio.sleep(120)          # let startup settle
+    while True:
+        try:
+            await _check_expiring_tokens()
+        except Exception as exc:
+            print(f"[token_refresh] Unexpected loop error: {exc}")
+        await asyncio.sleep(3_600)    # re-check every hour
 
 
 app.add_middleware(
@@ -388,6 +442,39 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest):
         raise HTTPException(400, "كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل")
     sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
     return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
+
+
+# ── Settings: Token status & manual refresh ───────────────────────────────────
+
+@app.get("/admin/{store_id}/settings/token-status")
+async def token_status(store_id: str):
+    """Return OAuth token health for the admin settings page."""
+    from salla_oauth import get_token_status
+    info   = sm.get_store_info(store_id)
+    status = get_token_status(store_id)
+    return {
+        **status,
+        "store_name":   info.get("store_name",  ""),
+        "connected_at": info.get("connected_at", ""),
+        "has_refresh":  bool(sm.get_refresh_token(store_id)),
+    }
+
+
+@app.post("/admin/{store_id}/settings/token-refresh")
+async def manual_token_refresh(store_id: str):
+    """Manually trigger an OAuth token refresh for a store."""
+    from salla_oauth import refresh_access_token, get_token_status
+
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    if not sm.get_refresh_token(store_id):
+        raise HTTPException(400, "لا يوجد Refresh Token — يجب إعادة تثبيت التطبيق من سلة")
+    try:
+        await refresh_access_token(store_id)
+        status = get_token_status(store_id)
+        return {"status": "ok", "message": "تم تجديد الـ Token بنجاح ✅", **status}
+    except Exception as exc:
+        raise HTTPException(500, f"فشل تجديد الـ Token: {exc}")
 
 
 # ── Settings: Super admin reset password for a store ──────────────────────────
@@ -784,6 +871,7 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     access_token  = data.get("access_token", "")
     refresh_token = data.get("refresh_token", "")
     expires       = data.get("expires", 0)       # unix timestamp (2-week expiry)
+    expires_in    = data.get("expires_in", 0)    # seconds alternative
     store_info    = data.get("store", {})
 
     store_id = merchant_id or "default"
@@ -791,11 +879,23 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         print(f"[webhook] app.store.authorize for {store_id!r} — no token in payload")
         return
 
+    # Compute expires_at ISO string for proactive refresh scheduling
+    expires_at = ""
+    try:
+        if expires_in:
+            expires_at = (_dt.datetime.utcnow() + _dt.timedelta(seconds=int(expires_in))).isoformat()
+        elif expires:
+            expires_at = _dt.datetime.utcfromtimestamp(int(expires)).isoformat()
+    except Exception:
+        pass
+
+    merged_info = {**store_info, "expires_at": expires_at} if expires_at else store_info
+
     sm.register_store(
         store_id=store_id,
         access_token=access_token,
         refresh_token=refresh_token,
-        store_info=store_info,
+        store_info=merged_info,
     )
     asyncio.create_task(_sync_task(store_id, access_token))
     _log_event(store_id, "app.store.authorize", "ok",

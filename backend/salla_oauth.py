@@ -13,6 +13,7 @@ Key design decisions (per Salla docs + RFC 6819 §5.2.2.3):
 
 import os
 import asyncio
+import datetime
 import json
 import httpx
 from pathlib import Path
@@ -148,14 +149,24 @@ async def refresh_access_token(store_id: str = "default") -> str:
                 f"[salla_oauth] Token refresh response missing access_token for store {store_id!r}."
             )
 
+        # Compute expiry timestamp from expires_in (Salla default: 14 days = 1,209,600 s)
+        expires_in = int(data.get("expires_in", 1_209_600))
+        expires_at = (
+            datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in)
+        ).isoformat()
+
         # Persist to store_manager → data/stores/{store_id}/tokens.json
         # register_store preserves admin_password_hash, ai_config, store info, etc.
         sm.register_store(
             store_id=store_id,
             access_token=new_access,
             refresh_token=new_refresh,
+            store_info={"expires_at": expires_at},
         )
-        print(f"[salla_oauth] ✅ Token refreshed for store {store_id!r} ({new_access[:8]}…)")
+        print(
+            f"[salla_oauth] ✅ Token refreshed for store {store_id!r} "
+            f"({new_access[:8]}…) — expires {expires_at[:10]}"
+        )
 
         # Keep env vars in sync for the "default" store (backward compat)
         if store_id == "default":
@@ -163,6 +174,64 @@ async def refresh_access_token(store_id: str = "default") -> str:
             os.environ["SALLA_REFRESH_TOKEN"] = new_refresh
 
         return new_access
+
+
+# ── Token status helper ───────────────────────────────────────────────────────
+
+def get_token_status(store_id: str) -> dict:
+    """
+    Return a health summary dict for the store's OAuth token.
+    Used by the admin API endpoint and the proactive refresh loop.
+
+    status values:
+        "ok"       — more than 3 days remaining
+        "warning"  — 1–3 days remaining
+        "critical" — less than 1 day remaining
+        "expired"  — already past expiry
+        "unknown"  — no expires_at stored yet (will be populated after first refresh)
+    """
+    import store_manager as sm
+
+    expires_at_str = sm.get_token_expires_at(store_id)
+    if not expires_at_str:
+        return {
+            "status":         "unknown",
+            "days_remaining": None,
+            "expires_at":     "",
+            "message":        "تاريخ الانتهاء غير مسجّل — سيُحدَّث عند أول تجديد تلقائي",
+        }
+
+    try:
+        expires_at     = datetime.datetime.fromisoformat(expires_at_str)
+        delta          = expires_at - datetime.datetime.utcnow()
+        days_remaining = delta.days
+    except Exception:
+        return {
+            "status":         "unknown",
+            "days_remaining": None,
+            "expires_at":     expires_at_str,
+            "message":        "تعذّر تحليل تاريخ الانتهاء",
+        }
+
+    if days_remaining < 0:
+        status  = "expired"
+        message = "انتهت صلاحية الـ Token — يرجى إعادة تثبيت التطبيق"
+    elif days_remaining < 1:
+        status  = "critical"
+        message = "الـ Token ينتهي خلال أقل من يوم ⚠️"
+    elif days_remaining <= 3:
+        status  = "warning"
+        message = f"الـ Token ينتهي خلال {days_remaining} أيام — سيتجدد تلقائياً"
+    else:
+        status  = "ok"
+        message = f"الـ Token سليم — يتبقى {days_remaining} يوماً"
+
+    return {
+        "status":         status,
+        "days_remaining": days_remaining,
+        "expires_at":     expires_at_str,
+        "message":        message,
+    }
 
 
 # ── Backward-compat helper ────────────────────────────────────────────────────

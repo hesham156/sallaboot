@@ -167,6 +167,8 @@ def register_store(
         "store_avatar":       info.get("avatar") or existing.get("store_avatar") or "",
         "store_url":          info.get("url")    or existing.get("store_url")    or "",
         "connected_at":       existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
+        # Token expiry — set by OAuth flow; preserved across re-registrations
+        "expires_at":         info.get("expires_at") or existing.get("expires_at") or "",
         # Preserve existing password hash and AI config
         "admin_password_hash": existing.get("admin_password_hash", ""),
         "ai_config":           existing.get("ai_config", {}),
@@ -206,6 +208,11 @@ def get_access_token(store_id: str) -> str:
 
 def get_refresh_token(store_id: str) -> str:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("refresh_token", "")
+
+
+def get_token_expires_at(store_id: str) -> str:
+    """Return ISO timestamp when the access token expires (empty if not stored)."""
+    return _registry.get(str(store_id), {}).get("tokens", {}).get("expires_at", "")
 
 
 def get_store_info(store_id: str) -> dict:

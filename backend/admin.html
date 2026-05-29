@@ -1037,9 +1037,27 @@ select.form-control{cursor:pointer}
         <button class="btn btn-primary" onclick="saveAIConfig()">💾 حفظ إعدادات الذكاء الاصطناعي</button>
       </div>
 
+      <!-- Token Status -->
+      <div class="section" style="max-width:540px">
+        <div class="section-title">🔑 حالة ربط سلة (OAuth Token)</div>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">
+          الـ Token يتجدد تلقائياً قبل انتهائه بيومين. يمكنك أيضاً تجديده يدوياً في أي وقت.
+        </p>
+        <div id="token-status-card" style="margin-bottom:16px">
+          <div class="kv"><span class="kv-key">الحالة</span><span id="ts-badge">—</span></div>
+          <div class="kv"><span class="kv-key">تاريخ الانتهاء</span><span id="ts-expiry" style="color:#64748b;font-size:13px">—</span></div>
+          <div class="kv"><span class="kv-key">الأيام المتبقية</span><span id="ts-days" style="color:#64748b;font-size:13px">—</span></div>
+          <div id="ts-msg" style="font-size:13px;color:#64748b;margin-top:8px"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="loadTokenStatus()">🔍 تحقق الآن</button>
+          <button id="btn-token-refresh" class="btn btn-primary btn-sm" onclick="manualTokenRefresh()">🔄 تجديد الـ Token</button>
+        </div>
+      </div>
+
       <!-- Password Change -->
       <div class="section" style="max-width:480px">
-        <div class="section-title">🔑 تغيير كلمة المرور</div>
+        <div class="section-title">🔒 تغيير كلمة المرور</div>
         <div>
           <label class="form-label">كلمة المرور الحالية</label>
           <input type="password" id="cur-pass" class="form-control" style="margin-bottom:12px">
@@ -1852,8 +1870,64 @@ function relTime(iso) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings page
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Token status
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadTokenStatus() {
+  if (!STORE_ID) return;
+  try {
+    const d = await fetch(`${API}/settings/token-status`).then(r => r.json());
+
+    const icons   = { ok:'✅', warning:'⚠️', critical:'🚨', expired:'🔴', unknown:'❓' };
+    const colours = { ok:'#16a34a', warning:'#d97706', critical:'#dc2626', expired:'#dc2626', unknown:'#64748b' };
+    const status  = d.status || 'unknown';
+
+    document.getElementById('ts-badge').innerHTML =
+      `<span class="badge" style="background:${colours[status]}20;color:${colours[status]};padding:3px 10px;border-radius:6px;font-weight:700">
+        ${icons[status] || '❓'} ${status === 'ok' ? 'سليم' : status === 'warning' ? 'ينتهي قريباً' : status === 'critical' ? 'حرج' : status === 'expired' ? 'منتهي' : 'غير معروف'}
+       </span>`;
+
+    document.getElementById('ts-expiry').textContent =
+      d.expires_at ? new Date(d.expires_at).toLocaleString('ar-SA') : 'غير مسجّل بعد';
+
+    document.getElementById('ts-days').textContent =
+      d.days_remaining !== null ? `${d.days_remaining} يوم` : '—';
+
+    document.getElementById('ts-msg').textContent = d.message || '';
+
+    // Disable refresh button if no refresh token
+    const btn = document.getElementById('btn-token-refresh');
+    if (btn) btn.disabled = !d.has_refresh;
+
+  } catch(e) {
+    document.getElementById('ts-msg').textContent = 'تعذّر تحميل حالة الـ Token';
+  }
+}
+
+async function manualTokenRefresh() {
+  const btn = document.getElementById('btn-token-refresh');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التجديد…'; }
+  try {
+    const res  = await fetch(`${API}/settings/token-refresh`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast('✅ تم تجديد الـ Token بنجاح', 'success');
+      loadTokenStatus();
+    } else {
+      toast('❌ ' + (data.detail || 'فشل تجديد الـ Token'), 'error');
+    }
+  } catch(e) {
+    toast('❌ خطأ في الاتصال', 'error');
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '🔄 تجديد الـ Token'; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings page
+// ─────────────────────────────────────────────────────────────────────────────
 async function loadAISettings() {
   if (!STORE_ID) return;
+  loadTokenStatus();   // load token health alongside AI settings
   try {
     const cfg = await fetch(`${API}/settings/ai`).then(r => r.json());
     document.getElementById('ai-provider').value = cfg.provider === 'anthropic' ? 'anthropic' : 'groq';
