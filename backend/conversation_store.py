@@ -14,8 +14,9 @@ Bot can be toggled:
 
 import datetime
 
-# ── Global bot toggle ──────────────────────────────────────────────────────────
-_bot_globally_enabled: bool = True
+# ── Bot toggles ────────────────────────────────────────────────────────────────
+_bot_globally_enabled: bool = True          # legacy / single-store fallback
+_store_bot_enabled:    dict[str, bool] = {} # per-store override {store_id: bool}
 
 # ── Conversations dict: session_id → conv dict ─────────────────────────────────
 _conversations: dict[str, dict] = {}
@@ -169,10 +170,19 @@ def pop_pending_for_widget(session_id: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_bot_enabled(session_id: str) -> bool:
-    """Check if bot should respond for this session."""
-    if not _bot_globally_enabled:
+    """Check if bot should respond for this session.
+    Priority: per-session override → per-store toggle → global toggle.
+    """
+    conv = _conversations.get(session_id, {})
+    # per-session override (human takeover)
+    if not conv.get("bot_enabled", True):
         return False
-    return _conversations.get(session_id, {}).get("bot_enabled", True)
+    # per-store toggle
+    store_id = conv.get("store_id", "default")
+    if not _store_bot_enabled.get(store_id, True):
+        return False
+    # global toggle (legacy)
+    return _bot_globally_enabled
 
 
 def set_session_bot(session_id: str, enabled: bool):
@@ -186,6 +196,18 @@ def get_bot_globally() -> bool:
 def set_bot_globally(enabled: bool):
     global _bot_globally_enabled
     _bot_globally_enabled = enabled
+
+
+# ── Per-store bot toggle ───────────────────────────────────────────────────────
+
+def get_store_bot(store_id: str) -> bool:
+    """Return per-store bot enabled state (defaults to True)."""
+    return _store_bot_enabled.get(store_id, True)
+
+
+def set_store_bot(store_id: str, enabled: bool):
+    """Enable/disable bot for a specific store only."""
+    _store_bot_enabled[store_id] = enabled
 
 
 # ─────────────────────────────────────────────────────────────────────────────

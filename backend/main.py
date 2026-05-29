@@ -218,13 +218,13 @@ async def store_debug(store_id: str):
 # ── Per-store bot toggle ───────────────────────────────────────────────────────
 @app.get("/admin/{store_id}/bot/status")
 async def store_bot_status(store_id: str):
-    return {"bot_globally_enabled": cs.get_bot_globally()}
+    return {"bot_globally_enabled": cs.get_store_bot(store_id)}
 
 
 @app.post("/admin/{store_id}/bot/toggle")
 async def store_bot_toggle(store_id: str, req: BotToggleRequest):
-    cs.set_bot_globally(req.enabled)
-    return {"bot_globally_enabled": cs.get_bot_globally()}
+    cs.set_store_bot(store_id, req.enabled)
+    return {"bot_globally_enabled": cs.get_store_bot(store_id)}
 
 
 # ── Per-store conversations ────────────────────────────────────────────────────
@@ -285,12 +285,13 @@ async def admin_debug_compat():
 
 @app.get("/admin/bot/status")
 async def admin_bot_status_compat():
-    return await store_bot_status("default")
+    return {"bot_globally_enabled": cs.get_bot_globally()}
 
 
 @app.post("/admin/bot/toggle")
 async def admin_bot_toggle_compat(req: BotToggleRequest):
-    return await store_bot_toggle("default", req)
+    cs.set_bot_globally(req.enabled)
+    return {"bot_globally_enabled": cs.get_bot_globally()}
 
 
 @app.get("/admin/conversations")
