@@ -2,14 +2,16 @@
   "use strict";
 
   // ── Configuration ────────────────────────────────────────────────────────────
-  var CONFIG = {
-    apiUrl: "https://YOUR-BACKEND-URL.railway.app", // ← غيّر هذا
+  var _defaults = {
+    apiUrl: "https://sallaboot-t.up.railway.app",
     primaryColor: "#1a56db",
     storeName: "متجر الطباعة",
     welcomeMessage: "مرحباً! 👋 أنا مساعد متجرنا للطباعة. كيف أقدر أساعدك اليوم؟",
     placeholder: "اكتب سؤالك هنا...",
     maxFileSizeMB: 20,
   };
+  // Allow overriding via window.SallaChatConfig
+  var CONFIG = Object.assign({}, _defaults, window.SallaChatConfig || {});
 
   // ── State ─────────────────────────────────────────────────────────────────────
   var sessionId = null;
