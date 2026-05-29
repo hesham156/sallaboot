@@ -5,6 +5,7 @@ from groq import AsyncGroq
 from salla_client import SallaClient
 from store_sync import build_knowledge_summary, get_store_data
 import conversation_store as cs
+import store_manager as sm
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
@@ -224,8 +225,17 @@ class PrintingAgent:
     def __init__(self, store_id: str = "default", access_token: str = ""):
         self.store_id = store_id
 
-        groq_key      = os.getenv("GROQ_API_KEY", "")
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+        # Per-store AI config takes priority over env vars
+        ai_cfg        = sm.get_ai_config(store_id) if store_id else {}
+        groq_key      = ai_cfg.get("groq_api_key",      "").strip() or os.getenv("GROQ_API_KEY",      "")
+        anthropic_key = ai_cfg.get("anthropic_api_key", "").strip() or os.getenv("ANTHROPIC_API_KEY", "")
+        self._bot_name = ai_cfg.get("bot_name", "").strip()
+
+        # Per-store model override
+        self._groq_model      = (ai_cfg.get("ai_model", "").strip()
+                                  if ai_cfg.get("groq_api_key") else "") or "llama-3.3-70b-versatile"
+        self._anthropic_model = (ai_cfg.get("ai_model", "").strip()
+                                  if ai_cfg.get("anthropic_api_key") else "") or "claude-sonnet-4-6"
 
         if groq_key:
             self.provider     = "groq"
@@ -236,7 +246,7 @@ class PrintingAgent:
             self.ai          = anthropic.Anthropic(api_key=anthropic_key)
             self.groq_client = None
         else:
-            raise RuntimeError("يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY.")
+            raise RuntimeError("يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY في إعدادات المتجر أو متغيرات البيئة.")
 
         token      = access_token or os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token) if token else None
@@ -614,7 +624,7 @@ class PrintingAgent:
         tool_rounds = 0
         while True:
             response = await self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=self._groq_model,
                 messages=messages,
                 tools=groq_tools,
                 tool_choice="auto",
@@ -661,7 +671,7 @@ class PrintingAgent:
 
         while True:
             response = self.ai.messages.create(
-                model="claude-sonnet-4-6",
+                model=self._anthropic_model,
                 max_tokens=1024,
                 system=get_system_prompt(self.store_id),
                 tools=TOOLS,

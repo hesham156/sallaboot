@@ -9,14 +9,16 @@ load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 import hmac
 import hashlib
 
+import re as _re
 import store_manager as sm
+import auth as _auth
 from store_sync import sync_store
 from salla_oauth import get_auth_url, exchange_code, save_tokens
 import conversation_store as cs
@@ -65,6 +67,39 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 _ADMIN_HTML = Path(__file__).parent / "admin.html"
 
 
+# ── Auth middleware ────────────────────────────────────────────────────────────
+# Protects all per-store admin API routes (not the HTML pages or auth endpoints).
+_PROTECTED_RE = _re.compile(
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings)"
+)
+_SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
+
+
+@app.middleware("http")
+async def admin_auth_middleware(request: Request, call_next):
+    path = request.url.path
+
+    # Per-store API routes
+    m = _PROTECTED_RE.match(path)
+    if m:
+        store_id = m.group(1)
+        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        claims = _auth.verify_token(token)
+        if not claims:
+            return JSONResponse({"detail": "يرجى تسجيل الدخول"}, status_code=401)
+        if not claims.get("su") and claims.get("s") != store_id:
+            return JSONResponse({"detail": "غير مصرح لك بالوصول"}, status_code=403)
+
+    # Super admin: protect store list
+    elif _SUPER_PROTECTED_RE.match(path):
+        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        claims = _auth.verify_token(token)
+        if not claims or not claims.get("su"):
+            return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
+
+    return await call_next(request)
+
+
 # ── Models ─────────────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     message: str
@@ -86,6 +121,22 @@ class AdminReplyRequest(BaseModel):
 
 class BotToggleRequest(BaseModel):
     enabled: bool
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+class AIConfigRequest(BaseModel):
+    groq_api_key:      Optional[str] = ""
+    anthropic_api_key: Optional[str] = ""
+    ai_model:          Optional[str] = ""  # e.g. "llama-3.3-70b-versatile" or "claude-sonnet-4-6"
+    bot_name:          Optional[str] = ""
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password:     str
 
 
 # ── Utility endpoints ──────────────────────────────────────────────────────────
@@ -138,6 +189,93 @@ async def admin_list_stores():
 async def admin_store_page(store_id: str):
     """Per-store admin dashboard. Same HTML; JS reads the store_id from the URL."""
     return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
+
+
+# ── Auth: Super admin login ────────────────────────────────────────────────────
+@app.post("/admin/auth/login")
+async def super_login(req: LoginRequest):
+    super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
+    if not req.password or req.password != super_pass:
+        raise HTTPException(401, "كلمة المرور غير صحيحة")
+    token = _auth.create_token("super", is_super=True)
+    return {"token": token, "store_id": "super", "is_super": True}
+
+
+# ── Auth: Per-store login ──────────────────────────────────────────────────────
+@app.post("/admin/{store_id}/auth/login")
+async def store_login(store_id: str, req: LoginRequest):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    stored_hash = sm.get_admin_password_hash(store_id)
+    if not stored_hash or not _auth.check_password(req.password, stored_hash):
+        raise HTTPException(401, "كلمة المرور غير صحيحة")
+    token = _auth.create_token(store_id)
+    info  = sm.get_store_info(store_id)
+    return {
+        "token":      token,
+        "store_id":   store_id,
+        "store_name": info.get("store_name", f"متجر {store_id}"),
+    }
+
+
+# ── Settings: AI config ────────────────────────────────────────────────────────
+@app.get("/admin/{store_id}/settings/ai")
+async def get_ai_settings(store_id: str):
+    cfg = sm.get_ai_config(store_id)
+    # Mask the keys — return only whether they exist, not the actual value
+    return {
+        "groq_api_key":      "••••" if cfg.get("groq_api_key")      else "",
+        "anthropic_api_key": "••••" if cfg.get("anthropic_api_key") else "",
+        "ai_model":          cfg.get("ai_model",  ""),
+        "bot_name":          cfg.get("bot_name",  ""),
+        "provider":          "groq" if cfg.get("groq_api_key") else
+                             ("anthropic" if cfg.get("anthropic_api_key") else "env"),
+    }
+
+
+@app.put("/admin/{store_id}/settings/ai")
+async def update_ai_settings(store_id: str, req: AIConfigRequest):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    existing = sm.get_ai_config(store_id)
+    config = {
+        # Only update a key if a non-empty value was sent; keep existing otherwise
+        "groq_api_key":      req.groq_api_key.strip()      or existing.get("groq_api_key",      ""),
+        "anthropic_api_key": req.anthropic_api_key.strip() or existing.get("anthropic_api_key", ""),
+        "ai_model":          req.ai_model.strip()          or existing.get("ai_model",          ""),
+        "bot_name":          req.bot_name.strip()          or existing.get("bot_name",          ""),
+    }
+    sm.set_ai_config(store_id, config)
+    return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي"}
+
+
+# ── Settings: Change password ──────────────────────────────────────────────────
+@app.put("/admin/{store_id}/settings/password")
+async def change_store_password(store_id: str, req: PasswordChangeRequest):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    stored_hash = sm.get_admin_password_hash(store_id)
+    if not _auth.check_password(req.current_password, stored_hash):
+        raise HTTPException(401, "كلمة المرور الحالية غير صحيحة")
+    if len(req.new_password) < 6:
+        raise HTTPException(400, "كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل")
+    sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
+    return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
+
+
+# ── Settings: Super admin reset password for a store ──────────────────────────
+@app.put("/admin/stores/{store_id}/reset-password")
+async def super_reset_password(store_id: str, request: Request):
+    # Must be super admin
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(403, "مصرح للمدير العام فقط")
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    # Reset to store_id as default
+    sm.set_admin_password(store_id, _auth.hash_password(str(store_id)))
+    return {"status": "ok", "message": f"تمت إعادة تعيين كلمة المرور إلى: {store_id}"}
 
 
 # ── Per-store sync ─────────────────────────────────────────────────────────────

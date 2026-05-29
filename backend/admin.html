@@ -255,6 +255,44 @@ tr:hover td{background:#fafbfc}
   .conv-thread{border-radius:12px;border:1px solid #e2e8f0}
 }
 @media(max-width:540px){.cards{grid-template-columns:1fr}}
+
+/* ── Settings form ── */
+.form-label{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}
+.form-control{
+  width:100%;padding:9px 13px;border:1.5px solid #e2e8f0;border-radius:8px;
+  font-family:'Tajawal',sans-serif;font-size:14px;color:#1e293b;outline:none;
+  transition:border-color .15s;background:#fff;
+}
+.form-control:focus{border-color:#3b82f6}
+select.form-control{cursor:pointer}
+
+/* ── Login overlay ── */
+#login-overlay{
+  position:fixed;inset:0;background:rgba(15,23,42,.75);backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;z-index:9999;
+}
+.login-card{
+  background:#fff;border-radius:20px;padding:40px 36px;width:380px;max-width:92vw;
+  box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:center;direction:rtl;
+}
+.login-avatar{font-size:48px;margin-bottom:14px}
+.login-title{font-size:22px;font-weight:800;color:#0f172a;margin-bottom:6px}
+.login-sub{font-size:14px;color:#64748b;margin-bottom:24px}
+.login-error{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;
+  border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px;text-align:right}
+.login-input{
+  width:100%;padding:12px 16px;border:1.5px solid #e2e8f0;border-radius:10px;
+  font-family:'Tajawal',sans-serif;font-size:15px;color:#1e293b;outline:none;
+  margin-bottom:14px;text-align:right;transition:border-color .15s;
+}
+.login-input:focus{border-color:#3b82f6}
+.login-btn{
+  width:100%;padding:13px;background:#3b82f6;color:#fff;border:none;border-radius:10px;
+  font-family:'Tajawal',sans-serif;font-size:16px;font-weight:700;cursor:pointer;
+  transition:background .15s;
+}
+.login-btn:hover{background:#2563eb}
+.login-btn:disabled{background:#94a3b8;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -298,6 +336,13 @@ tr:hover td{background:#fafbfc}
     </div>
     <div class="nav-item" data-page="debug" onclick="showPage('debug',this)">
       <span class="nav-icon">🔧</span> التشخيص
+    </div>
+    <div class="nav-section">الحساب</div>
+    <div class="nav-item" data-page="settings" onclick="showPage('settings',this)">
+      <span class="nav-icon">⚙️</span> الإعدادات
+    </div>
+    <div class="nav-item" onclick="doLogout()" style="color:#f87171">
+      <span class="nav-icon">🚪</span> تسجيل الخروج
     </div>
   </nav>
 
@@ -524,10 +569,99 @@ tr:hover td{background:#fafbfc}
       </div>
     </div>
 
+    <!-- ── SETTINGS ── -->
+    <div class="page" id="page-settings">
+      <div class="page-header">
+        <div>
+          <div class="page-title">⚙️ الإعدادات</div>
+          <div class="page-sub">إعدادات الذكاء الاصطناعي وأمان الحساب</div>
+        </div>
+      </div>
+
+      <!-- AI Config -->
+      <div class="section">
+        <div class="section-title">🤖 إعدادات الذكاء الاصطناعي</div>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">
+          أدخل مفتاح API الخاص بمتجرك. إذا تُرك فارغاً، سيُستخدم المفتاح العام للنظام.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div>
+            <label class="form-label">مزود الخدمة (Provider)</label>
+            <select id="ai-provider" class="form-control" onchange="toggleAIFields()">
+              <option value="groq">Groq — Llama 3.3 70B (مجاني)</option>
+              <option value="anthropic">Anthropic — Claude Sonnet</option>
+            </select>
+          </div>
+          <div id="ai-model-wrap">
+            <label class="form-label">الموديل (اتركه فارغاً للافتراضي)</label>
+            <input type="text" id="ai-model" class="form-control" placeholder="مثال: llama-3.3-70b-versatile">
+          </div>
+        </div>
+        <div id="groq-key-wrap">
+          <label class="form-label">Groq API Key</label>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <input type="password" id="groq-api-key" class="form-control" placeholder="gsk_...">
+            <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility('groq-api-key',this)" style="flex-shrink:0">👁</button>
+          </div>
+        </div>
+        <div id="anthropic-key-wrap" style="display:none">
+          <label class="form-label">Anthropic API Key</label>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <input type="password" id="anthropic-api-key" class="form-control" placeholder="sk-ant-...">
+            <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility('anthropic-api-key',this)" style="flex-shrink:0">👁</button>
+          </div>
+        </div>
+        <div>
+          <label class="form-label">اسم المساعد (Bot Name)</label>
+          <input type="text" id="bot-name" class="form-control" placeholder="مثال: مساعد متجر الطباعة" style="margin-bottom:16px">
+        </div>
+        <div id="ai-status" style="margin-bottom:12px;font-size:13px"></div>
+        <button class="btn btn-primary" onclick="saveAIConfig()">💾 حفظ إعدادات الذكاء الاصطناعي</button>
+      </div>
+
+      <!-- Password Change -->
+      <div class="section" style="max-width:480px">
+        <div class="section-title">🔑 تغيير كلمة المرور</div>
+        <div>
+          <label class="form-label">كلمة المرور الحالية</label>
+          <input type="password" id="cur-pass" class="form-control" style="margin-bottom:12px">
+        </div>
+        <div>
+          <label class="form-label">كلمة المرور الجديدة (6 أحرف على الأقل)</label>
+          <input type="password" id="new-pass" class="form-control" style="margin-bottom:12px">
+        </div>
+        <div>
+          <label class="form-label">تأكيد كلمة المرور الجديدة</label>
+          <input type="password" id="conf-pass" class="form-control" style="margin-bottom:16px">
+        </div>
+        <div id="pass-status" style="margin-bottom:12px;font-size:13px"></div>
+        <button class="btn btn-primary" onclick="changePassword()">🔒 تغيير كلمة المرور</button>
+      </div>
+    </div>
+
   </div><!-- /store-view -->
 
 </div><!-- /main -->
 </div><!-- /layout -->
+
+<!-- ── LOGIN OVERLAY ── -->
+<div id="login-overlay" style="display:none">
+  <div class="login-card">
+    <div class="login-avatar">🖨️</div>
+    <h2 class="login-title" id="login-title">تسجيل الدخول</h2>
+    <p class="login-sub" id="login-sub">أدخل كلمة مرور لوحة التحكم</p>
+    <div id="login-error" class="login-error" style="display:none"></div>
+    <input type="password" id="login-password" class="login-input"
+      placeholder="كلمة المرور"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">
+      <span id="login-btn-text">دخول</span>
+    </button>
+    <p style="margin-top:16px;font-size:12px;color:#94a3b8">
+      كلمة المرور الافتراضية = رقم المتجر
+    </p>
+  </div>
+</div>
 
 <div id="toasts"></div>
 
@@ -544,9 +678,93 @@ const STORE_ID = (PARTS.length > 1) ? PARTS[1] : null;
 const API      = STORE_ID ? `/admin/${STORE_ID}` : '/admin';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Authentication
+// ─────────────────────────────────────────────────────────────────────────────
+const TOKEN_KEY = STORE_ID ? `admin_token_${STORE_ID}` : 'admin_token_super';
+
+function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function saveToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+
+function showLogin(msg) {
+  const overlay = document.getElementById('login-overlay');
+  const errEl   = document.getElementById('login-error');
+  const titleEl = document.getElementById('login-title');
+  const subEl   = document.getElementById('login-sub');
+
+  titleEl.textContent = STORE_ID ? `متجر ${STORE_ID}` : 'المدير العام';
+  subEl.textContent   = STORE_ID
+    ? 'أدخل كلمة مرور لوحة تحكم المتجر'
+    : 'أدخل كلمة مرور المدير العام (SUPER_ADMIN_PASSWORD)';
+
+  if (msg) { errEl.textContent = msg; errEl.style.display = 'block'; }
+  else      { errEl.style.display = 'none'; }
+
+  overlay.style.display = 'flex';
+  setTimeout(() => document.getElementById('login-password').focus(), 100);
+}
+
+function hideLogin() {
+  document.getElementById('login-overlay').style.display = 'none';
+  document.getElementById('login-password').value = '';
+}
+
+async function doLogin() {
+  const password = document.getElementById('login-password').value.trim();
+  if (!password) { showLogin('أدخل كلمة المرور'); return; }
+
+  const btn = document.querySelector('.login-btn');
+  btn.disabled = true;
+  document.getElementById('login-btn-text').textContent = 'جارٍ التحقق…';
+
+  try {
+    const url = STORE_ID ? `/admin/${STORE_ID}/auth/login` : '/admin/auth/login';
+    const res  = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showLogin(data.detail || 'كلمة المرور غير صحيحة');
+    } else {
+      saveToken(data.token);
+      hideLogin();
+      startApp();    // re-init the dashboard
+    }
+  } catch(e) {
+    showLogin('تعذّر الاتصال بالسيرفر');
+  }
+
+  btn.disabled = false;
+  document.getElementById('login-btn-text').textContent = 'دخول';
+}
+
+function doLogout() {
+  clearToken();
+  showLogin();
+}
+
+// ── Intercept all fetch calls to add auth header + handle 401 ────────────────
+const _realFetch = window.fetch.bind(window);
+window.fetch = function(url, opts = {}) {
+  const token = getToken();
+  if (token && String(url).includes('/admin')) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), 'Authorization': `Bearer ${token}` } };
+  }
+  return _realFetch(url, opts).then(res => {
+    if (res.status === 401 && String(url).includes('/admin') && !String(url).includes('/auth/login')) {
+      showLogin('انتهت صلاحية الجلسة. أعد تسجيل الدخول.');
+      throw new Error('Unauthorized');
+    }
+    return res;
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Init: show the right view
 // ─────────────────────────────────────────────────────────────────────────────
-(function init() {
+function startApp() {
   if (STORE_ID) {
     document.getElementById('store-view').style.display = 'block';
     document.getElementById('nav-store').style.display  = 'block';
@@ -570,6 +788,18 @@ const API      = STORE_ID ? `/admin/${STORE_ID}` : '/admin';
     loadStores();
     setInterval(loadStores, 15000);
   }
+}
+
+// ── Check token, show login or start app ─────────────────────────────────────
+(function checkAuth() {
+  const token = getToken();
+  if (!token) {
+    showLogin();
+  } else {
+    // Hide overlay and start (token will be validated by the first real API call)
+    document.getElementById('login-overlay').style.display = 'none';
+    startApp();
+  }
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -584,6 +814,7 @@ function showPage(name, el) {
   if (name === 'debug')         loadDebug();
   if (name === 'sync')          loadSyncInfo();
   if (name === 'conversations') loadConversations();
+  if (name === 'settings')      loadAISettings();
 }
 function showSuperPage(name, el) {
   document.querySelectorAll('.super-page').forEach(p => p.classList.remove('active'));
@@ -1111,6 +1342,93 @@ function relTime(iso) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}س`;
   return `${Math.floor(h/24)}ي`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings page
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadAISettings() {
+  if (!STORE_ID) return;
+  try {
+    const cfg = await fetch(`${API}/settings/ai`).then(r => r.json());
+    document.getElementById('ai-provider').value = cfg.provider === 'anthropic' ? 'anthropic' : 'groq';
+    document.getElementById('ai-model').value    = cfg.ai_model  || '';
+    document.getElementById('bot-name').value    = cfg.bot_name  || '';
+    // Keys are masked server-side — just indicate if configured
+    document.getElementById('groq-api-key').placeholder      = cfg.provider === 'groq'      ? '••••••• (محفوظ)' : 'gsk_...';
+    document.getElementById('anthropic-api-key').placeholder = cfg.provider === 'anthropic' ? '••••••• (محفوظ)' : 'sk-ant-...';
+    document.getElementById('ai-status').innerHTML =
+      cfg.provider === 'env'
+        ? '<span style="color:#f59e0b">⚠️ يُستخدم مفتاح النظام العام</span>'
+        : `<span style="color:#16a34a">✅ يُستخدم مفتاح المتجر الخاص (${cfg.provider})</span>`;
+    toggleAIFields();
+  } catch(e) {
+    console.error('loadAISettings', e);
+  }
+}
+
+function toggleAIFields() {
+  const provider = document.getElementById('ai-provider').value;
+  document.getElementById('groq-key-wrap').style.display      = provider === 'groq'      ? '' : 'none';
+  document.getElementById('anthropic-key-wrap').style.display = provider === 'anthropic' ? '' : 'none';
+}
+
+function toggleKeyVisibility(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (inp.type === 'password') { inp.type = 'text';     btn.textContent = '🙈'; }
+  else                         { inp.type = 'password'; btn.textContent = '👁'; }
+}
+
+async function saveAIConfig() {
+  const provider     = document.getElementById('ai-provider').value;
+  const groqKey      = document.getElementById('groq-api-key').value.trim();
+  const anthropicKey = document.getElementById('anthropic-api-key').value.trim();
+  const model        = document.getElementById('ai-model').value.trim();
+  const botName      = document.getElementById('bot-name').value.trim();
+
+  const body = {
+    groq_api_key:      provider === 'groq'      ? groqKey      : '',
+    anthropic_api_key: provider === 'anthropic' ? anthropicKey : '',
+    ai_model:  model,
+    bot_name:  botName,
+  };
+
+  try {
+    const res  = await fetch(`${API}/settings/ai`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const data = await res.json();
+    if (res.ok) { toast(data.message || 'تم الحفظ', 'success'); loadAISettings(); }
+    else        { toast(data.detail || 'حدث خطأ',  'error'); }
+  } catch(e) { toast('تعذّر الحفظ', 'error'); }
+}
+
+async function changePassword() {
+  const cur  = document.getElementById('cur-pass').value;
+  const nw   = document.getElementById('new-pass').value;
+  const conf = document.getElementById('conf-pass').value;
+  const st   = document.getElementById('pass-status');
+
+  if (!cur || !nw) { st.innerHTML = '<span style="color:#ef4444">أدخل كلمة المرور الحالية والجديدة</span>'; return; }
+  if (nw !== conf)  { st.innerHTML = '<span style="color:#ef4444">كلمتا المرور الجديدتان غير متطابقتين</span>'; return; }
+  if (nw.length < 6){ st.innerHTML = '<span style="color:#ef4444">كلمة المرور يجب أن تكون 6 أحرف على الأقل</span>'; return; }
+
+  try {
+    const res  = await fetch(`${API}/settings/password`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({current_password:cur, new_password:nw}),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      st.innerHTML = '<span style="color:#16a34a">✅ ' + (data.message || 'تم تغيير كلمة المرور') + '</span>';
+      document.getElementById('cur-pass').value  = '';
+      document.getElementById('new-pass').value  = '';
+      document.getElementById('conf-pass').value = '';
+      // Update stored token since password changed
+      clearToken();
+      setTimeout(() => showLogin('كلمة المرور تغيّرت. أعد تسجيل الدخول.'), 1500);
+    } else {
+      st.innerHTML = '<span style="color:#ef4444">❌ ' + (data.detail || 'خطأ') + '</span>';
+    }
+  } catch(e) { st.innerHTML = '<span style="color:#ef4444">تعذّر الاتصال</span>'; }
 }
 </script>
 </body>

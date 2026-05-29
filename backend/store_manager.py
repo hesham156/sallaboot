@@ -121,14 +121,23 @@ def register_store(
     existing = _registry.get(store_id, {}).get("tokens", {})
 
     tokens = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "store_name": info.get("name") or existing.get("store_name") or f"متجر {store_id}",
-        "store_domain": info.get("domain") or existing.get("store_domain") or "",
-        "store_avatar": info.get("avatar") or existing.get("store_avatar") or "",
-        "store_url": info.get("url") or existing.get("store_url") or "",
-        "connected_at": existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
+        "access_token":        access_token,
+        "refresh_token":       refresh_token,
+        "store_name":          info.get("name")   or existing.get("store_name")   or f"متجر {store_id}",
+        "store_domain":        info.get("domain") or existing.get("store_domain") or "",
+        "store_avatar":        info.get("avatar") or existing.get("store_avatar") or "",
+        "store_url":           info.get("url")    or existing.get("store_url")    or "",
+        "connected_at":        existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
+        # Preserve existing password hash and AI config
+        "admin_password_hash": existing.get("admin_password_hash", ""),
+        "ai_config":           existing.get("ai_config", {}),
     }
+
+    # Auto-set initial password = store_id on first registration
+    if not tokens["admin_password_hash"]:
+        from auth import hash_password
+        tokens["admin_password_hash"] = hash_password(str(store_id))
+        print(f"[store_manager] Initial password for {store_id!r} set to store_id")
 
     if store_id in _registry:
         _registry[store_id]["tokens"] = tokens
@@ -211,15 +220,65 @@ def list_stores() -> list:
     result = []
     for sid, state in _registry.items():
         tokens = state.get("tokens", {})
-        cache = state.get("cache", {})
+        cache  = state.get("cache", {})
         result.append({
-            "store_id": sid,
-            "store_name": tokens.get("store_name", f"متجر {sid}"),
-            "store_domain": tokens.get("store_domain", ""),
-            "store_avatar": tokens.get("store_avatar", ""),
-            "connected_at": tokens.get("connected_at", ""),
-            "products_count": cache.get("products_count", 0),
-            "last_sync": cache.get("last_sync", "never"),
-            "last_sync_errors": cache.get("last_sync_errors", []),
+            "store_id":          sid,
+            "store_name":        tokens.get("store_name",   f"متجر {sid}"),
+            "store_domain":      tokens.get("store_domain", ""),
+            "store_avatar":      tokens.get("store_avatar", ""),
+            "connected_at":      tokens.get("connected_at", ""),
+            "products_count":    cache.get("products_count", 0),
+            "last_sync":         cache.get("last_sync", "never"),
+            "last_sync_errors":  cache.get("last_sync_errors", []),
+            "has_ai_config":     bool(tokens.get("ai_config", {}).get("groq_api_key") or
+                                      tokens.get("ai_config", {}).get("anthropic_api_key")),
         })
     return sorted(result, key=lambda x: x.get("connected_at", ""), reverse=True)
+
+
+# ── AI configuration ───────────────────────────────────────────────────────────
+
+def get_ai_config(store_id: str) -> dict:
+    """Return per-store AI settings (groq_api_key, anthropic_api_key, model, bot_name)."""
+    return _registry.get(str(store_id), {}).get("tokens", {}).get("ai_config", {})
+
+
+def set_ai_config(store_id: str, config: dict):
+    """Save AI settings for a store and reset its agent."""
+    store_id = str(store_id)
+    if store_id not in _registry:
+        return
+    tokens = _registry[store_id]["tokens"]
+    tokens["ai_config"] = config
+    _registry[store_id]["agent"] = None          # force re-init with new keys
+    try:
+        _store_dir(store_id)
+        _tokens_path(store_id).write_text(
+            json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"[store_manager] AI config updated for {store_id!r}")
+    except Exception as e:
+        print(f"[store_manager] Warning: could not save ai_config for {store_id!r}: {e}")
+
+
+# ── Admin password ─────────────────────────────────────────────────────────────
+
+def get_admin_password_hash(store_id: str) -> str:
+    return _registry.get(str(store_id), {}).get("tokens", {}).get("admin_password_hash", "")
+
+
+def set_admin_password(store_id: str, password_hash: str):
+    """Save a new (already-hashed) admin password for a store."""
+    store_id = str(store_id)
+    if store_id not in _registry:
+        return
+    tokens = _registry[store_id]["tokens"]
+    tokens["admin_password_hash"] = password_hash
+    try:
+        _store_dir(store_id)
+        _tokens_path(store_id).write_text(
+            json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"[store_manager] Password updated for {store_id!r}")
+    except Exception as e:
+        print(f"[store_manager] Warning: could not save password for {store_id!r}: {e}")
