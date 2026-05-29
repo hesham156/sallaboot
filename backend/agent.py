@@ -162,16 +162,23 @@ TOOLS = [
     # ── Support ────────────────────────────────────────────────────────────
     {
         "name": "track_order",
-        "description": "تتبع حالة طلب موجود برقم الطلب.",
+        "description": (
+            "تتبع حالة طلب موجود وعرض تفاصيله الكاملة: الحالة، المنتجات، الشحن، ورابط التتبع. "
+            "يقبل رقم الطلب/المرجع أو رقم جوال العميل. "
+            "استخدمها عندما يسأل العميل: وين طلبي؟ / ما حالة طلبي؟ / طلبي وصل؟"
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "order_reference": {
                     "type": "string",
-                    "description": "رقم الطلب أو رقم المرجع",
+                    "description": "رقم الطلب أو رقم المرجع (مثال: ORD-12345 أو 12345)",
+                },
+                "customer_phone": {
+                    "type": "string",
+                    "description": "رقم جوال العميل للبحث عن طلباته (بديل عن رقم الطلب)",
                 },
             },
-            "required": ["order_reference"],
         },
     },
     {
@@ -563,25 +570,142 @@ class PrintingAgent:
             elif name == "track_order":
                 if not self.salla:
                     return "⚠️ لم يتم ربط المتجر بعد."
-                ref = inputs["order_reference"].strip()
-                try:
-                    data  = await self.salla.get_order(ref)
-                    order = data.get("data", {})
-                except Exception:
-                    data   = await self.salla.search_orders_by_reference(ref)
-                    orders = data.get("data", [])
-                    order  = orders[0] if orders else {}
+
+                ref   = (inputs.get("order_reference") or "").strip()
+                phone = (inputs.get("customer_phone")  or "").strip()
+
+                if not ref and not phone:
+                    return "⚠️ يرجى تزويدي برقم الطلب أو رقم الجوال للبحث."
+
+                order = {}
+
+                # 1. Try direct order-ID lookup
+                if ref:
+                    try:
+                        data  = await self.salla.get_order(ref)
+                        order = data.get("data", {})
+                    except Exception:
+                        pass
+
+                # 2. Search by reference string
+                if not order and ref:
+                    try:
+                        data   = await self.salla.get_orders(reference_id=ref, per_page=5)
+                        orders = data.get("data", [])
+                        order  = orders[0] if orders else {}
+                    except Exception:
+                        pass
+
+                # 3. Search by keyword (catches phone, name, reference)
                 if not order:
-                    return f"لم يُوجد طلب برقم {ref}."
-                status   = ORDER_STATUS_AR.get(order.get("status", ""), order.get("status", ""))
+                    keyword = phone or ref
+                    try:
+                        data   = await self.salla.get_orders(keyword=keyword, per_page=5)
+                        orders = data.get("data", [])
+                        order  = orders[0] if orders else {}
+                    except Exception:
+                        pass
+
+                if not order:
+                    hint = f"رقم الطلب: {ref}" if ref else f"الجوال: {phone}"
+                    return (
+                        f"لم أجد طلباً بـ {hint}. 😔\n"
+                        "تأكد من الرقم وحاول مرة أخرى، أو تواصل مع فريق الدعم."
+                    )
+
+                # ── Format the order nicely ────────────────────────────────
+                order_id  = str(order.get("id", ""))
+                order_ref = order.get("reference_id", order_id)
+                raw_status = order.get("status", {})
+                if isinstance(raw_status, dict):
+                    status_slug = raw_status.get("slug", "")
+                    status_name = raw_status.get("name", "")
+                else:
+                    status_slug = str(raw_status)
+                    status_name = ORDER_STATUS_AR.get(status_slug, status_slug)
+
+                status_ar = ORDER_STATUS_AR.get(status_slug, status_name or status_slug)
+
+                # Status emoji
+                status_emoji = {
+                    "pending":      "⏳",
+                    "under_review": "🔍",
+                    "processing":   "⚙️",
+                    "in_shipping":  "🚚",
+                    "completed":    "✅",
+                    "cancelled":    "❌",
+                    "refunded":     "↩️",
+                    "on_hold":      "⏸️",
+                }.get(status_slug, "📦")
+
+                # Amounts
                 amounts  = order.get("amounts", {})
-                total    = (amounts.get("total") or {}).get("amount", "—")
-                currency = (amounts.get("total") or {}).get("currency", "ريال")
-                date     = (order.get("date") or {}).get("date", "—")
-                return (
-                    f"طلب رقم: {ref}\nالحالة: {status}\n"
-                    f"الإجمالي: {total} {currency}\nالتاريخ: {date}"
-                )
+                total_d  = amounts.get("total") or {}
+                total    = total_d.get("amount", "—") if isinstance(total_d, dict) else str(total_d or "—")
+                currency = total_d.get("currency", "SAR") if isinstance(total_d, dict) else "SAR"
+
+                # Date
+                date_d = order.get("date") or {}
+                date   = date_d.get("date", "—")[:10] if isinstance(date_d, dict) else str(date_d or "—")[:10]
+
+                # Items
+                items   = order.get("products") or order.get("items") or []
+                item_lines = []
+                for it in items[:5]:
+                    iname = it.get("name", "—")
+                    iqty  = it.get("quantity", 1)
+                    item_lines.append(f"  • {iname} × {iqty}")
+
+                # Shipping
+                shipping    = order.get("shipping") or {}
+                ship_number = shipping.get("tracking_number", "") or shipping.get("number", "")
+                ship_co     = (shipping.get("company") or {}).get("name", "") if isinstance(shipping.get("company"), dict) else str(shipping.get("company", "") or "")
+                ship_url    = shipping.get("tracking_link", "") or shipping.get("url", "")
+
+                # Payment
+                payment  = order.get("payment_method", "")
+                if isinstance(payment, dict):
+                    payment = payment.get("name", "")
+
+                # Build text response
+                lines = [
+                    f"🛍️ **طلبك رقم #{order_ref}**",
+                    f"{status_emoji} الحالة: **{status_ar}**",
+                    f"📅 تاريخ الطلب: {date}",
+                    f"💰 الإجمالي: {total} {currency}",
+                ]
+                if payment:
+                    lines.append(f"💳 طريقة الدفع: {payment}")
+                if item_lines:
+                    lines.append(f"📦 المنتجات ({len(items)}):")
+                    lines.extend(item_lines)
+                if ship_co or ship_number:
+                    ship_info = f"🚚 الشحن: {ship_co}" if ship_co else "🚚 الشحن"
+                    if ship_number:
+                        ship_info += f" | رقم التتبع: {ship_number}"
+                    lines.append(ship_info)
+                if ship_url:
+                    lines.append(f"🔗 تتبع الشحنة: {ship_url}")
+
+                # Set widget component so the frontend can show an order card
+                if session_id:
+                    cs.set_last_component(session_id, {
+                        "type":        "order_status",
+                        "order_id":    order_id,
+                        "order_ref":   order_ref,
+                        "status":      status_ar,
+                        "status_slug": status_slug,
+                        "status_emoji":status_emoji,
+                        "total":       total,
+                        "currency":    currency,
+                        "date":        date,
+                        "items":       [{"name": it.get("name",""), "qty": it.get("quantity",1)} for it in items[:5]],
+                        "tracking_number": ship_number,
+                        "tracking_url":    ship_url,
+                        "shipping_company": ship_co,
+                    })
+
+                return "\n".join(lines)
 
             # ── get_abandoned_carts ─────────────────────────────────────────
             elif name == "get_abandoned_carts":

@@ -92,7 +92,7 @@ _ADMIN_HTML = Path(__file__).parent / "admin.html"
 # ── Auth middleware ────────────────────────────────────────────────────────────
 # Protects all per-store admin API routes (not the HTML pages or auth endpoints).
 _PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders)"
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
@@ -1007,6 +1007,51 @@ async def mark_cart_recovered(store_id: str, cart_id: str):
     # Persist recovery status to DB
     asyncio.create_task(db.mark_cart_recovered(store_id, cart_id))
     return {"status": "ok", "cart_id": cart_id, "recovered": True, "found_in_cache": found}
+
+
+# ── Orders ────────────────────────────────────────────────────────────────────
+
+@app.get("/admin/{store_id}/orders")
+async def store_orders(
+    store_id: str,
+    page:      int = 1,
+    per_page:  int = 20,
+    keyword:   str = "",
+    status:    str = "",
+):
+    """
+    Proxy Salla GET /orders for a store — list with optional keyword / status filter.
+    Requires carts.read or orders.read scope on the Salla app.
+    """
+    token = sm.get_access_token(store_id)
+    if not token:
+        raise HTTPException(400, f"No access token for store '{store_id}'")
+    from salla_client import SallaClient
+    client = SallaClient(token, store_id=store_id)
+    try:
+        data = await client.get_orders(
+            per_page=per_page,
+            page=page,
+            keyword=keyword or None,
+            status=status or None,
+        )
+        return data
+    except Exception as e:
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
+
+
+@app.get("/admin/{store_id}/orders/{order_id}")
+async def store_order_detail(store_id: str, order_id: str):
+    """Proxy Salla GET /orders/{id} for a store."""
+    token = sm.get_access_token(store_id)
+    if not token:
+        raise HTTPException(400, f"No access token for store '{store_id}'")
+    from salla_client import SallaClient
+    client = SallaClient(token, store_id=store_id)
+    try:
+        return await client.get_order(order_id)
+    except Exception as e:
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
 
 
 # ── Webhook raw attempts debug (no auth — shows last 50 raw attempts) ──────────

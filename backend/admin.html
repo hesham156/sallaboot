@@ -372,6 +372,9 @@ select.form-control{cursor:pointer}
       <span class="nav-icon">🛒</span> السلات المتروكة
       <span id="abandoned-badge" class="badge badge-red" style="margin-right:auto;display:none">0</span>
     </div>
+    <div class="nav-item" data-page="orders" onclick="showPage('orders',this)">
+      <span class="nav-icon">📋</span> الطلبات
+    </div>
     <div class="nav-item" data-page="analytics" onclick="showPage('analytics',this)">
       <span class="nav-icon">📈</span> الإحصائيات
     </div>
@@ -795,6 +798,58 @@ select.form-control{cursor:pointer}
       </div>
     </div>
 
+    <!-- ── ORDERS ── -->
+    <div class="page" id="page-orders">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📋 الطلبات</div>
+          <div class="page-sub">تصفّح وتتبع طلبات عملاء المتجر</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="loadOrders()">🔁 تحديث</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="section" style="padding:14px 20px;margin-bottom:0;border-radius:12px 12px 0 0;border-bottom:1px solid #f1f5f9">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="search-box" style="flex:1;min-width:200px">
+            <span style="color:#94a3b8">🔍</span>
+            <input type="text" id="orders-keyword" placeholder="ابحث بالاسم أو الجوال أو رقم الطلب…"
+              onkeydown="if(event.key==='Enter')loadOrders()">
+          </div>
+          <select id="orders-status" onchange="loadOrders()"
+            style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-family:'Tajawal',sans-serif;font-size:13px;background:#f8fafc">
+            <option value="">كل الحالات</option>
+            <option value="pending">قيد الانتظار</option>
+            <option value="under_review">قيد المراجعة</option>
+            <option value="processing">جاري التجهيز</option>
+            <option value="in_shipping">قيد الشحن</option>
+            <option value="completed">مكتمل</option>
+            <option value="cancelled">ملغي</option>
+            <option value="on_hold">معلق</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadOrders()">بحث</button>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="border-radius:0 0 12px 12px">
+        <div id="orders-table">
+          <div class="empty"><div class="ei">📋</div><h3>اضغط بحث لعرض الطلبات</h3></div>
+        </div>
+        <div id="orders-pagination" style="display:flex;justify-content:center;gap:8px;padding:14px 16px;border-top:1px solid #f1f5f9"></div>
+      </div>
+
+      <!-- Order detail modal -->
+      <div id="order-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:500;align-items:center;justify-content:center;backdrop-filter:blur(4px)">
+        <div style="background:#fff;border-radius:16px;width:580px;max-width:96vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #f1f5f9;position:sticky;top:0;background:#fff;z-index:1">
+            <div style="font-size:16px;font-weight:800" id="modal-order-title">تفاصيل الطلب</div>
+            <button onclick="closeOrderModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8;line-height:1">×</button>
+          </div>
+          <div id="modal-order-body" style="padding:20px 22px"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── ANALYTICS ── -->
     <div class="page" id="page-analytics">
       <div class="page-header">
@@ -1162,6 +1217,7 @@ function showPage(name, el) {
   if (name === 'settings')      loadAISettings();
   if (name === 'webhooks')      loadWebhooks();
   if (name === 'abandoned')     loadAbandoned();
+  if (name === 'orders')       loadOrders();
   if (name === 'analytics')    loadAnalytics();
 }
 function showSuperPage(name, el) {
@@ -2047,6 +2103,190 @@ async function markRecovered(cartId, btn) {
     btn.disabled    = false;
     btn.textContent = '✅ تم التواصل';
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orders
+// ─────────────────────────────────────────────────────────────────────────────
+var _ordersPage = 1;
+
+const ORDER_STATUS_BADGE = {
+  pending:      ['badge-yellow', 'قيد الانتظار', '⏳'],
+  under_review: ['badge-blue',   'قيد المراجعة', '🔍'],
+  processing:   ['badge-blue',   'جاري التجهيز',  '⚙️'],
+  in_shipping:  ['badge-blue',   'قيد الشحن',     '🚚'],
+  completed:    ['badge-green',  'مكتمل',          '✅'],
+  cancelled:    ['badge-red',    'ملغي',            '❌'],
+  refunded:     ['badge-gray',   'مسترجع',          '↩️'],
+  on_hold:      ['badge-yellow', 'معلق',            '⏸️'],
+};
+
+function _statusBadge(slug) {
+  const info = ORDER_STATUS_BADGE[slug] || ['badge-gray', slug || '—', '📦'];
+  return `<span class="badge ${info[0]}">${info[2]} ${info[1]}</span>`;
+}
+
+async function loadOrders(page) {
+  _ordersPage = page || 1;
+  const keyword = (document.getElementById('orders-keyword').value || '').trim();
+  const status  = document.getElementById('orders-status').value;
+
+  document.getElementById('orders-table').innerHTML =
+    '<div class="empty"><div class="ei"><span class="spin spin-blue" style="width:28px;height:28px;border-width:3px"></span></div><h3>جارٍ التحميل…</h3></div>';
+
+  let url = `${API}/orders?page=${_ordersPage}&per_page=20`;
+  if (keyword) url += '&keyword=' + encodeURIComponent(keyword);
+  if (status)  url += '&status='  + encodeURIComponent(status);
+
+  let data;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) { toast('فشل تحميل الطلبات', 'err'); return; }
+    data = await res.json();
+  } catch(e) { toast('تعذّر الاتصال', 'err'); return; }
+
+  const orders = data.data || [];
+  const meta   = data.pagination || data.meta || {};
+  const total  = meta.total || orders.length;
+  const pages  = meta.last_page || meta.total_pages || 1;
+
+  if (!orders.length) {
+    document.getElementById('orders-table').innerHTML =
+      '<div class="empty"><div class="ei">📋</div><h3>لا توجد طلبات</h3><p>جرّب تغيير فلتر البحث</p></div>';
+    document.getElementById('orders-pagination').innerHTML = '';
+    return;
+  }
+
+  let html = `<table><thead><tr>
+    <th>رقم الطلب</th><th>العميل</th><th>المنتجات</th>
+    <th>الإجمالي</th><th>الحالة</th><th>التاريخ</th><th></th>
+  </tr></thead><tbody>`;
+
+  for (const o of orders) {
+    const ref      = o.reference_id || o.id || '—';
+    const cust     = o.customer || {};
+    const custName = cust.name || cust.first_name || '—';
+    const custPhone= cust.mobile || cust.phone || '';
+    const amounts  = o.amounts || {};
+    const totalD   = amounts.total || {};
+    const amt      = (typeof totalD === 'object' ? totalD.amount : totalD) || '—';
+    const cur      = (typeof totalD === 'object' ? totalD.currency : 'SAR') || 'SAR';
+    const rawStatus = o.status || {};
+    const slug     = typeof rawStatus === 'object' ? rawStatus.slug : rawStatus;
+    const dateD    = o.date || {};
+    const date     = (typeof dateD === 'object' ? dateD.date : dateD || '—').slice(0,10);
+    const prods    = (o.products || o.items || []).slice(0,2);
+    const prodsText= prods.map(p => p.name).join('، ') || '—';
+    const moreProds= (o.products || o.items || []).length > 2 ? ' …' : '';
+
+    html += `<tr>
+      <td><span style="font-family:monospace;font-weight:700;color:#1d4ed8">#${ref}</span></td>
+      <td>
+        <div style="font-weight:600">${custName}</div>
+        ${custPhone ? `<div style="font-size:11px;color:#94a3b8;direction:ltr">${custPhone}</div>` : ''}
+      </td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${prodsText}${moreProds}</td>
+      <td><strong>${amt}</strong> ${cur}</td>
+      <td>${_statusBadge(slug)}</td>
+      <td style="font-size:12px;color:#94a3b8">${date}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="openOrderModal('${o.id}')">تفاصيل</button></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('orders-table').innerHTML = html;
+
+  // Pagination
+  let pag = '';
+  if (pages > 1) {
+    if (_ordersPage > 1)   pag += `<button class="btn btn-outline btn-sm" onclick="loadOrders(${_ordersPage-1})">السابق</button>`;
+    pag += `<span style="font-size:13px;color:#64748b;align-self:center">صفحة ${_ordersPage} من ${pages} (${total} طلب)</span>`;
+    if (_ordersPage < pages) pag += `<button class="btn btn-outline btn-sm" onclick="loadOrders(${_ordersPage+1})">التالي</button>`;
+  } else {
+    pag = `<span style="font-size:12px;color:#94a3b8">${total} طلب</span>`;
+  }
+  document.getElementById('orders-pagination').innerHTML = pag;
+}
+
+async function openOrderModal(orderId) {
+  document.getElementById('modal-order-title').textContent = 'جارٍ التحميل…';
+  document.getElementById('modal-order-body').innerHTML =
+    '<div style="text-align:center;padding:40px"><span class="spin spin-blue" style="width:28px;height:28px;border-width:3px"></span></div>';
+  document.getElementById('order-modal').style.display = 'flex';
+
+  let data;
+  try {
+    const res = await fetch(`${API}/orders/${orderId}`);
+    if (!res.ok) { toast('فشل تحميل التفاصيل', 'err'); closeOrderModal(); return; }
+    data = await res.json();
+  } catch(e) { toast('تعذّر الاتصال', 'err'); closeOrderModal(); return; }
+
+  const o       = data.data || {};
+  const ref     = o.reference_id || o.id || '—';
+  const cust    = o.customer || {};
+  const amounts = o.amounts  || {};
+  const totalD  = amounts.total || {};
+  const amt     = (typeof totalD === 'object' ? totalD.amount   : totalD) || '—';
+  const cur     = (typeof totalD === 'object' ? totalD.currency : 'SAR') || 'SAR';
+  const rawSt   = o.status || {};
+  const slug    = typeof rawSt === 'object' ? rawSt.slug : rawSt;
+  const dateD   = o.date   || {};
+  const date    = (typeof dateD === 'object' ? dateD.date : dateD || '—').slice(0,16).replace('T',' ');
+  const ship    = o.shipping || {};
+  const shipCo  = (ship.company || {}).name || '';
+  const trackNo = ship.tracking_number || ship.number || '';
+  const trackUrl= ship.tracking_link   || ship.url || '';
+  const payment = (typeof (o.payment_method||'') === 'object' ? (o.payment_method||{}).name : o.payment_method) || '—';
+  const notes   = o.notes || '';
+  const items   = o.products || o.items || [];
+
+  document.getElementById('modal-order-title').textContent = `طلب رقم #${ref}`;
+
+  let itemsHtml = '';
+  for (const it of items) {
+    const name = it.name || '—';
+    const qty  = it.quantity || 1;
+    const pr   = (it.price || {}).amount || it.price || '—';
+    const im   = it.image?.url || it.image || '';
+    itemsHtml += `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #f8fafc">
+      ${im ? `<img src="${im}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0">` : '<div style="width:44px;height:44px;background:#f1f5f9;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center">📦</div>'}
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13px">${name}</div>
+        <div style="font-size:12px;color:#64748b">الكمية: ${qty} | السعر: ${pr} ${cur}</div>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('modal-order-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+      <div class="kv"><span class="kv-key">الحالة</span><span>${_statusBadge(slug)}</span></div>
+      <div class="kv"><span class="kv-key">التاريخ</span><span class="kv-val">${date}</span></div>
+      <div class="kv"><span class="kv-key">الإجمالي</span><span class="kv-val">${amt} ${cur}</span></div>
+      <div class="kv"><span class="kv-key">طريقة الدفع</span><span class="kv-val">${payment}</span></div>
+    </div>
+    <div style="background:#f8fafc;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">العميل</div>
+      <div style="font-weight:600">${cust.name || cust.first_name || '—'}</div>
+      ${cust.mobile ? `<div style="font-size:13px;color:#64748b;direction:ltr">${cust.mobile}</div>` : ''}
+      ${cust.email  ? `<div style="font-size:13px;color:#64748b">${cust.email}</div>`  : ''}
+    </div>
+    ${shipCo || trackNo ? `
+    <div style="background:#eff6ff;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#1d4ed8;margin-bottom:6px">🚚 معلومات الشحن</div>
+      ${shipCo  ? `<div>شركة الشحن: <strong>${shipCo}</strong></div>` : ''}
+      ${trackNo ? `<div>رقم التتبع: <strong style="direction:ltr;display:inline-block">${trackNo}</strong></div>` : ''}
+      ${trackUrl? `<div><a href="${trackUrl}" target="_blank" class="btn btn-outline btn-sm" style="margin-top:8px">🔗 تتبع الشحنة</a></div>` : ''}
+    </div>` : ''}
+    ${items.length ? `
+    <div>
+      <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:8px">المنتجات (${items.length})</div>
+      ${itemsHtml}
+    </div>` : ''}
+    ${notes ? `<div style="margin-top:12px;background:#fefce8;border-radius:8px;padding:10px 12px;font-size:13px"><strong>ملاحظات:</strong> ${notes}</div>` : ''}
+  `;
+}
+
+function closeOrderModal() {
+  document.getElementById('order-modal').style.display = 'none';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

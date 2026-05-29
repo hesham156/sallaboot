@@ -59,6 +59,27 @@ class SallaClient:
     async def get_order(self, order_id: str) -> dict:
         return await self._request("GET", f"/orders/{order_id}")
 
+    async def get_orders(
+        self,
+        per_page: int = 20,
+        reference_id: Optional[str] = None,
+        keyword: Optional[str] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+    ) -> dict:
+        """
+        List orders with optional filters.
+        keyword — searches customer name, phone, email, reference.
+        """
+        params: dict = {"per_page": per_page, "page": page}
+        if reference_id:
+            params["reference_id"] = reference_id
+        if keyword:
+            params["keyword"] = keyword
+        if status:
+            params["status"] = status
+        return await self._request("GET", "/orders", params=params)
+
     async def search_orders_by_reference(self, reference: str) -> dict:
         return await self._request("GET", "/orders", params={"reference_id": reference})
 
