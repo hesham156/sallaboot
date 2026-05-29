@@ -893,6 +893,20 @@ select.form-control{cursor:pointer}
             <div class="card-value" id="an-products">—</div>
             <div class="card-sub" id="an-last-sync">آخر مزامنة: —</div>
           </div>
+          <div class="card" style="grid-column:1/-1;background:linear-gradient(135deg,#fffbeb,#fef9c3)">
+            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+              <div>
+                <div class="card-icon">⭐</div>
+                <div class="card-label">متوسط التقييم</div>
+                <div class="card-value" id="an-avg-rating" style="color:#d97706">—</div>
+                <div class="card-sub" id="an-rating-count">— محادثة مقيّمة</div>
+              </div>
+              <div style="flex:1;min-width:180px">
+                <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:8px">توزيع التقييمات</div>
+                <div id="an-rating-dist" style="display:flex;flex-direction:column;gap:4px"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ── Row 1: daily chart + messages donut ── -->
@@ -1714,6 +1728,7 @@ async function loadConversations() {
         <div class="conv-badges">${botBadge}
           <span class="badge badge-gray" style="font-size:10px">${c.messages_count} رسالة</span>
           ${c.unread?'<span class="badge badge-red" style="font-size:10px">جديد</span>':''}
+          ${c.rating?`<span class="badge badge-yellow" style="font-size:10px">${'⭐'.repeat(c.rating)}</span>`:''}
         </div>
       </div>`;
     }).join('');
@@ -1751,7 +1766,7 @@ function renderThread(conv) {
     <div class="conv-thread-header">
       <div>
         <div class="conv-thread-title">${sid.substring(0,16)}…</div>
-        <div class="conv-thread-sub">${msgs.length} رسالة · آخر نشاط ${relTime(conv.last_activity)}</div>
+        <div class="conv-thread-sub">${msgs.length} رسالة · آخر نشاط ${relTime(conv.last_activity)}${conv.rating ? ' · ' + '⭐'.repeat(conv.rating) : ''}</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${botOn
@@ -2323,6 +2338,26 @@ async function loadAnalytics() {
   document.getElementById('an-recovery').textContent     = 'نسبة الاسترداد ' + (carts.recovery_rate || 0) + '%';
   document.getElementById('an-products').textContent     = (prods.count  || 0).toLocaleString('ar');
   document.getElementById('an-last-sync').textContent    = 'آخر مزامنة: ' + (prods.last_sync || 'لم تتم').replace('T',' ').slice(0,16);
+
+  // ── Ratings ──────────────────────────────────────────────────────────────
+  const ratings = data.ratings || {};
+  const avgR    = ratings.avg   || 0;
+  const rCount  = ratings.count || 0;
+  document.getElementById('an-avg-rating').textContent  = avgR ? avgR.toFixed(1) + ' ⭐' : '—';
+  document.getElementById('an-rating-count').textContent= rCount + ' محادثة مقيّمة';
+  var distEl = document.getElementById('an-rating-dist');
+  var dist   = ratings.distribution || [0,0,0,0,0];
+  var maxDist = Math.max(...dist, 1);
+  distEl.innerHTML = dist.map(function(v, i) {
+    var pct = Math.round(v / maxDist * 100);
+    return `<div style="display:flex;align-items:center;gap:6px;font-size:11px">
+      <span style="width:18px;color:#d97706;font-weight:700">${i+1}⭐</span>
+      <div style="flex:1;height:8px;background:#fef3c7;border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:4px;transition:width .4s"></div>
+      </div>
+      <span style="width:20px;color:#92400e;font-weight:600">${v}</span>
+    </div>`;
+  }).join('');
 
   // ── Detail stats ──────────────────────────────────────────────────────────
   document.getElementById('an-today').textContent           = (conv.today         || 0) + ' محادثة';

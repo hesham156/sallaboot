@@ -50,6 +50,9 @@ def get_or_create(session_id: str, store_id: str = "default") -> dict:
             "cart": [],             # [{product_id, name, price, currency, image, url, quantity, notes}]
             "customer_info": {},    # {name, phone, email}
             "last_component": None, # last structured component for the widget
+            # ── Rating ────────────────────────────────────────────────
+            "rating": None,         # 1-5 or None
+            "rating_comment": "",
         }
     return _conversations[session_id]
 
@@ -243,6 +246,15 @@ def has_unread_user_messages(session_id: str) -> bool:
 # Query helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def set_rating(session_id: str, rating: int, comment: str = ""):
+    """Save a customer rating (1-5) for a conversation."""
+    conv = _conversations.get(session_id)
+    if conv:
+        conv["rating"]         = max(1, min(5, int(rating)))
+        conv["rating_comment"] = comment
+        db.fire(db.save_conversation(session_id, conv.get("store_id", "default"), conv))
+
+
 def all_conversations() -> dict:
     return _conversations
 
@@ -288,6 +300,7 @@ def summary_list(store_id: str = None) -> list:
             "last_activity": conv["last_activity"],
             "created_at": conv["created_at"],
             "unread": unread,
+            "rating": conv.get("rating"),
         })
     result.sort(key=lambda x: x["last_activity"], reverse=True)
     return result

@@ -161,6 +161,13 @@ class PasswordChangeRequest(BaseModel):
     new_password:     str
 
 
+class RateRequest(BaseModel):
+    session_id: str
+    store_id:   str = "default"
+    rating:     int          # 1 – 5
+    comment:    str = ""
+
+
 # ── Utility endpoints ──────────────────────────────────────────────────────────
 @app.get("/env-check")
 async def env_check():
@@ -549,6 +556,12 @@ async def store_analytics(store_id: str):
     # ── Products / store cache ─────────────────────────────────────────────────
     cache = sm.get_cache(store_id)
 
+    # ── Ratings ────────────────────────────────────────────────────────────────
+    rated_vals   = [c.get("rating") for c in all_convs.values() if c.get("rating")]
+    rated_count  = len(rated_vals)
+    avg_rating   = round(sum(rated_vals) / rated_count, 1) if rated_count else 0
+    distribution = [sum(1 for r in rated_vals if r == i) for i in range(1, 6)]
+
     return {
         "conversations": {
             "total":          total_convs,
@@ -575,6 +588,11 @@ async def store_analytics(store_id: str):
         "products": {
             "count":     cache.get("products_count", 0),
             "last_sync": cache.get("last_sync", "never"),
+        },
+        "ratings": {
+            "count":        rated_count,
+            "avg":          avg_rating,
+            "distribution": distribution,   # [1★,2★,3★,4★,5★]
         },
     }
 
@@ -1216,6 +1234,15 @@ async def chat(req: ChatRequest):
         components = [component] if component else None,
         cart_count = cart_count,
     )
+
+
+@app.post("/chat/rate")
+async def chat_rate(req: RateRequest):
+    """Customer rates a conversation 1-5 stars."""
+    if not 1 <= req.rating <= 5:
+        raise HTTPException(400, "التقييم يجب أن يكون بين 1 و 5")
+    cs.set_rating(req.session_id, req.rating, req.comment)
+    return {"status": "ok", "message": "شكراً لتقييمك! 😊"}
 
 
 @app.get("/chat/poll")

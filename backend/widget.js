@@ -29,6 +29,8 @@
   var botEnabled = true;          // tracks whether AI bot is handling this session
   var pollTimer = null;           // setInterval handle for admin message polling
   var humanBannerShown = false;   // prevent duplicate "human took over" banners
+  var _botReplyCount = 0;         // how many bot replies this session
+  var _ratingShown = false;       // rating bar shown at least once this session
 
   // ── Salla Storefront SDK detection ───────────────────────────────────────────
   // When the widget runs inside a Salla store page, window.salla is available.
@@ -261,6 +263,52 @@
     }
     .checkout-fallback .cf-title { font-size: 13px; font-weight: 700; color: #92400e; }
     .checkout-fallback a { color: ${CONFIG.primaryColor}; font-size: 12px; }
+    /* ── Rating bar ──────────────────────────────────────────── */
+    #salla-rating-bar {
+      padding: 10px 16px 8px; text-align: center; border-top: 1px solid #e8efff;
+      background: #f5f8ff; flex-shrink: 0;
+      animation: ratingSlide .3s ease;
+    }
+    @keyframes ratingSlide { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+    #salla-rating-bar .r-label { font-size: 12px; color: #64748b; margin-bottom: 6px; }
+    #salla-rating-bar .r-stars { display: flex; gap: 4px; justify-content: center; }
+    #salla-rating-bar .r-stars button {
+      background: none; border: none; font-size: 24px; cursor: pointer; padding: 2px 3px;
+      opacity: .25; transition: opacity .12s, transform .1s; line-height: 1;
+    }
+    #salla-rating-bar .r-stars button:hover ~ button { opacity: .25; }
+    #salla-rating-bar .r-stars:hover button { opacity: .25; }
+    #salla-rating-bar .r-stars button:hover,
+    #salla-rating-bar .r-stars button.lit { opacity: 1; transform: scale(1.18); }
+    #salla-rating-bar .r-stars:hover button:hover,
+    #salla-rating-bar .r-stars:hover button:hover ~ button + button { opacity: .25; }
+    /* light up all stars up to hovered one */
+    #salla-rating-bar .r-stars button:not(:hover) { transition: opacity .08s; }
+    #salla-rating-bar .r-thanks {
+      font-size: 13px; color: #16a34a; font-weight: 600; padding: 4px 0 2px;
+      animation: ratingSlide .3s ease;
+    }
+    /* ── Order status component ───────────────────────────────── */
+    .order-status-card {
+      background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.09);
+      padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; width: 100%;
+    }
+    .order-status-card .os-header {
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .order-status-card .os-ref { font-weight: 700; font-size: 13px; color: #1e293b; }
+    .order-status-card .os-badge {
+      background: #eff6ff; color: #1d4ed8; border-radius: 20px;
+      font-size: 11px; font-weight: 700; padding: 3px 9px;
+    }
+    .order-status-card .os-row { font-size: 12px; color: #64748b; display: flex; gap: 6px; }
+    .order-status-card .os-row strong { color: #1e293b; }
+    .order-status-card .os-track {
+      display: block; text-align: center; padding: 7px 0;
+      background: ${CONFIG.primaryColor}; color: white; border-radius: 8px;
+      font-size: 12px; font-weight: 700; text-decoration: none; margin-top: 4px;
+    }
+    .order-status-card .os-track:hover { opacity: .88; }
   `;
 
   // ── DOM Builder ───────────────────────────────────────────────────────────────
@@ -294,6 +342,7 @@
           <span>جارٍ التواصل مع فريق الدعم... سيرد عليك أحد المتخصصين قريباً</span>
         </div>
         <div id="salla-chat-messages"></div>
+        <div id="salla-rating-bar" style="display:none"></div>
         <div id="salla-chat-footer">
           <div id="salla-file-preview" style="display:none"></div>
           <div id="salla-chat-input-row">
@@ -492,6 +541,29 @@
           '<div style="display:flex;flex-direction:column;gap:4px">' + linksHtml + '</div>' +
         '</div>'
       );
+    } else if (component.type === "order_status") {
+      var os = component;
+      var trackBtn = os.tracking_url
+        ? '<a href="' + escapeAttr(os.tracking_url) + '" target="_blank" class="os-track">🚚 تتبع الشحنة</a>'
+        : '';
+      var itemsHtml2 = (os.items || []).slice(0, 3).map(function(it) {
+        return '<div class="os-row">• ' + esc(it.name) + ' × ' + (it.qty||1) + '</div>';
+      }).join('');
+      wrap.innerHTML = (
+        '<div class="order-status-card">' +
+          '<div class="os-header">' +
+            '<div class="os-ref">طلب #' + esc(os.order_ref || os.order_id) + '</div>' +
+            '<div class="os-badge">' + esc(os.status_emoji||'📦') + ' ' + esc(os.status) + '</div>' +
+          '</div>' +
+          '<div class="os-row">📅 <strong>' + esc(os.date||'') + '</strong></div>' +
+          '<div class="os-row">💰 <strong>' + esc(os.total||'') + ' ' + esc(os.currency||'SAR') + '</strong></div>' +
+          (os.shipping_company ? '<div class="os-row">🚚 <strong>' + esc(os.shipping_company) + '</strong></div>' : '') +
+          (os.tracking_number  ? '<div class="os-row">🔢 رقم التتبع: <strong style="direction:ltr;display:inline-block">' + esc(os.tracking_number) + '</strong></div>' : '') +
+          itemsHtml2 +
+          trackBtn +
+        '</div>'
+      );
+
     } else {
       return; // unknown component — skip
     }
@@ -510,6 +582,52 @@
   }
   function escapeAttr(str) {
     return String(str || "").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  // ── Rating ───────────────────────────────────────────────────────────────────
+  function showRatingBar() {
+    if (_ratingShown) return;
+    _ratingShown = true;
+    var bar = document.getElementById("salla-rating-bar");
+    if (!bar) return;
+    bar.style.display = "block";
+    bar.innerHTML =
+      '<div class="r-label">كيف كانت تجربتك مع المساعد؟</div>' +
+      '<div class="r-stars" id="r-stars-wrap">' +
+        [1,2,3,4,5].map(function(v){
+          return '<button data-v="'+v+'" title="'+v+' نجوم" aria-label="'+v+' نجوم">⭐</button>';
+        }).join('') +
+      '</div>';
+
+    // Light-up hover effect: highlight all stars up to hovered one
+    var starsWrap = document.getElementById("r-stars-wrap");
+    var btns = starsWrap.querySelectorAll("button");
+    btns.forEach(function(btn, idx) {
+      btn.addEventListener("mouseenter", function() {
+        btns.forEach(function(b, i) { b.style.opacity = i <= idx ? "1" : "0.25"; });
+      });
+      btn.addEventListener("mouseleave", function() {
+        btns.forEach(function(b) { b.style.opacity = ""; });
+      });
+      btn.addEventListener("click", function() {
+        submitRating(parseInt(btn.getAttribute("data-v"), 10));
+      });
+    });
+  }
+
+  async function submitRating(value) {
+    var bar = document.getElementById("salla-rating-bar");
+    if (bar) {
+      bar.innerHTML = '<div class="r-thanks">شكراً لتقييمك ' + "⭐".repeat(value) + ' 😊</div>';
+      setTimeout(function() { bar.style.display = "none"; }, 3000);
+    }
+    try {
+      await fetch(CONFIG.apiUrl + "/chat/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, store_id: CONFIG.storeId, rating: value }),
+      });
+    } catch(e) { /* non-critical */ }
   }
 
   // ── Human Takeover UI ─────────────────────────────────────────────────────────
@@ -635,6 +753,14 @@
 
         // Always show the reply (either bot reply or "support team notified" message)
         appendMessage(botEnabled ? "bot" : "system-note", data.reply || "عذراً، لم أفهم طلبك. حاول مرة أخرى.");
+
+        // Count bot replies and maybe show rating bar (after 2nd reply, bot-only)
+        if (botEnabled) {
+          _botReplyCount++;
+          if (_botReplyCount >= 2 && !_ratingShown) {
+            setTimeout(showRatingBar, 800);
+          }
+        }
 
         // Render rich components (product cards, cart, checkout…)
         if (data.components && data.components.length > 0) {
