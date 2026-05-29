@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 import aiofiles
 from pathlib import Path
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ from typing import Optional
 
 from agent import PrintingAgent
 from salla_oauth import get_auth_url, exchange_code, save_tokens
+from store_sync import sync_store, load_cache, get_store_data
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
@@ -29,6 +31,19 @@ ALLOWED_EXTENSIONS = {
 }
 
 app = FastAPI(title="Salla Printing Chatbot", version="1.0.0")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Load cached store data and attempt a live sync on startup."""
+    load_cache()  # Always load cache first (instant)
+    token = os.getenv("SALLA_ACCESS_TOKEN", "")
+    if token:
+        try:
+            await sync_store(token)
+            print("✅ Store sync completed on startup")
+        except Exception as e:
+            print(f"⚠️ Store sync failed on startup: {e}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -83,7 +98,33 @@ async def serve_widget():
 @app.get("/health")
 async def health():
     has_token = bool(os.getenv("SALLA_ACCESS_TOKEN"))
-    return {"status": "ok", "service": "salla-printing-chatbot", "salla_connected": has_token}
+    store = get_store_data()
+    return {
+        "status": "ok",
+        "service": "salla-printing-chatbot",
+        "salla_connected": has_token,
+        "products_synced": store.get("products_count", 0),
+        "last_sync": store.get("last_sync", "never"),
+    }
+
+
+@app.post("/admin/sync")
+async def admin_sync():
+    """Manually trigger a full store sync. Call this after updating products."""
+    token = os.getenv("SALLA_ACCESS_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=400, detail="لم يتم ربط المتجر بعد. SALLA_ACCESS_TOKEN غير موجود.")
+    try:
+        data = await sync_store(token)
+        return {
+            "status": "ok",
+            "products_count": data.get("products_count", 0),
+            "categories_count": len(data.get("categories", [])),
+            "articles_count": len(data.get("articles", [])),
+            "last_sync": data.get("last_sync"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"فشل المزامنة: {str(e)}")
 
 
 # ── Salla Webhook (Easy Mode) ──────────────────────────────────────────────────
@@ -109,6 +150,8 @@ async def salla_webhook(payload: dict):
                     a.salla.headers["Authorization"] = f"Bearer {access_token}"
             except Exception:
                 pass
+            # Trigger background store sync with new token
+            asyncio.create_task(sync_store(access_token))
             return {"status": "ok", "message": "Token saved successfully"}
 
     # Log other events silently

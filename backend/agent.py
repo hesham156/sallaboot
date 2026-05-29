@@ -3,8 +3,9 @@ import json
 import anthropic
 from groq import Groq
 from salla_client import SallaClient
+from store_sync import build_knowledge_summary, get_store_data
 
-SYSTEM_PROMPT = """أنت مساعد ذكي لمتجر طباعة احترافي على منصة سلة. اسمك "مساعد المتجر".
+BASE_SYSTEM_PROMPT = """أنت مساعد ذكي لمتجر طباعة احترافي على منصة سلة. اسمك "مساعد المتجر".
 
 خدمات المتجر تشمل:
 - كروت شخصية وبزنس كارد
@@ -21,7 +22,16 @@ SYSTEM_PROMPT = """أنت مساعد ذكي لمتجر طباعة احترافي
 4. إذا أراد العميل إرسال ملف تصميم، أخبره: "يمكنك إرفاق ملف التصميم مباشرة هنا في المحادثة"
 5. للتسعير التقريبي، استخدم أداة حساب السعر
 6. إذا احتاج العميل تدخل بشري أو كان الطلب معقداً، قل: "سأحيلك لفريق المبيعات، يرجى التواصل على واتساب أو البريد الإلكتروني"
-7. لا تتكلم عن أي شيء خارج نطاق المتجر وخدمات الطباعة"""
+7. لا تتكلم عن أي شيء خارج نطاق المتجر وخدمات الطباعة
+8. عندك قاعدة بيانات كاملة لمنتجات المتجر، استخدمها للإجابة مباشرة دون الحاجة لاستدعاء أداة get_products في معظم الأحيان"""
+
+
+def get_system_prompt() -> str:
+    """Build dynamic system prompt with live store knowledge."""
+    knowledge = build_knowledge_summary()
+    if knowledge:
+        return BASE_SYSTEM_PROMPT + f"\n\n--- معلومات المتجر الحالية ---\n{knowledge}\n--- نهاية معلومات المتجر ---"
+    return BASE_SYSTEM_PROMPT
 
 TOOLS = [
     {
@@ -138,9 +148,35 @@ class PrintingAgent:
     async def _run_tool(self, name: str, inputs: dict) -> str:
         try:
             if name == "get_products":
+                keyword = inputs.get("keyword", "").strip().lower()
+                # Try cached store data first (faster, no API call needed)
+                store = get_store_data()
+                cached_products = store.get("products", [])
+                if cached_products:
+                    if keyword:
+                        filtered = [
+                            p for p in cached_products
+                            if keyword in p.get("name", "").lower()
+                            or keyword in p.get("description", "").lower()
+                            or any(keyword in c.lower() for c in p.get("categories", []))
+                        ]
+                    else:
+                        filtered = cached_products
+                    if filtered:
+                        lines = []
+                        for p in filtered[:15]:
+                            price = p.get("price", "—")
+                            currency = p.get("currency", "ريال")
+                            cats = "، ".join(p.get("categories", []))
+                            line = f"• {p.get('name', '')} — {price} {currency}"
+                            if cats:
+                                line += f" [{cats}]"
+                            lines.append(line)
+                        return "المنتجات المتاحة:\n" + "\n".join(lines)
+                # Fall back to live API
                 if not self.salla:
                     return "⚠️ لم يتم ربط المتجر بعد، يرجى التواصل مع الدعم."
-                data = await self.salla.get_products(keyword=inputs.get("keyword"))
+                data = await self.salla.get_products(keyword=keyword or None)
                 products = data.get("data", [])
                 if not products:
                     return "لا توجد منتجات متاحة حالياً."
@@ -288,7 +324,7 @@ class PrintingAgent:
             for t in TOOLS
         ]
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+        messages = [{"role": "system", "content": get_system_prompt()}] + [
             {"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else str(m["content"])}
             for m in history
         ]
@@ -333,7 +369,7 @@ class PrintingAgent:
             response = self.ai.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
-                system=SYSTEM_PROMPT,
+                system=get_system_prompt(),
                 tools=TOOLS,
                 messages=history,
             )
