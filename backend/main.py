@@ -62,6 +62,17 @@ class ChatResponse(BaseModel):
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
+@app.get("/env-check")
+async def env_check():
+    """Debug: show which API keys are configured (values hidden)."""
+    return {
+        "GROQ_API_KEY": bool(os.getenv("GROQ_API_KEY")),
+        "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "SALLA_ACCESS_TOKEN": bool(os.getenv("SALLA_ACCESS_TOKEN")),
+        "BASE_URL": os.getenv("BASE_URL", "not set"),
+    }
+
+
 @app.get("/widget.js")
 async def serve_widget():
     """Serve the chat widget JS file."""
