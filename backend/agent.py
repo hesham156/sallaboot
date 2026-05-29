@@ -266,7 +266,7 @@ class PrintingAgent:
             raise RuntimeError("يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY في إعدادات المتجر أو متغيرات البيئة.")
 
         token      = access_token or os.getenv("SALLA_ACCESS_TOKEN", "")
-        self.salla = SallaClient(token) if token else None
+        self.salla = SallaClient(token, store_id=store_id) if token else None
 
     # ── Tool runner ────────────────────────────────────────────────────────────
     async def _run_tool(self, name: str, inputs: dict, session_id: str = "") -> str:

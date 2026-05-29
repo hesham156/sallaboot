@@ -126,14 +126,8 @@ def _strip_html(text: str) -> str:
 
 # ── Main sync ──────────────────────────────────────────────────────────────────
 
-async def sync_store(access_token: str, store_id: str = "default") -> dict:
-    """
-    Fetch all store data and save to store_manager cache.
-    Returns the structured data dict.
-    """
-    if not access_token:
-        return {}
-
+async def _do_sync(access_token: str, store_id: str) -> dict:
+    """Inner sync — one attempt with the given token."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json",
@@ -156,7 +150,9 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
         articles_raw = []
         for endpoint in [f"{base}/blogs/posts", f"{base}/blog/posts", f"{base}/blogs"]:
             try:
-                r = await client.get(endpoint, headers=headers, params={"per_page": 50}, timeout=15)
+                r = await client.get(
+                    endpoint, headers=headers, params={"per_page": 50}, timeout=15
+                )
                 if r.status_code == 200:
                     articles_raw = r.json().get("data", [])
                     if articles_raw:
@@ -171,17 +167,48 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
     ]
     articles = [_format_article(a) for a in articles_raw]
 
-    data = {
-        "products":          products,
-        "categories":        categories,
-        "articles":          articles,
-        "products_count":    len(products),
-        "last_sync":         datetime.datetime.utcnow().isoformat(),
-        "last_sync_errors":  errors,
+    return {
+        "products":         products,
+        "categories":       categories,
+        "articles":         articles,
+        "products_count":   len(products),
+        "last_sync":        datetime.datetime.utcnow().isoformat(),
+        "last_sync_errors": errors,
     }
 
+
+async def sync_store(access_token: str, store_id: str = "default") -> dict:
+    """
+    Fetch all store data and save to store_manager cache.
+
+    If the first attempt returns a 401 (expired token), automatically
+    refreshes the token and retries once — so a sync triggered right after
+    a 14-day token expiry will still succeed without manual intervention.
+
+    Returns the structured data dict.
+    """
+    if not access_token:
+        return {}
+
+    data = await _do_sync(access_token, store_id)
+
+    # Auto-refresh and retry on 401
+    errors = data.get("last_sync_errors", [])
+    if any("401" in str(e) for e in errors):
+        try:
+            from salla_oauth import refresh_access_token
+            print(f"[store_sync:{store_id}] 401 detected — refreshing token and retrying …")
+            new_token = await refresh_access_token(store_id)
+            data      = await _do_sync(new_token, store_id)
+        except Exception as exc:
+            print(f"[store_sync:{store_id}] Token refresh during sync failed: {exc}")
+            # Keep the original data (with the 401 error recorded)
+
     sm.set_cache(store_id, data)
-    print(f"[store_sync:{store_id}] ✅ Sync done — {len(products)} products, {len(categories)} cats, {len(articles)} articles")
+    n_p = data.get("products_count", 0)
+    n_c = len(data.get("categories", []))
+    n_a = len(data.get("articles",   []))
+    print(f"[store_sync:{store_id}] ✅ Sync done — {n_p} products, {n_c} cats, {n_a} articles")
     return data
 
 
