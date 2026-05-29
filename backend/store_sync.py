@@ -81,6 +81,14 @@ def _format_product(p: dict) -> dict:
     urls = p.get("urls") or {}
     customer_url = urls.get("customer") or p.get("url", "")
 
+    # Best-effort image extraction
+    images = p.get("images") or []
+    thumbnail = p.get("thumbnail") or {}
+    image_url = (
+        (images[0].get("url") or images[0].get("src", "")) if images
+        else thumbnail.get("url", "") or p.get("image", "") or p.get("cover", "")
+    )
+
     return {
         "id":               p.get("id"),
         "name":             p.get("name", ""),
@@ -96,6 +104,7 @@ def _format_product(p: dict) -> dict:
         "categories":       [c.get("name", "") for c in (p.get("categories") or [])],
         "options":          options_summary,
         "skus":             skus_summary,
+        "image":            image_url,
         "url":              customer_url,
         "type":             p.get("type", "product"),
     }

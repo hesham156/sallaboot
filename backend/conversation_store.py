@@ -33,15 +33,97 @@ def get_or_create(session_id: str, store_id: str = "default") -> dict:
     if session_id not in _conversations:
         _conversations[session_id] = {
             "session_id": session_id,
-            "store_id": store_id,      # which store this session belongs to
-            "messages": [],            # full history (all roles)
-            "bot_enabled": True,       # per-session flag
+            "store_id": store_id,
+            "messages": [],
+            "bot_enabled": True,
             "created_at": _now(),
             "last_activity": _now(),
-            "pending_for_widget": [],  # admin msgs not yet polled by widget
-            "last_admin_read": "",     # ISO ts — used for unread badge
+            "pending_for_widget": [],
+            "last_admin_read": "",
+            # ── Shopping cart ──────────────────────────────────────────
+            "cart": [],             # [{product_id, name, price, currency, image, url, quantity, notes}]
+            "customer_info": {},    # {name, phone, email}
+            "last_component": None, # last structured component for the widget
         }
     return _conversations[session_id]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cart management
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_cart(session_id: str) -> list:
+    return get_or_create(session_id).get("cart", [])
+
+
+def cart_add(session_id: str, item: dict):
+    """Add or update a product in the cart."""
+    conv = get_or_create(session_id)
+    pid  = str(item.get("product_id", ""))
+    for existing in conv["cart"]:
+        if str(existing.get("product_id", "")) == pid:
+            existing["quantity"] = existing.get("quantity", 1) + item.get("quantity", 1)
+            if item.get("notes"):
+                existing["notes"] = item["notes"]
+            return
+    conv["cart"].append(item)
+
+
+def cart_remove(session_id: str, product_id) -> bool:
+    conv = _conversations.get(session_id)
+    if not conv:
+        return False
+    before = len(conv["cart"])
+    conv["cart"] = [i for i in conv["cart"] if str(i.get("product_id", "")) != str(product_id)]
+    return len(conv["cart"]) < before
+
+
+def cart_clear(session_id: str):
+    conv = _conversations.get(session_id)
+    if conv:
+        conv["cart"] = []
+
+
+def cart_total(session_id: str) -> float:
+    total = 0.0
+    for item in get_cart(session_id):
+        try:
+            total += float(item.get("price", 0)) * int(item.get("quantity", 1))
+        except (ValueError, TypeError):
+            pass
+    return total
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Customer info
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_customer_info(session_id: str) -> dict:
+    return get_or_create(session_id).get("customer_info", {})
+
+
+def set_customer_info(session_id: str, info: dict):
+    conv = get_or_create(session_id)
+    conv["customer_info"].update({k: v for k, v in info.items() if v})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Last component (widget rich UI state)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def set_last_component(session_id: str, component):
+    conv = get_or_create(session_id)
+    conv["last_component"] = component
+
+
+def pop_last_component(session_id: str):
+    """Return and clear the last component."""
+    conv = _conversations.get(session_id)
+    if not conv:
+        return None
+    comp = conv.get("last_component")
+    conv["last_component"] = None
+    return comp
 
 
 def add_message(session_id: str, role: str, content: str, store_id: str = "default") -> dict:

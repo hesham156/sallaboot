@@ -76,6 +76,8 @@ class ChatResponse(BaseModel):
     reply: str
     session_id: str
     bot_enabled: bool = True
+    components: Optional[list] = None   # rich UI components (product cards, cart, checkout…)
+    cart_count: int = 0                 # current cart item count for badge
 
 
 class AdminReplyRequest(BaseModel):
@@ -440,7 +442,17 @@ async def chat(req: ChatRequest):
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
 
-    return ChatResponse(reply=reply, session_id=session_id, bot_enabled=True)
+    # Pick up any rich UI component set by the agent tools this turn
+    component  = cs.pop_last_component(session_id)
+    cart_count = len(cs.get_cart(session_id))
+
+    return ChatResponse(
+        reply      = reply,
+        session_id = session_id,
+        bot_enabled= True,
+        components = [component] if component else None,
+        cart_count = cart_count,
+    )
 
 
 @app.get("/chat/poll")

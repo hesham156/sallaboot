@@ -163,6 +163,88 @@
     @media (max-width: 420px) {
       #salla-chat-panel { width: calc(100vw - 16px); left: 8px; bottom: 80px; height: 70vh; }
     }
+    /* ── Cart badge on header ─────────────────────────────────── */
+    #salla-cart-badge {
+      background: #ef4444; color: white; border-radius: 20px;
+      font-size: 11px; font-weight: 700; padding: 1px 7px; margin-right: auto;
+      display: none;
+    }
+    #salla-cart-badge.visible { display: inline-block; }
+    /* ── Product cards component ──────────────────────────────── */
+    .chat-component { width: 100%; margin-top: 4px; }
+    .product-cards-wrap {
+      display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+      scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent;
+    }
+    .product-cards-wrap::-webkit-scrollbar { height: 4px; }
+    .product-cards-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .product-card {
+      flex: 0 0 140px; background: white; border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;
+      display: flex; flex-direction: column; transition: box-shadow 0.2s;
+    }
+    .product-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.15); }
+    .product-card img {
+      width: 100%; height: 100px; object-fit: cover; background: #f1f5f9;
+    }
+    .product-card .card-body { padding: 8px 10px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .product-card .card-name { font-size: 12px; font-weight: 600; color: #1e293b; line-height: 1.3; }
+    .product-card .card-price { font-size: 12px; color: ${CONFIG.primaryColor}; font-weight: 700; }
+    .product-card .card-price del { color: #94a3b8; font-weight: 400; margin-left: 4px; font-size: 11px; }
+    .product-card .card-unavail { font-size: 11px; color: #ef4444; }
+    .product-card .card-add {
+      margin-top: auto; width: 100%; padding: 6px 0; background: ${CONFIG.primaryColor};
+      color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .product-card .card-add:hover { opacity: 0.88; }
+    .product-card .card-add:disabled { background: #cbd5e1; cursor: not-allowed; }
+    /* ── Cart component ───────────────────────────────────────── */
+    .cart-component {
+      background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.09);
+      padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; width: 100%;
+    }
+    .cart-component .cart-title { font-size: 13px; font-weight: 700; color: #1e293b; }
+    .cart-item {
+      display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475569;
+    }
+    .cart-item img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #f1f5f9; flex-shrink: 0; }
+    .cart-item .ci-name { flex: 1; font-weight: 500; color: #1e293b; }
+    .cart-item .ci-qty { color: #64748b; }
+    .cart-item .ci-sub { font-weight: 600; color: ${CONFIG.primaryColor}; }
+    .cart-total {
+      display: flex; justify-content: space-between; border-top: 1px solid #e2e8f0;
+      padding-top: 8px; font-size: 13px; font-weight: 700; color: #1e293b;
+    }
+    .cart-checkout-btn {
+      width: 100%; padding: 9px 0; background: #16a34a; color: white;
+      border: none; border-radius: 10px; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .cart-checkout-btn:hover { opacity: 0.88; }
+    /* ── Checkout component ───────────────────────────────────── */
+    .checkout-component {
+      background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 1px solid #86efac;
+      border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column;
+      gap: 8px; width: 100%;
+    }
+    .checkout-component .co-title { font-size: 13px; font-weight: 700; color: #166534; }
+    .checkout-component .co-ref { font-size: 12px; color: #166534; }
+    .checkout-component .co-total { font-size: 14px; font-weight: 700; color: #15803d; }
+    .checkout-pay-btn {
+      width: 100%; padding: 10px 0; background: #16a34a; color: white;
+      border: none; border-radius: 10px; font-size: 14px; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s; text-decoration: none;
+      display: block; text-align: center;
+    }
+    .checkout-pay-btn:hover { opacity: 0.88; }
+    /* ── Checkout fallback component ─────────────────────────── */
+    .checkout-fallback {
+      background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px;
+      padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; width: 100%;
+    }
+    .checkout-fallback .cf-title { font-size: 13px; font-weight: 700; color: #92400e; }
+    .checkout-fallback a { color: ${CONFIG.primaryColor}; font-size: 12px; }
   `;
 
   // ── DOM Builder ───────────────────────────────────────────────────────────────
@@ -188,6 +270,7 @@
             <div class="name">${CONFIG.storeName}</div>
             <div class="status" id="salla-status-text">متاح الآن</div>
           </div>
+          <span id="salla-cart-badge" title="السلة">🛒 <span id="salla-cart-count">0</span></span>
           <button id="salla-chat-close" aria-label="إغلاق">✕</button>
         </div>
         <div id="salla-human-banner">
@@ -246,6 +329,131 @@
   function hideTyping() {
     var el = document.getElementById("typing-indicator");
     if (el) el.remove();
+  }
+
+  // ── Cart badge ────────────────────────────────────────────────────────────────
+  function updateCartBadge(count) {
+    var badge = document.getElementById("salla-cart-badge");
+    var countEl = document.getElementById("salla-cart-count");
+    if (!badge || !countEl) return;
+    if (count > 0) {
+      countEl.textContent = count;
+      badge.classList.add("visible");
+    } else {
+      badge.classList.remove("visible");
+    }
+  }
+
+  // ── Rich Component Renderer ───────────────────────────────────────────────────
+  function renderComponent(component) {
+    if (!component || !component.type) return;
+    var container = document.getElementById("salla-chat-messages");
+    var wrap = document.createElement("div");
+    wrap.className = "chat-component";
+
+    if (component.type === "product_cards") {
+      var cardsHtml = '<div class="product-cards-wrap">';
+      (component.products || []).forEach(function (p) {
+        var imgTag = p.image
+          ? '<img src="' + escapeAttr(p.image) + '" alt="' + escapeAttr(p.name) + '" onerror="this.style.display=\'none\'">'
+          : '<div style="width:100%;height:100px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:28px">🖨️</div>';
+        var priceHtml = p.sale_price && p.sale_price !== p.price && p.sale_price !== ""
+          ? '<del>' + esc(p.price) + '</del> ' + esc(p.sale_price) + ' ' + esc(p.currency)
+          : esc(p.price) + ' ' + esc(p.currency);
+        var availHtml = p.available ? '' : '<div class="card-unavail">⛔ نفد المخزون</div>';
+        cardsHtml += (
+          '<div class="product-card">' +
+            imgTag +
+            '<div class="card-body">' +
+              '<div class="card-name">' + esc(p.name) + '</div>' +
+              '<div class="card-price">' + priceHtml + '</div>' +
+              availHtml +
+              '<button class="card-add" data-id="' + escapeAttr(p.id) + '" data-name="' + escapeAttr(p.name) + '"' +
+                (p.available ? '' : ' disabled') + '>أضف للسلة</button>' +
+            '</div>' +
+          '</div>'
+        );
+      });
+      cardsHtml += '</div>';
+      wrap.innerHTML = cardsHtml;
+
+      // Wire "أضف للسلة" buttons
+      wrap.querySelectorAll(".card-add").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var name = btn.getAttribute("data-name");
+          sendMessage("أضف " + name + " للسلة");
+        });
+      });
+
+    } else if (component.type === "cart") {
+      var items = component.items || [];
+      var currency = component.currency || "SAR";
+      var itemsHtml = items.map(function (item) {
+        var sub = (parseFloat(item.price || 0) * parseInt(item.quantity || 1, 10)).toFixed(2);
+        var imgTag = item.image
+          ? '<img src="' + escapeAttr(item.image) + '" alt="" onerror="this.style.display=\'none\'">'
+          : '<div style="width:36px;height:36px;background:#f1f5f9;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">📦</div>';
+        return (
+          '<div class="cart-item">' +
+            imgTag +
+            '<span class="ci-name">' + esc(item.name) + '</span>' +
+            '<span class="ci-qty">×' + item.quantity + '</span>' +
+            '<span class="ci-sub">' + sub + ' ' + esc(currency) + '</span>' +
+          '</div>'
+        );
+      }).join("");
+      wrap.innerHTML = (
+        '<div class="cart-component">' +
+          '<div class="cart-title">🛒 سلة التسوق (' + items.length + ' منتج)</div>' +
+          itemsHtml +
+          '<div class="cart-total"><span>الإجمالي</span><span>' + esc(component.total) + ' ' + esc(currency) + '</span></div>' +
+          '<button class="cart-checkout-btn">إتمام الطلب ←</button>' +
+        '</div>'
+      );
+      wrap.querySelector(".cart-checkout-btn").addEventListener("click", function () {
+        sendMessage("أريد إتمام الطلب");
+      });
+
+    } else if (component.type === "checkout") {
+      wrap.innerHTML = (
+        '<div class="checkout-component">' +
+          '<div class="co-title">✅ تم إنشاء طلبك بنجاح!</div>' +
+          (component.order_ref ? '<div class="co-ref">رقم الطلب: #' + esc(component.order_ref) + '</div>' : '') +
+          '<div class="co-total">الإجمالي: ' + esc(component.total) + ' ' + esc(component.currency || "SAR") + '</div>' +
+          '<a href="' + escapeAttr(component.url) + '" target="_blank" rel="noopener" class="checkout-pay-btn">💳 ادفع الآن</a>' +
+        '</div>'
+      );
+
+    } else if (component.type === "checkout_fallback") {
+      var linksHtml = (component.items || [])
+        .filter(function (i) { return i.url; })
+        .map(function (i) {
+          return '<a href="' + escapeAttr(i.url) + '" target="_blank" rel="noopener">• ' + esc(i.name) + '</a>';
+        }).join("<br>");
+      wrap.innerHTML = (
+        '<div class="checkout-fallback">' +
+          '<div class="cf-title">🛒 أتمم طلبك عبر الروابط التالية:</div>' +
+          '<div style="display:flex;flex-direction:column;gap:4px">' + linksHtml + '</div>' +
+        '</div>'
+      );
+    } else {
+      return; // unknown component — skip
+    }
+
+    container.appendChild(wrap);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // XSS helpers
+  function esc(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function escapeAttr(str) {
+    return String(str || "").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   // ── Human Takeover UI ─────────────────────────────────────────────────────────
@@ -365,6 +573,16 @@
 
         // Always show the reply (either bot reply or "support team notified" message)
         appendMessage(botEnabled ? "bot" : "system-note", data.reply || "عذراً، لم أفهم طلبك. حاول مرة أخرى.");
+
+        // Render rich components (product cards, cart, checkout…)
+        if (data.components && data.components.length > 0) {
+          data.components.forEach(function (comp) { renderComponent(comp); });
+        }
+
+        // Update cart badge in header
+        if (typeof data.cart_count !== "undefined") {
+          updateCartBadge(data.cart_count);
+        }
       }
     } catch (e) {
       hideTyping();
@@ -423,6 +641,7 @@
     var fileInput = document.getElementById("salla-file-input");
     var filePreview = document.getElementById("salla-file-preview");
     var badge = document.getElementById("salla-chat-badge");
+    var cartBadge = document.getElementById("salla-cart-badge");
 
     // Show badge on load
     badge.style.display = "flex";
@@ -473,6 +692,13 @@
         sendMessage(text);
       }
     });
+
+    // Cart badge click → show cart
+    if (cartBadge) {
+      cartBadge.addEventListener("click", function () {
+        sendMessage("اعرض سلة التسوق");
+      });
+    }
 
     // File upload
     attachBtn.addEventListener("click", function () {

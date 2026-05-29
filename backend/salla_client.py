@@ -38,3 +38,33 @@ class SallaClient:
 
     async def search_orders_by_reference(self, reference: str) -> dict:
         return await self._request("GET", "/orders", params={"reference_id": reference})
+
+    async def create_order(
+        self,
+        items: list,
+        customer_info: dict = None,
+        notes: str = "",
+    ) -> dict:
+        """
+        Create a draft order and return the customer-facing payment URL.
+
+        items:  [{"id": product_id, "quantity": qty}]
+        customer_info: {"name": "...", "phone": "...", "email": "..."}
+        """
+        payload: dict = {"items": [{"id": str(i["product_id"]), "quantity": i["quantity"]} for i in items]}
+        if notes:
+            payload["notes"] = notes
+
+        if customer_info:
+            name_parts = (customer_info.get("name") or "").split()
+            payload["customer"] = {
+                "first_name": name_parts[0] if name_parts else "",
+                "last_name":  " ".join(name_parts[1:]) if len(name_parts) > 1 else "",
+                "mobile":     customer_info.get("phone", ""),
+                "email":      customer_info.get("email", ""),
+            }
+
+        return await self._request("POST", "/orders", json=payload)
+
+    async def get_customer_by_phone(self, phone: str) -> dict:
+        return await self._request("GET", "/customers", params={"keyword": phone})
