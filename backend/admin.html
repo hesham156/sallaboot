@@ -569,10 +569,83 @@ select.form-control{cursor:pointer}
         <div class="section-title">📋 آخر نتيجة مزامنة</div>
         <div id="last-sync-detail" style="color:#64748b;font-size:14px">جارٍ التحميل…</div>
       </div>
+      <!-- Snippets Generator -->
       <div class="section">
-        <div class="section-title">🧩 كود تضمين الويدجت</div>
-        <div style="font-size:14px;color:#64748b;margin-bottom:12px">ضع هذا الكود قبل <code>&lt;/body&gt;</code> في صفحات متجرك على سلة:</div>
-        <div id="widget-embed-code" class="log-box" style="font-size:13px;user-select:all"></div>
+        <div class="section-title">🧩 Salla Snippets — تضمين تلقائي</div>
+        <div class="alert alert-success" style="margin-bottom:16px">
+          ✅ أضف الكود مرة واحدة في Partners Portal وسلة تحقنه تلقائياً في <strong>كل متجر</strong> يثبّت تطبيقك.
+          لا حاجة لأي إعداد يدوي من أصحاب المتاجر.
+        </div>
+
+        <!-- Steps -->
+        <div style="margin-bottom:20px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px">خطوات الإعداد:</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#374151">
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <span style="min-width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">١</span>
+              <span>افتح <a href="https://salla.partners" target="_blank" style="color:#3b82f6">salla.partners</a> ← تطبيقاتي ← تطبيقك ← قسم <strong>Snippets</strong></span>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <span style="min-width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">٢</span>
+              <span>اضغط <strong>إنشاء Snippet جديد</strong> واختر الموضع <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">Body End</code></span>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <span style="min-width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">٣</span>
+              <span>الصق الكود المولَّد أدناه واحفظ ✅</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Customizer -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+          <div>
+            <label class="form-label">لون البوت</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="color" id="snip-color" value="#1a56db"
+                style="width:40px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:2px;cursor:pointer"
+                oninput="regenerateSnippet()">
+              <input type="text" id="snip-color-hex" class="form-control" value="#1a56db"
+                style="flex:1" oninput="syncColorPicker()" placeholder="#1a56db">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">موقع الزر</label>
+            <select id="snip-position" class="form-control" onchange="regenerateSnippet()">
+              <option value="left">يسار (left) ← الافتراضي</option>
+              <option value="right">يمين (right)</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">رسالة الترحيب (اختياري)</label>
+            <input type="text" id="snip-welcome" class="form-control"
+              placeholder="مرحباً! كيف أقدر أساعدك؟" oninput="regenerateSnippet()">
+          </div>
+        </div>
+
+        <!-- Generated snippet code (Salla Partners Portal — with {{ merchant.id }}) -->
+        <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:6px">
+          📋 كود Salla Snippets
+          <span style="font-weight:400;color:#64748b;font-size:12px"> — الصقه في Partners Portal → Snippets</span>
+        </div>
+        <div id="snippet-code-box" class="log-box" style="font-size:12px;user-select:all;position:relative;padding-left:100px"></div>
+        <button class="btn btn-primary btn-sm" onclick="copyCode('snippet-code-box')" style="margin-top:8px">
+          📋 نسخ كود Snippets
+        </button>
+        <a href="/snippet" target="_blank" class="btn btn-outline btn-sm" style="margin-top:8px;margin-right:8px">
+          🔗 فتح صفحة الكود
+        </a>
+
+        <hr class="divider">
+
+        <!-- Manual embed code (with actual store ID — for testing) -->
+        <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:6px">
+          🔧 كود التضمين اليدوي
+          <span style="font-weight:400;color:#64748b;font-size:12px"> — للاختبار في متجرك مباشرةً</span>
+        </div>
+        <div id="widget-embed-code" class="log-box" style="font-size:12px;user-select:all"></div>
+        <button class="btn btn-outline btn-sm" onclick="copyCode('widget-embed-code')" style="margin-top:8px">
+          📋 نسخ كود التضمين
+        </button>
       </div>
     </div>
 
@@ -892,12 +965,8 @@ function startApp() {
     document.getElementById('store-view').style.display = 'block';
     document.getElementById('nav-store').style.display  = 'block';
     document.getElementById('sidebar-store-sub').textContent = `متجر: ${STORE_ID}`;
-    // Show embed code
-    const embedEl = document.getElementById('widget-embed-code');
-    if (embedEl) {
-      embedEl.textContent =
-        `<script>\n  window.SallaChatConfig = {\n    storeId: "${STORE_ID}"\n  };\n<\/script>\n<script src="${location.origin}/widget.js"><\/script>`;
-    }
+    // Generate Snippets + manual embed codes
+    regenerateSnippet();
     loadDashboard();
     setInterval(loadDashboard, 30000);
     setInterval(() => {
@@ -935,7 +1004,7 @@ function showPage(name, el) {
   if (el) el.classList.add('active');
   if (name === 'products')      loadProducts();
   if (name === 'debug')         loadDebug();
-  if (name === 'sync')          loadSyncInfo();
+  if (name === 'sync')          { loadSyncInfo(); regenerateSnippet(); }
   if (name === 'conversations') loadConversations();
   if (name === 'settings')      loadAISettings();
   if (name === 'webhooks')      loadWebhooks();
@@ -1610,6 +1679,77 @@ async function saveAIConfig() {
     if (res.ok) { toast(data.message || 'تم الحفظ', 'success'); loadAISettings(); }
     else        { toast(data.detail || 'حدث خطأ',  'error'); }
   } catch(e) { toast('تعذّر الحفظ', 'error'); }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Snippet code generator
+// ─────────────────────────────────────────────────────────────────────────────
+function regenerateSnippet() {
+  if (!STORE_ID) return;
+  const color    = (document.getElementById('snip-color-hex')?.value || '#1a56db').trim();
+  const position = document.getElementById('snip-position')?.value || 'left';
+  const welcome  = document.getElementById('snip-welcome')?.value.trim() || '';
+  const origin   = location.origin;
+
+  // ── Salla Snippets code: uses {{ merchant.id }} template variable ──────────
+  let snippetLines = [
+    '<!-- Salla Chat Bot | يُضاف مرة واحدة في Partners Portal → Snippets -->',
+    '<script>',
+    'window.SallaChatConfig = {',
+    `  storeId:      "{{ merchant.id }}",`,
+    `  storeName:    "{{ store.name }}",`,
+    `  primaryColor: "${color}",`,
+    `  position:     "${position}"`,
+  ];
+  if (welcome) snippetLines.push(`  welcomeMessage: "${welcome.replace(/"/g, '\\"')}",`);
+  snippetLines.push('};', '</scr' + 'ipt>', `<script src="${origin}/widget.js" defer></scr` + 'ipt>');
+
+  const snippetEl = document.getElementById('snippet-code-box');
+  if (snippetEl) snippetEl.textContent = snippetLines.join('\n');
+
+  // ── Manual embed code: uses the real store ID (for testing) ───────────────
+  let manualLines = [
+    '<!-- بوت المتجر — ضعه قبل </body> في صفحات سلة -->',
+    '<script>',
+    'window.SallaChatConfig = {',
+    `  storeId:      "${STORE_ID}",`,
+    `  primaryColor: "${color}",`,
+    `  position:     "${position}"`,
+  ];
+  if (welcome) manualLines.push(`  welcomeMessage: "${welcome.replace(/"/g, '\\"')}",`);
+  manualLines.push('};', '</scr' + 'ipt>', `<script src="${origin}/widget.js" defer></scr` + 'ipt>');
+
+  const embedEl = document.getElementById('widget-embed-code');
+  if (embedEl) embedEl.textContent = manualLines.join('\n');
+
+  // Sync color picker input with hex field
+  const picker = document.getElementById('snip-color');
+  if (picker && picker.value !== color && /^#[0-9a-f]{6}$/i.test(color)) picker.value = color;
+}
+
+function syncColorPicker() {
+  const hex = document.getElementById('snip-color-hex')?.value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(hex)) {
+    const picker = document.getElementById('snip-color');
+    if (picker) picker.value = hex;
+  }
+  regenerateSnippet();
+}
+
+async function copyCode(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  try {
+    await navigator.clipboard.writeText(el.textContent);
+    toast('✅ تم النسخ!');
+  } catch(e) {
+    // Fallback: select text
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    toast('✅ تم تحديد الكود — اضغط Ctrl+C للنسخ', 'warn');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

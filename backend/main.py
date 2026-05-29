@@ -170,6 +170,91 @@ async def serve_widget():
     return FileResponse(widget_path, media_type="application/javascript")
 
 
+@app.get("/snippet")
+async def snippet_guide():
+    """
+    Public page — shows the exact Salla Snippets code the app developer needs
+    to paste in the Partners Portal (App → Snippets → New Snippet).
+
+    Uses {{ merchant.id }} so Salla resolves the correct store ID automatically
+    for every merchant that installs the app.
+    """
+    base = os.getenv("BASE_URL", "http://localhost:8000")
+    snippet_code = (
+        f"<!-- Salla Chat Bot — paste this in Partners Portal → App → Snippets -->\n"
+        f"<script>\n"
+        f"window.SallaChatConfig = {{\n"
+        f'  storeId:      "{{{{ merchant.id }}}}",\n'
+        f'  storeName:    "{{{{ store.name }}}}",\n'
+        f'  primaryColor: "#1a56db",\n'
+        f'  position:     "left"\n'
+        f"}};\n"
+        f"</script>\n"
+        f'<script src="{base}/widget.js" defer></script>'
+    )
+    html = f"""<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Salla Snippets — كود التضمين التلقائي</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:'Tajawal',sans-serif;background:#f1f5f9;color:#1e293b;padding:32px;direction:rtl}}
+  .card{{background:#fff;border-radius:16px;padding:28px 32px;max-width:820px;margin:0 auto;box-shadow:0 2px 16px rgba(0,0,0,.08)}}
+  h1{{font-size:22px;font-weight:800;margin-bottom:6px}}
+  .sub{{color:#64748b;font-size:14px;margin-bottom:24px}}
+  .steps{{counter-reset:step;display:flex;flex-direction:column;gap:12px;margin-bottom:24px}}
+  .step{{display:flex;gap:12px;align-items:flex-start;font-size:14px;line-height:1.6}}
+  .step::before{{counter-increment:step;content:counter(step);min-width:26px;height:26px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0;margin-top:1px}}
+  code{{background:#f1f5f9;padding:2px 7px;border-radius:4px;font-size:13px;font-family:monospace}}
+  .code-box{{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:20px;font-family:monospace;font-size:13px;line-height:1.7;white-space:pre;overflow-x:auto;position:relative;margin-bottom:16px}}
+  .copy-btn{{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:9px 20px;font-family:'Tajawal',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}}
+  .copy-btn:hover{{background:#2563eb}}
+  .alert{{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:12px 16px;font-size:13px;line-height:1.6}}
+  a{{color:#3b82f6}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🧩 Salla Snippets — تضمين تلقائي للبوت</h1>
+  <p class="sub">هذا الكود يُضاف مرة واحدة في Partners Portal وسلة تحقنه تلقائياً في كل متجر يثبّت تطبيقك</p>
+
+  <div class="steps">
+    <div class="step">افتح <a href="https://salla.partners" target="_blank">salla.partners</a> ← تطبيقاتي ← تطبيقك ← Snippets</div>
+    <div class="step">اضغط <strong>إنشاء Snippet جديد</strong></div>
+    <div class="step">اختر الموضع: <code>Body End</code> (قبل نهاية &lt;body&gt;)</div>
+    <div class="step">الصق الكود التالي كاملاً ثم احفظ</div>
+    <div class="step">عند تثبيت أي متجر للتطبيق، البوت يظهر تلقائياً بدون أي إعداد إضافي ✅</div>
+  </div>
+
+  <div class="code-box" id="snippet-code">{snippet_code}</div>
+  <button class="copy-btn" onclick="copySnippet()">📋 نسخ الكود</button>
+
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+  <div class="alert">
+    💡 <strong>ملاحظة:</strong> <code>{{{{ merchant.id }}}}</code> و <code>{{{{ store.name }}}}</code>
+    يُستبدلان تلقائياً بسلة بمعرّف وباسم المتجر الحقيقي — لا تغيّر هذه القيم يدوياً.
+    <br>يمكنك تغيير <code>primaryColor</code> و <code>position</code> حسب تصميم تطبيقك.
+  </div>
+</div>
+
+<script>
+function copySnippet() {{
+  var code = document.getElementById('snippet-code').textContent;
+  navigator.clipboard.writeText(code).then(function() {{
+    var btn = document.querySelector('.copy-btn');
+    btn.textContent = '✅ تم النسخ!';
+    setTimeout(function(){{ btn.textContent = '📋 نسخ الكود'; }}, 2000);
+  }});
+}}
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
 @app.get("/health")
 async def health():
     stores = sm.list_stores()

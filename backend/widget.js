@@ -2,17 +2,25 @@
   "use strict";
 
   // ── Configuration ────────────────────────────────────────────────────────────
+  // window.SallaChatConfig is set by the Salla Snippet before this script loads.
+  // In Salla Partners Portal Snippets, {{ merchant.id }} is resolved server-side
+  // so storeId is automatically the correct merchant ID for every store.
+  var _ext = window.SallaChatConfig || {};
   var _defaults = {
-    apiUrl: "https://sallaboot-t.up.railway.app",
-    storeId: "default",           // Each store sets its own ID: window.SallaChatConfig = { storeId: "12345" }
-    primaryColor: "#1a56db",
-    storeName: "متجر الطباعة",
+    apiUrl:         "https://sallaboot-t.up.railway.app",
+    storeId:        "default",
+    primaryColor:   "#1a56db",
+    position:       "left",   // "left" | "right"
+    storeName:      "متجر الطباعة",
     welcomeMessage: "مرحباً! 👋 أنا مساعد متجرنا للطباعة. كيف أقدر أساعدك اليوم؟",
-    placeholder: "اكتب سؤالك هنا...",
-    maxFileSizeMB: 20,
+    placeholder:    "اكتب سؤالك هنا...",
+    maxFileSizeMB:  20,
   };
-  // Allow overriding via window.SallaChatConfig
-  var CONFIG = Object.assign({}, _defaults, window.SallaChatConfig || {});
+  var CONFIG = Object.assign({}, _defaults, _ext);
+  // Normalise: storeId must always be a non-empty string
+  CONFIG.storeId = String(CONFIG.storeId || "default").trim() || "default";
+  // Support short alias: color → primaryColor
+  if (_ext.color && !_ext.primaryColor) CONFIG.primaryColor = _ext.color;
 
   // ── State ─────────────────────────────────────────────────────────────────────
   var sessionId = null;
@@ -30,10 +38,11 @@
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────────
+  var _side = CONFIG.position === "right" ? "right" : "left";
   var styles = `
     #salla-chat-widget * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; }
     #salla-chat-btn {
-      position: fixed; bottom: 24px; left: 24px; z-index: 9999;
+      position: fixed; bottom: 24px; ${_side}: 24px; z-index: 9999;
       width: 60px; height: 60px; border-radius: 50%;
       background: ${CONFIG.primaryColor}; border: none; cursor: pointer;
       box-shadow: 0 4px 20px rgba(26,86,219,0.4);
@@ -50,7 +59,7 @@
       display: none;
     }
     #salla-chat-panel {
-      position: fixed; bottom: 96px; left: 24px; z-index: 9998;
+      position: fixed; bottom: 96px; ${_side}: 24px; z-index: 9998;
       width: 370px; height: 560px; border-radius: 16px;
       background: #fff; box-shadow: 0 10px 50px rgba(0,0,0,0.18);
       display: flex; flex-direction: column; overflow: hidden;
@@ -168,7 +177,7 @@
     .file-preview .remove { margin-right: auto; cursor: pointer; color: #94a3b8; font-size: 16px; }
     .file-preview .remove:hover { color: #ef4444; }
     @media (max-width: 420px) {
-      #salla-chat-panel { width: calc(100vw - 16px); left: 8px; bottom: 80px; height: 70vh; }
+      #salla-chat-panel { width: calc(100vw - 16px); ${_side}: 8px; bottom: 80px; height: 70vh; }
     }
     /* ── Cart badge on header ─────────────────────────────────── */
     #salla-cart-badge {
