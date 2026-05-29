@@ -8,7 +8,7 @@ load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -62,6 +62,13 @@ class ChatResponse(BaseModel):
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
+@app.get("/widget.js")
+async def serve_widget():
+    """Serve the chat widget JS file."""
+    widget_path = Path(__file__).parent / "widget.js"
+    return FileResponse(widget_path, media_type="application/javascript")
+
+
 @app.get("/health")
 async def health():
     has_token = bool(os.getenv("SALLA_ACCESS_TOKEN"))
