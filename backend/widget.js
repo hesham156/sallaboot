@@ -17,8 +17,19 @@
     maxFileSizeMB:  20,
   };
   var CONFIG = Object.assign({}, _defaults, _ext);
-  // Normalise: storeId must always be a non-empty string
-  CONFIG.storeId = String(CONFIG.storeId || "default").trim() || "default";
+
+  // Normalise storeId — if Salla's server-side template was NOT resolved
+  // (widget tested directly outside Salla Snippets), "{{ merchant.id }}" is
+  // passed literally.  Detect it and fall back to "default".
+  var _sid = String(CONFIG.storeId || "").trim();
+  if (!_sid || _sid.includes("{{") || _sid.includes("}}")) _sid = "default";
+  CONFIG.storeId = _sid;
+
+  // Same sanitisation for storeName
+  var _sn = String(CONFIG.storeName || "").trim();
+  if (!_sn || _sn.includes("{{") || _sn.includes("}}")) _sn = _defaults.storeName;
+  CONFIG.storeName = _sn;
+
   // Support short alias: color → primaryColor
   if (_ext.color && !_ext.primaryColor) CONFIG.primaryColor = _ext.color;
 

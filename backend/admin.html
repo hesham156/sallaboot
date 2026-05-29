@@ -583,6 +583,15 @@ select.form-control{cursor:pointer}
           <div class="page-sub">تحديث قاعدة معرفة البوت من متجر سلة</div>
         </div>
       </div>
+      <!-- Test bot -->
+      <div class="section" style="margin-bottom:0">
+        <div class="section-title">🧪 اختبر البوت</div>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px;line-height:1.7">
+          افتح صفحة اختبار مدمجة تُشغّل البوت بـ store_id الحقيقي — مفيد للتأكد من ردود البوت قبل النشر.
+        </p>
+        <button class="btn btn-outline" onclick="openTestWidget()">🧪 فتح نافذة اختبار البوت</button>
+      </div>
+
       <div class="section">
         <div class="section-title">🔄 مزامنة يدوية</div>
         <p style="font-size:14px;color:#64748b;margin-bottom:16px;line-height:1.7">
@@ -1978,6 +1987,12 @@ async function saveAIConfig() {
     if (res.ok) { toast(data.message || 'تم الحفظ', 'success'); loadAISettings(); }
     else        { toast(data.detail || 'حدث خطأ',  'error'); }
   } catch(e) { toast('تعذّر الحفظ', 'error'); }
+}
+
+function openTestWidget() {
+  if (!STORE_ID) { toast('متاح فقط في لوحة تحكم المتجر', 'error'); return; }
+  const url = `/test-widget/${STORE_ID}`;
+  window.open(url, 'test-bot', 'width=480,height=640,resizable=yes,scrollbars=yes');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

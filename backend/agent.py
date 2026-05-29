@@ -2,6 +2,7 @@ import os
 import re as _re
 import json
 import anthropic
+from anthropic import AsyncAnthropic
 from groq import AsyncGroq
 from salla_client import SallaClient
 from store_sync import build_knowledge_summary, get_store_data
@@ -284,7 +285,7 @@ class PrintingAgent:
             self.ai           = None
         elif anthropic_key:
             self.provider    = "anthropic"
-            self.ai          = anthropic.Anthropic(api_key=anthropic_key)
+            self.ai          = AsyncAnthropic(api_key=anthropic_key)  # async client
             self.groq_client = None
         else:
             raise RuntimeError("يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY في إعدادات المتجر أو متغيرات البيئة.")
@@ -871,7 +872,7 @@ class PrintingAgent:
         history = cs.get_groq_history(session_id)
 
         while True:
-            response = self.ai.messages.create(
+            response = await self.ai.messages.create(
                 model=self._anthropic_model,
                 max_tokens=1024,
                 system=get_system_prompt(self.store_id),

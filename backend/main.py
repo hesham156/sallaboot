@@ -338,6 +338,58 @@ function copySnippet() {{
     return HTMLResponse(html)
 
 
+@app.get("/test-widget/{store_id}", response_class=HTMLResponse)
+async def test_widget_page(store_id: str):
+    """
+    Quick test page — embeds the widget with the *real* store_id so developers
+    can test the bot without going through Salla Snippets.
+    Linked from the admin dashboard 'Test Bot' button.
+    """
+    base  = os.getenv("BASE_URL", "http://localhost:8000")
+    info  = sm.get_store_info(store_id)
+    name  = info.get("store_name", f"متجر {store_id}")
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>اختبار بوت — {name}</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:'Tajawal',sans-serif;background:#f1f5f9;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px}}
+  .card{{background:#fff;border-radius:16px;padding:28px 32px;max-width:480px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.10);text-align:center}}
+  h1{{font-size:20px;font-weight:800;margin-bottom:8px;color:#1e293b}}
+  .sub{{color:#64748b;font-size:14px;margin-bottom:24px}}
+  .info{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;font-size:13px;color:#475569;text-align:right;margin-bottom:16px}}
+  .info b{{color:#1e293b}}
+  .hint{{font-size:12px;color:#94a3b8;margin-top:16px}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🧪 وضع الاختبار</h1>
+  <p class="sub">البوت يعمل بـ store_id الحقيقي — اضغط أيقونة الدردشة أسفل الشاشة</p>
+  <div class="info">
+    <div><b>المتجر:</b> {name}</div>
+    <div><b>Store ID:</b> {store_id}</div>
+  </div>
+  <p class="hint">💡 هذه الصفحة للاختبار فقط — لا تشاركها مع العملاء</p>
+</div>
+<script>
+window.SallaChatConfig = {{
+  storeId:      "{store_id}",
+  storeName:    "{name}",
+  primaryColor: "#1a56db",
+  position:     "left",
+  apiUrl:       "{base}",
+}};
+</script>
+<script src="{base}/widget.js" defer></script>
+</body>
+</html>""")
+
+
 @app.get("/health")
 async def health():
     stores = sm.list_stores()
@@ -1285,6 +1337,13 @@ async def chat(req: ChatRequest):
         raise HTTPException(400, "الرسالة فارغة")
 
     store_id   = req.store_id or "default"
+
+    # Sanitize store_id — if Salla's template wasn't resolved server-side
+    # (e.g. widget tested outside Salla Snippets), "{{ merchant.id }}" is
+    # passed literally.  Fall back to "default" to avoid polluting the registry.
+    if "{{" in store_id or "}}" in store_id:
+        store_id = "default"
+
     session_id = req.session_id or str(uuid.uuid4())
     bot_on     = cs.is_bot_enabled(session_id)
 
@@ -1337,20 +1396,35 @@ async def chat(req: ChatRequest):
     try:
         reply = await agent.chat(message=req.message, session_id=session_id)
     except Exception as e:
-        err_msg = str(e)
-        print(f"[chat] ❌ agent.chat error for store={store_id!r} session={session_id!r}: {type(e).__name__}: {err_msg}")
-        # Return a user-friendly message — keep bot_enabled=True so the widget
-        # does NOT show "تم تحويل المحادثة" and does NOT loop into handback/takeover
-        friendly = (
-            "عذراً، حدث خطأ مؤقت في معالجة طلبك. يرجى المحاولة مرة أخرى. 🙏"
-            if "API" not in err_msg and "key" not in err_msg.lower()
-            else "عذراً، هناك مشكلة في إعدادات الذكاء الاصطناعي. يرجى التواصل مع الدعم."
+        import traceback as _tb
+        err_msg  = str(e)
+        err_type = type(e).__name__
+        print(
+            f"[chat] ❌ agent.chat error store={store_id!r} session={session_id!r}\n"
+            f"  {err_type}: {err_msg}\n"
+            f"{_tb.format_exc()}"
         )
+
+        # Pick a user-visible message based on error class / text.
+        # Never return bot_enabled=False here — that triggers the widget's
+        # admin-takeover loop and confuses the user.
+        err_lower = err_msg.lower()
+        if "rate" in err_lower or "429" in err_lower or "quota" in err_lower:
+            friendly = "عذراً، المساعد مشغول الآن بسبب الضغط الزائد. انتظر لحظة وحاول مجدداً. ⏳"
+        elif "401" in err_lower or "invalid" in err_lower and "key" in err_lower:
+            friendly = "عذراً، هناك مشكلة في مفتاح API للذكاء الاصطناعي. يرجى مراجعة الإعدادات من لوحة التحكم. 🔑"
+        elif "timeout" in err_lower or "connect" in err_lower or "connection" in err_lower:
+            friendly = "عذراً، انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى. 🌐"
+        elif "key" in err_lower or "api" in err_lower:
+            friendly = "عذراً، هناك مشكلة في إعدادات الذكاء الاصطناعي. يرجى التواصل مع الدعم. ⚙️"
+        else:
+            friendly = "عذراً، حدث خطأ مؤقت في معالجة طلبك. يرجى المحاولة مرة أخرى. 🙏"
+
         cs.add_message(session_id, "assistant", friendly, store_id)
         return ChatResponse(
             reply=friendly,
             session_id=session_id,
-            bot_enabled=True,   # error ≠ admin takeover; don't confuse the widget
+            bot_enabled=True,   # error ≠ admin takeover; do NOT confuse the widget
         )
 
     # Pick up any rich UI component set by the agent tools this turn
