@@ -92,7 +92,7 @@ _ADMIN_HTML = Path(__file__).parent / "admin.html"
 # ── Auth middleware ────────────────────────────────────────────────────────────
 # Protects all per-store admin API routes (not the HTML pages or auth endpoints).
 _PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics)"
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
@@ -458,6 +458,125 @@ async def store_debug(store_id: str):
             result["salla_api_test"] = {"error": f"{type(e).__name__}: {e}"}
 
     return result
+
+
+# ── Analytics ──────────────────────────────────────────────────────────────────
+
+@app.get("/admin/{store_id}/analytics")
+async def store_analytics(store_id: str):
+    """
+    Return aggregated analytics for a store.
+    Computed from in-memory conversation_store + store_manager cache.
+    """
+    import datetime as _dtt
+
+    now_utc = _dtt.datetime.utcnow()
+
+    # ── Conversations ──────────────────────────────────────────────────────────
+    all_convs = {
+        sid: conv
+        for sid, conv in cs.all_conversations().items()
+        if conv.get("store_id", "default") == store_id
+    }
+
+    total_convs   = len(all_convs)
+    today_convs   = 0
+    week_convs    = 0
+    bot_handled   = 0
+    admin_takeover = 0
+    total_msgs    = 0
+    user_msgs     = 0
+    bot_msgs      = 0
+    admin_msgs    = 0
+
+    # Daily counts: last 14 days  {date_str: count}
+    daily: dict = {}
+    for i in range(14):
+        d = (now_utc - _dtt.timedelta(days=i)).strftime("%Y-%m-%d")
+        daily[d] = 0
+
+    # Hourly distribution: 24-slot list  [count_at_hour_0, ..., count_at_hour_23]
+    hourly = [0] * 24
+
+    for conv in all_convs.values():
+        created_str = conv.get("created_at", "")
+        try:
+            created = _dtt.datetime.fromisoformat(created_str)
+            delta   = now_utc - created
+            if delta.days == 0:
+                today_convs += 1
+            if delta.days < 7:
+                week_convs += 1
+            date_key = created.strftime("%Y-%m-%d")
+            if date_key in daily:
+                daily[date_key] += 1
+            hourly[created.hour] += 1
+        except Exception:
+            pass
+
+        if not conv.get("bot_enabled", True):
+            admin_takeover += 1
+        else:
+            bot_handled += 1
+
+        for m in conv.get("messages", []):
+            total_msgs += 1
+            role = m.get("role", "")
+            if role == "user":
+                user_msgs += 1
+            elif role == "assistant":
+                bot_msgs += 1
+            elif role == "admin":
+                admin_msgs += 1
+
+    avg_msgs = round(total_msgs / total_convs, 1) if total_convs else 0
+
+    daily_counts = [
+        {"date": d, "count": daily[d]}
+        for d in sorted(daily.keys())
+    ]
+
+    # ── Abandoned carts ────────────────────────────────────────────────────────
+    carts_list = list(_abandoned_carts.get(store_id, []))
+    if not carts_list and db.available():
+        carts_list = await db.load_abandoned_carts(store_id)
+
+    total_carts    = len(carts_list)
+    recovered_carts = sum(1 for c in carts_list if c.get("recovered"))
+    pending_carts  = total_carts - recovered_carts
+    recovery_rate  = round(recovered_carts / total_carts * 100, 1) if total_carts else 0
+
+    # ── Products / store cache ─────────────────────────────────────────────────
+    cache = sm.get_cache(store_id)
+
+    return {
+        "conversations": {
+            "total":          total_convs,
+            "today":          today_convs,
+            "this_week":      week_convs,
+            "bot_handled":    bot_handled,
+            "admin_takeover": admin_takeover,
+            "avg_messages":   avg_msgs,
+            "daily_counts":   daily_counts,
+            "hourly_distribution": hourly,
+        },
+        "messages": {
+            "total":     total_msgs,
+            "user":      user_msgs,
+            "bot":       bot_msgs,
+            "admin":     admin_msgs,
+        },
+        "abandoned_carts": {
+            "total":         total_carts,
+            "recovered":     recovered_carts,
+            "pending":       pending_carts,
+            "recovery_rate": recovery_rate,
+        },
+        "products": {
+            "count":     cache.get("products_count", 0),
+            "last_sync": cache.get("last_sync", "never"),
+        },
+    }
 
 
 # ── Per-store bot toggle ───────────────────────────────────────────────────────

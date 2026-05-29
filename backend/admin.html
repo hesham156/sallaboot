@@ -6,6 +6,7 @@
 <title>لوحة تحكم | بوت المتجر</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Tajawal',sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh}
@@ -266,6 +267,32 @@ tr:hover td{background:#fafbfc}
 .form-control:focus{border-color:#3b82f6}
 select.form-control{cursor:pointer}
 
+/* ── Analytics ── */
+.analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+.analytics-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:18px}
+.chart-wrap{background:#fff;border-radius:12px;padding:20px 22px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.chart-title{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:#1e293b}
+.chart-canvas-wrap{position:relative;height:180px}
+.mini-stat-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f1f5f9;font-size:14px}
+.mini-stat-row:last-child{border:none}
+.mini-stat-label{color:#64748b;font-weight:500}
+.mini-stat-val{font-weight:700;color:#1e293b}
+.donut-wrap{display:flex;align-items:center;gap:20px}
+.donut-legend{display:flex;flex-direction:column;gap:8px;flex:1}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:13px}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.stat-highlight{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-radius:10px;padding:14px 16px;text-align:center}
+.stat-highlight .num{font-size:32px;font-weight:800;color:#1d4ed8;line-height:1}
+.stat-highlight .lbl{font-size:12px;color:#3b82f6;margin-top:4px;font-weight:600}
+.hourly-bars{display:flex;align-items:flex-end;gap:2px;height:60px;margin-top:8px}
+.hourly-bar{flex:1;background:#bfdbfe;border-radius:3px 3px 0 0;min-height:3px;transition:background .15s;cursor:default;position:relative}
+.hourly-bar:hover{background:#3b82f6}
+.hourly-bar:hover::after{
+  content:attr(data-tip);position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);
+  background:#1e293b;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;white-space:nowrap;pointer-events:none;
+}
+@media(max-width:900px){.analytics-grid,.analytics-grid-3{grid-template-columns:1fr}}
+
 /* ── Login overlay ── */
 #login-overlay{
   position:fixed;inset:0;background:rgba(15,23,42,.75);backdrop-filter:blur(4px);
@@ -344,6 +371,9 @@ select.form-control{cursor:pointer}
     <div class="nav-item" data-page="abandoned" onclick="showPage('abandoned',this)">
       <span class="nav-icon">🛒</span> السلات المتروكة
       <span id="abandoned-badge" class="badge badge-red" style="margin-right:auto;display:none">0</span>
+    </div>
+    <div class="nav-item" data-page="analytics" onclick="showPage('analytics',this)">
+      <span class="nav-icon">📈</span> الإحصائيات
     </div>
     <div class="nav-section">الحساب</div>
     <div class="nav-item" data-page="settings" onclick="showPage('settings',this)">
@@ -765,6 +795,129 @@ select.form-control{cursor:pointer}
       </div>
     </div>
 
+    <!-- ── ANALYTICS ── -->
+    <div class="page" id="page-analytics">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📈 الإحصائيات</div>
+          <div class="page-sub">تحليل أداء البوت والمحادثات والمبيعات</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="loadAnalytics()">🔁 تحديث</button>
+      </div>
+
+      <div id="analytics-loading" style="text-align:center;padding:60px 20px;color:#94a3b8">
+        <span class="spin spin-blue" style="width:32px;height:32px;border-width:3px"></span>
+        <p style="margin-top:12px;font-size:14px">جارٍ تحميل الإحصائيات…</p>
+      </div>
+
+      <div id="analytics-body" style="display:none">
+
+        <!-- ── KPI row ── -->
+        <div class="cards" id="analytics-kpis">
+          <div class="card">
+            <div class="card-icon">💬</div>
+            <div class="card-label">إجمالي المحادثات</div>
+            <div class="card-value" id="an-total-convs">—</div>
+            <div class="card-sub" id="an-week-convs">— هذا الأسبوع</div>
+          </div>
+          <div class="card">
+            <div class="card-icon">💌</div>
+            <div class="card-label">إجمالي الرسائل</div>
+            <div class="card-value" id="an-total-msgs">—</div>
+            <div class="card-sub" id="an-avg-msgs">متوسط — رسالة/محادثة</div>
+          </div>
+          <div class="card">
+            <div class="card-icon">🛒</div>
+            <div class="card-label">السلات المتروكة</div>
+            <div class="card-value" id="an-total-carts">—</div>
+            <div class="card-sub" id="an-recovery">نسبة الاسترداد —%</div>
+          </div>
+          <div class="card">
+            <div class="card-icon">📦</div>
+            <div class="card-label">المنتجات</div>
+            <div class="card-value" id="an-products">—</div>
+            <div class="card-sub" id="an-last-sync">آخر مزامنة: —</div>
+          </div>
+        </div>
+
+        <!-- ── Row 1: daily chart + messages donut ── -->
+        <div class="analytics-grid">
+
+          <!-- Daily conversations chart -->
+          <div class="chart-wrap">
+            <div class="chart-title">📅 المحادثات — آخر 14 يوماً</div>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-daily"></canvas>
+            </div>
+          </div>
+
+          <!-- Messages breakdown donut -->
+          <div class="chart-wrap">
+            <div class="chart-title">💬 توزيع الرسائل</div>
+            <div class="donut-wrap">
+              <div style="width:130px;height:130px;flex-shrink:0;position:relative">
+                <canvas id="chart-msgs-donut"></canvas>
+              </div>
+              <div class="donut-legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div><span id="leg-user">رسائل العملاء — </span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div><span id="leg-bot">ردود البوت — </span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div><span id="leg-admin">ردود الأدمن — </span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── Row 2: hourly + bot vs admin ── -->
+        <div class="analytics-grid">
+
+          <!-- Hourly distribution -->
+          <div class="chart-wrap">
+            <div class="chart-title">⏰ توزيع النشاط بالساعة</div>
+            <div class="hourly-bars" id="hourly-bars"></div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;margin-top:4px;direction:ltr">
+              <span>12 م</span><span>6 ص</span><span>12 ص</span><span>6 م</span><span>11 م</span>
+            </div>
+          </div>
+
+          <!-- Bot vs admin handling -->
+          <div class="chart-wrap">
+            <div class="chart-title">🤖 أداء التشغيل</div>
+            <div style="margin-bottom:12px">
+              <div class="mini-stat-row">
+                <span class="mini-stat-label">محادثات اليوم</span>
+                <span class="mini-stat-val" id="an-today">—</span>
+              </div>
+              <div class="mini-stat-row">
+                <span class="mini-stat-label">تولّى البوت</span>
+                <span class="mini-stat-val" style="color:#22c55e" id="an-bot-handled">—</span>
+              </div>
+              <div class="mini-stat-row">
+                <span class="mini-stat-label">تدخّل الأدمن</span>
+                <span class="mini-stat-val" style="color:#f59e0b" id="an-admin-takeover">—</span>
+              </div>
+              <div class="mini-stat-row">
+                <span class="mini-stat-label">السلات المعلّقة</span>
+                <span class="mini-stat-val" style="color:#ef4444" id="an-pending-carts">—</span>
+              </div>
+              <div class="mini-stat-row">
+                <span class="mini-stat-label">السلات المستردة</span>
+                <span class="mini-stat-val" style="color:#22c55e" id="an-recovered-carts">—</span>
+              </div>
+            </div>
+            <!-- Bot handling rate bar -->
+            <div style="font-size:12px;color:#64748b;margin-bottom:4px">نسبة تشغيل البوت</div>
+            <div class="progress-bar" style="height:8px">
+              <div class="progress-fill" id="an-bot-rate-bar" style="background:#22c55e"></div>
+            </div>
+            <div style="font-size:12px;color:#22c55e;font-weight:700;margin-top:4px" id="an-bot-rate-text">—%</div>
+          </div>
+
+        </div>
+
+      </div><!-- /analytics-body -->
+    </div>
+
     <!-- ── SETTINGS ── -->
     <div class="page" id="page-settings">
       <div class="page-header">
@@ -1009,6 +1162,7 @@ function showPage(name, el) {
   if (name === 'settings')      loadAISettings();
   if (name === 'webhooks')      loadWebhooks();
   if (name === 'abandoned')     loadAbandoned();
+  if (name === 'analytics')    loadAnalytics();
 }
 function showSuperPage(name, el) {
   document.querySelectorAll('.super-page').forEach(p => p.classList.remove('active'));
@@ -1893,6 +2047,130 @@ async function markRecovered(cartId, btn) {
     btn.disabled    = false;
     btn.textContent = '✅ تم التواصل';
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analytics
+// ─────────────────────────────────────────────────────────────────────────────
+var _chartDaily = null;
+var _chartMsgs  = null;
+
+async function loadAnalytics() {
+  document.getElementById('analytics-loading').style.display = 'block';
+  document.getElementById('analytics-body').style.display    = 'none';
+
+  let data;
+  try {
+    const res = await apiFetch(`${API}/analytics`);
+    data = await res.json();
+    if (!res.ok) { toast(data.detail || 'خطأ في تحميل الإحصائيات', 'err'); return; }
+  } catch(e) { toast('تعذّر الاتصال', 'err'); return; }
+
+  document.getElementById('analytics-loading').style.display = 'none';
+  document.getElementById('analytics-body').style.display    = 'block';
+
+  const conv  = data.conversations  || {};
+  const msgs  = data.messages       || {};
+  const carts = data.abandoned_carts || {};
+  const prods = data.products       || {};
+
+  // ── KPIs ──────────────────────────────────────────────────────────────────
+  document.getElementById('an-total-convs').textContent  = (conv.total   || 0).toLocaleString('ar');
+  document.getElementById('an-week-convs').textContent   = (conv.this_week || 0) + ' هذا الأسبوع';
+  document.getElementById('an-total-msgs').textContent   = (msgs.total   || 0).toLocaleString('ar');
+  document.getElementById('an-avg-msgs').textContent     = 'متوسط ' + (conv.avg_messages || 0) + ' رسالة/محادثة';
+  document.getElementById('an-total-carts').textContent  = (carts.total  || 0).toLocaleString('ar');
+  document.getElementById('an-recovery').textContent     = 'نسبة الاسترداد ' + (carts.recovery_rate || 0) + '%';
+  document.getElementById('an-products').textContent     = (prods.count  || 0).toLocaleString('ar');
+  document.getElementById('an-last-sync').textContent    = 'آخر مزامنة: ' + (prods.last_sync || 'لم تتم').replace('T',' ').slice(0,16);
+
+  // ── Detail stats ──────────────────────────────────────────────────────────
+  document.getElementById('an-today').textContent           = (conv.today         || 0) + ' محادثة';
+  document.getElementById('an-bot-handled').textContent     = (conv.bot_handled   || 0) + ' محادثة';
+  document.getElementById('an-admin-takeover').textContent  = (conv.admin_takeover|| 0) + ' محادثة';
+  document.getElementById('an-pending-carts').textContent   = (carts.pending      || 0) + ' سلة';
+  document.getElementById('an-recovered-carts').textContent = (carts.recovered    || 0) + ' سلة';
+
+  var total = conv.total || 0;
+  var botRate = total > 0 ? Math.round((conv.bot_handled || 0) / total * 100) : 0;
+  document.getElementById('an-bot-rate-bar').style.width  = botRate + '%';
+  document.getElementById('an-bot-rate-text').textContent  = botRate + '%';
+
+  // ── Message legend ─────────────────────────────────────────────────────────
+  document.getElementById('leg-user').textContent  = 'رسائل العملاء — '  + (msgs.user  || 0);
+  document.getElementById('leg-bot').textContent   = 'ردود البوت — '      + (msgs.bot   || 0);
+  document.getElementById('leg-admin').textContent = 'ردود الأدمن — '    + (msgs.admin || 0);
+
+  // ── Daily bar chart ────────────────────────────────────────────────────────
+  var daily  = conv.daily_counts || [];
+  var labels = daily.map(d => {
+    var dt = new Date(d.date);
+    return (dt.getMonth()+1) + '/' + dt.getDate();
+  });
+  var vals = daily.map(d => d.count);
+
+  if (_chartDaily) _chartDaily.destroy();
+  var ctx1 = document.getElementById('chart-daily').getContext('2d');
+  _chartDaily = new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'محادثات',
+        data: vals,
+        backgroundColor: '#bfdbfe',
+        borderColor: '#3b82f6',
+        borderWidth: 1.5,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { rtl: true } },
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Tajawal' } }, grid: { color: '#f1f5f9' } },
+        x: { ticks: { font: { family: 'Tajawal', size: 11 } }, grid: { display: false } },
+      },
+    }
+  });
+
+  // ── Messages donut ─────────────────────────────────────────────────────────
+  if (_chartMsgs) _chartMsgs.destroy();
+  var ctx2 = document.getElementById('chart-msgs-donut').getContext('2d');
+  var msgsData = [msgs.user || 0, msgs.bot || 0, msgs.admin || 0];
+  _chartMsgs = new Chart(ctx2, {
+    type: 'doughnut',
+    data: {
+      labels: ['عملاء', 'بوت', 'أدمن'],
+      datasets: [{
+        data: msgsData,
+        backgroundColor: ['#3b82f6', '#22c55e', '#f59e0b'],
+        borderWidth: 2,
+        borderColor: '#fff',
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { rtl: true } },
+      cutout: '65%',
+    }
+  });
+
+  // ── Hourly bars ────────────────────────────────────────────────────────────
+  var hourly = conv.hourly_distribution || new Array(24).fill(0);
+  var maxH   = Math.max(...hourly, 1);
+  var barsEl = document.getElementById('hourly-bars');
+  barsEl.innerHTML = '';
+  hourly.forEach(function(v, i) {
+    var pct  = Math.round(v / maxH * 100);
+    var h12  = i === 0 ? '12 م' : i < 12 ? i + ' ص' : i === 12 ? '12 ن' : (i-12) + ' م';
+    var bar  = document.createElement('div');
+    bar.className   = 'hourly-bar';
+    bar.style.height = Math.max(pct, 4) + '%';
+    bar.title        = h12 + ': ' + v;
+    bar.setAttribute('data-tip', h12 + ': ' + v);
+    barsEl.appendChild(bar);
+  });
 }
 
 async function changePassword() {
