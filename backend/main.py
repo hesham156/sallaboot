@@ -7,12 +7,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
+import hmac
+import hashlib
 
 from agent import PrintingAgent
 from salla_oauth import get_auth_url, exchange_code, save_tokens
@@ -171,12 +173,35 @@ async def admin_debug():
 
 # ── Salla Webhook (Easy Mode) ──────────────────────────────────────────────────
 @app.post("/webhook/salla")
-async def salla_webhook(payload: dict):
+async def salla_webhook(request: Request):
     """
     Receives Salla webhook events.
+    Verifies HMAC signature when SALLA_WEBHOOK_SECRET is set.
     On app.store.authorize: saves the access_token and refresh_token.
     """
+    body = await request.body()
+
+    # Verify Salla signature if secret is configured
+    webhook_secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        sig_header = request.headers.get("X-Salla-Signature", "")
+        expected = hmac.new(
+            webhook_secret.encode("utf-8"),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+        if sig_header and not hmac.compare_digest(expected, sig_header):
+            print(f"[webhook] Invalid signature — rejected")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    import json as _json
+    try:
+        payload = _json.loads(body)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
     event = payload.get("event", "")
+    print(f"[webhook] Received event: {event}")
 
     if event == "app.store.authorize":
         data = payload.get("data", {})
@@ -185,15 +210,20 @@ async def salla_webhook(payload: dict):
 
         if access_token:
             save_tokens(access_token, refresh_token)
+            print(f"[webhook] ✅ Access token received and saved! (preview: {access_token[:12]}…)")
             # Update running agent's Salla client if initialized
             try:
                 a = get_agent()
                 if a.salla:
                     a.salla.headers["Authorization"] = f"Bearer {access_token}"
+                else:
+                    from salla_client import SallaClient
+                    a.salla = SallaClient(access_token)
             except Exception:
                 pass
             # Trigger background store sync with new token
             asyncio.create_task(sync_store(access_token))
+            print(f"[webhook] ✅ Store sync triggered in background")
             return {"status": "ok", "message": "Token saved successfully"}
 
     # Log other events silently
