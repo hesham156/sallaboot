@@ -377,9 +377,10 @@
       cardsHtml += '</div>';
       wrap.innerHTML = cardsHtml;
 
-      // Wire "أضف للسلة" buttons
+      // Wire "أضف للسلة" buttons — disable while a request is in-flight
       wrap.querySelectorAll(".card-add").forEach(function (btn) {
         btn.addEventListener("click", function () {
+          if (isLoading) return;
           var name = btn.getAttribute("data-name");
           sendMessage("أضف " + name + " للسلة");
         });

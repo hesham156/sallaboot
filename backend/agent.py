@@ -1,4 +1,5 @@
 import os
+import re as _re
 import json
 import anthropic
 from groq import AsyncGroq
@@ -217,6 +218,22 @@ ORDER_STATUS_AR = {
     "refunded":     "مسترجع",
     "on_hold":      "معلق",
 }
+
+
+# ── Helper: strip Llama tool-call syntax that leaks into content ───────────────
+_FUNC_TAG   = _re.compile(r"<function=[^>]*>.*?</?\s*function\s*/?>",  _re.DOTALL | _re.IGNORECASE)
+_FUNC_OPEN  = _re.compile(r"<function=[^>]*/?>.*",                     _re.DOTALL | _re.IGNORECASE)
+_PREFIX_RE  = _re.compile(r"^(تم الرد سابقاً[:\s]*|الرد السابق[:\s]*|Previously[:\s]*)", _re.IGNORECASE)
+
+
+def _clean_reply(text: str) -> str:
+    """Remove Llama-leaked <function=...> tags and other artefacts from the reply."""
+    if not text:
+        return ""
+    text = _FUNC_TAG.sub("", text)    # complete <function=...>...</function>
+    text = _FUNC_OPEN.sub("", text)   # unclosed <function=...> to end of string
+    text = _PREFIX_RE.sub("", text)   # hallucinated "تم الرد سابقاً:" prefix
+    return text.strip()
 
 
 # ── Agent ──────────────────────────────────────────────────────────────────────
@@ -660,7 +677,9 @@ class PrintingAgent:
                     })
                 continue
 
-            reply = msg.content or "عذراً، لم أستطع معالجة طلبك."
+            reply = _clean_reply(msg.content or "")
+            if not reply:
+                reply = "عذراً، لم أستطع معالجة طلبك."
             cs.add_message(session_id, "assistant", reply)
             return reply
 

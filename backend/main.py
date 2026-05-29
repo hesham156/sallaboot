@@ -581,17 +581,19 @@ async def chat(req: ChatRequest):
     if agent is None:
         env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
 
-        # 1) Exact store not found — try env var fallback (any store_id)
+        # 1) Exact store not found — register env-var token as "default" ONCE
+        #    (avoid calling register_store on every request — it resets the agent)
         if env_token:
-            sm.register_store(
-                "default", env_token,
-                os.getenv("SALLA_REFRESH_TOKEN", ""),
-                {"name": "المتجر الافتراضي"},
-            )
+            if not sm.is_registered("default"):
+                sm.register_store(
+                    "default", env_token,
+                    os.getenv("SALLA_REFRESH_TOKEN", ""),
+                    {"name": "المتجر الافتراضي"},
+                )
             agent    = sm.get_agent("default")
-            store_id = "default"   # re-bind so session is tagged correctly
+            store_id = "default"
 
-        # 2) No env var — try first available registered store
+        # 2) No env var — fall back to first available registered store
         if agent is None:
             stores = sm.list_stores()
             if stores:
@@ -599,7 +601,7 @@ async def chat(req: ChatRequest):
                 agent    = sm.get_agent(fallback_id)
                 store_id = fallback_id
 
-        # 3) Nothing works → friendly error (widget will show toast, not crash)
+        # 3) Nothing works → friendly message (not HTTP 500)
         if agent is None:
             return ChatResponse(
                 reply=(
