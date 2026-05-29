@@ -1,6 +1,9 @@
 """
 Store Sync — fetches ALL products, categories, and articles from Salla
 and builds a knowledge base for the AI agent.
+
+Salla API docs: https://docs.salla.dev/5394168e0
+Pagination key: data.pagination.totalPages (camelCase)
 """
 
 import os
@@ -8,7 +11,6 @@ import json
 import asyncio
 import httpx
 from pathlib import Path
-from typing import Optional
 
 CACHE_FILE = Path(__file__).parent / "store_cache.json"
 
@@ -20,12 +22,17 @@ def get_store_data() -> dict:
 
 
 async def _fetch_all_pages(client: httpx.AsyncClient, url: str, headers: dict) -> list:
-    """Fetch all pages from a paginated Salla endpoint."""
+    """Fetch all pages from a paginated Salla endpoint (50 items/page)."""
     items = []
     page = 1
     while True:
         try:
-            r = await client.get(url, headers=headers, params={"per_page": 50, "page": page}, timeout=15)
+            r = await client.get(
+                url,
+                headers=headers,
+                params={"per_page": 50, "page": page},
+                timeout=20,
+            )
             if r.status_code != 200:
                 break
             data = r.json()
@@ -33,9 +40,10 @@ async def _fetch_all_pages(client: httpx.AsyncClient, url: str, headers: dict) -
             if not batch:
                 break
             items.extend(batch)
-            # Check if there are more pages
-            pagination = data.get("pagination", {})
-            if page >= pagination.get("totalPages", 1):
+            # Salla pagination uses camelCase: totalPages
+            pagination = data.get("pagination") or {}
+            total_pages = pagination.get("totalPages", 1)
+            if page >= total_pages:
                 break
             page += 1
         except Exception:
@@ -44,23 +52,59 @@ async def _fetch_all_pages(client: httpx.AsyncClient, url: str, headers: dict) -
 
 
 def _format_product(p: dict) -> dict:
-    """Extract essential product info."""
-    price = p.get("price", {})
+    """Extract essential product info including options (sizes, colors, etc.)."""
+    price_obj = p.get("price") or {}
+    sale_obj = p.get("sale_price") or {}
+    regular_obj = p.get("regular_price") or {}
+
+    # Build options summary: [{name, values: [...]}]
+    options_summary = []
+    for opt in p.get("options") or []:
+        opt_name = opt.get("name", "")
+        values = [v.get("name", "") for v in (opt.get("values") or []) if v.get("name")]
+        if opt_name and values:
+            options_summary.append({"option": opt_name, "values": values})
+
+    # Build SKU variants (only if they differ in price)
+    skus_summary = []
+    for sku in (p.get("skus") or [])[:10]:
+        sku_price = (sku.get("price") or {}).get("amount")
+        sku_code = sku.get("sku", "")
+        sku_qty = sku.get("stock_quantity", 0)
+        unlimited = sku.get("unlimited_quantity", False)
+        if sku_price:
+            skus_summary.append({
+                "sku": sku_code,
+                "price": sku_price,
+                "qty": "غير محدودة" if unlimited else sku_qty,
+            })
+
+    # Customer-facing URL
+    urls = p.get("urls") or {}
+    customer_url = urls.get("customer") or p.get("url", "")
+
     return {
         "id": p.get("id"),
         "name": p.get("name", ""),
-        "description": _strip_html(p.get("description", "")),
-        "price": price.get("amount", ""),
-        "currency": price.get("currency", "ريال"),
+        "description": _strip_html(p.get("description", ""))[:300],
+        "price": price_obj.get("amount", ""),
+        "regular_price": regular_obj.get("amount", ""),
+        "sale_price": sale_obj.get("amount", ""),
+        "currency": price_obj.get("currency", "SAR"),
+        "status": p.get("status", "sale"),          # sale | out | hidden
         "sku": p.get("sku", ""),
         "quantity": p.get("quantity", 0),
-        "categories": [c.get("name", "") for c in p.get("categories", [])],
-        "url": p.get("url", ""),
+        "unlimited_quantity": p.get("unlimited_quantity", False),
+        "categories": [c.get("name", "") for c in (p.get("categories") or [])],
+        "options": options_summary,
+        "skus": skus_summary,
+        "url": customer_url,
+        "type": p.get("type", "product"),
     }
 
 
 def _format_article(a: dict) -> dict:
-    """Extract essential article info."""
+    """Extract essential article/blog-post info."""
     return {
         "id": a.get("id"),
         "title": a.get("title", ""),
@@ -70,14 +114,14 @@ def _format_article(a: dict) -> dict:
 
 
 def _strip_html(text: str) -> str:
-    """Remove HTML tags from text."""
+    """Remove HTML tags and normalise whitespace."""
     import re
     text = re.sub(r"<[^>]+>", " ", text or "")
     return " ".join(text.split()).strip()
 
 
 async def sync_store(access_token: str) -> dict:
-    """Fetch all store data and return as structured dict."""
+    """Fetch all store data and return as structured dict. Saves to cache file."""
     global _store_data
 
     if not access_token:
@@ -89,41 +133,52 @@ async def sync_store(access_token: str) -> dict:
     }
     base = "https://api.salla.dev/admin/v2"
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        # Fetch products, categories, articles in parallel
-        products_task = _fetch_all_pages(client, f"{base}/products", headers)
-        categories_task = _fetch_all_pages(client, f"{base}/categories", headers)
-
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Fetch products and categories in parallel
         products_raw, categories_raw = await asyncio.gather(
-            products_task, categories_task, return_exceptions=True
+            _fetch_all_pages(client, f"{base}/products", headers),
+            _fetch_all_pages(client, f"{base}/categories", headers),
+            return_exceptions=True,
         )
 
-        # Fetch articles/blog posts
+        # Fetch blog articles (try multiple known endpoints)
         articles_raw = []
         for endpoint in [f"{base}/blogs/posts", f"{base}/blog/posts", f"{base}/blogs"]:
             try:
-                r = await client.get(endpoint, headers=headers, params={"per_page": 50})
+                r = await client.get(endpoint, headers=headers, params={"per_page": 50}, timeout=15)
                 if r.status_code == 200:
                     articles_raw = r.json().get("data", [])
-                    break
+                    if articles_raw:
+                        break
             except Exception:
                 continue
 
-    products = [_format_product(p) for p in (products_raw or []) if isinstance(products_raw, list)]
-    categories = [{"id": c.get("id"), "name": c.get("name", "")} for c in (categories_raw or []) if isinstance(categories_raw, list)]
+    products = [
+        _format_product(p)
+        for p in (products_raw if isinstance(products_raw, list) else [])
+    ]
+    categories = [
+        {"id": c.get("id"), "name": c.get("name", "")}
+        for c in (categories_raw if isinstance(categories_raw, list) else [])
+        if c.get("name")
+    ]
     articles = [_format_article(a) for a in articles_raw]
 
+    import datetime
     _store_data = {
         "products": products,
         "categories": categories,
         "articles": articles,
         "products_count": len(products),
-        "last_sync": __import__("datetime").datetime.utcnow().isoformat(),
+        "last_sync": datetime.datetime.utcnow().isoformat(),
     }
 
-    # Save to file for persistence
+    # Persist to file
     try:
-        CACHE_FILE.write_text(json.dumps(_store_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        CACHE_FILE.write_text(
+            json.dumps(_store_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     except Exception:
         pass
 
@@ -131,7 +186,7 @@ async def sync_store(access_token: str) -> dict:
 
 
 def load_cache() -> dict:
-    """Load previously cached store data from file."""
+    """Load previously cached store data from file (called on startup)."""
     global _store_data
     try:
         if CACHE_FILE.exists():
@@ -142,46 +197,82 @@ def load_cache() -> dict:
 
 
 def build_knowledge_summary() -> str:
-    """Build a concise text summary of the store for the AI system prompt."""
+    """
+    Build a concise Arabic text summary of the whole store catalogue
+    for injection into the AI system prompt.
+    """
     data = _store_data
     if not data:
         return ""
 
     lines = []
 
-    # Categories
+    # ── Categories ──────────────────────────────────────────────────────────────
     cats = data.get("categories", [])
     if cats:
-        cat_names = "، ".join(c["name"] for c in cats[:20] if c.get("name"))
+        cat_names = "، ".join(c["name"] for c in cats[:30] if c.get("name"))
         lines.append(f"تصنيفات المتجر: {cat_names}")
 
-    # Products
+    # ── Products ────────────────────────────────────────────────────────────────
     products = data.get("products", [])
-    if products:
-        lines.append(f"\nعدد المنتجات: {len(products)} منتج\n")
-        lines.append("قائمة المنتجات:")
-        for p in products:
-            name = p.get("name", "")
-            price = p.get("price", "")
-            currency = p.get("currency", "ريال")
-            desc = p.get("description", "")[:120]
+    available = [p for p in products if p.get("status") != "hidden"]
+    if available:
+        lines.append(f"\nعدد المنتجات المتاحة: {len(available)} منتج\n")
+        lines.append("=== قائمة المنتجات ===")
+        for p in available:
+            name     = p.get("name", "")
+            price    = p.get("price", "")
+            sale     = p.get("sale_price", "")
+            currency = p.get("currency", "SAR")
+            desc     = p.get("description", "")[:150]
             cats_str = "، ".join(p.get("categories", []))
-            line = f"• {name}"
-            if price:
-                line += f" — {price} {currency}"
+            status   = p.get("status", "")
+            qty      = p.get("quantity", 0)
+            unlimited = p.get("unlimited_quantity", False)
+
+            # Price line
+            price_str = f"{price} {currency}"
+            if sale and float(sale) > 0 and float(sale) < float(price or 0):
+                price_str = f"~~{price}~~ → {sale} {currency} (عرض خاص)"
+
+            # Availability
+            if status == "out":
+                avail_str = "⛔ نفد المخزون"
+            elif unlimited:
+                avail_str = "✅ متوفر"
+            else:
+                avail_str = f"✅ متوفر ({qty} قطعة)" if qty else "⛔ نفد المخزون"
+
+            line = f"• {name} — {price_str} | {avail_str}"
             if cats_str:
-                line += f" [{cats_str}]"
-            if desc:
-                line += f"\n  {desc}"
+                line += f" | [{cats_str}]"
             lines.append(line)
 
-    # Articles
+            if desc:
+                lines.append(f"  الوصف: {desc}")
+
+            # Options (sizes, colors, paper types, etc.)
+            for opt in p.get("options", []):
+                opt_name   = opt.get("option", "")
+                opt_values = "، ".join(opt.get("values", [])[:10])
+                if opt_name and opt_values:
+                    lines.append(f"  {opt_name}: {opt_values}")
+
+            # SKU variants with different prices
+            skus = p.get("skus", [])
+            if skus and len(skus) > 1:
+                sku_prices = list({s["price"] for s in skus if s.get("price")})
+                if len(sku_prices) > 1:
+                    sku_str = " / ".join(str(x) for x in sorted(sku_prices))
+                    lines.append(f"  أسعار الفاريانتس: {sku_str} {currency}")
+
+    # ── Articles / Blog ─────────────────────────────────────────────────────────
     articles = data.get("articles", [])
     if articles:
-        lines.append(f"\nمقالات المتجر ({len(articles)} مقال):")
-        for a in articles[:10]:
-            title = a.get("title", "")
-            excerpt = a.get("excerpt", "")[:100]
-            lines.append(f"• {title}: {excerpt}")
+        lines.append(f"\n=== مقالات المتجر ({len(articles)} مقال) ===")
+        for a in articles[:15]:
+            title   = a.get("title", "")
+            excerpt = a.get("excerpt", "")[:120]
+            lines.append(f"• {title}" + (f": {excerpt}" if excerpt else ""))
 
     return "\n".join(lines)
