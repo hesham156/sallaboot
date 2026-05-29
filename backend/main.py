@@ -19,6 +19,7 @@ import hashlib
 from agent import PrintingAgent
 from salla_oauth import get_auth_url, exchange_code, save_tokens
 from store_sync import sync_store, load_cache, get_store_data
+import conversation_store as cs
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
@@ -76,6 +77,15 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
+    bot_enabled: bool = True
+
+
+class AdminReplyRequest(BaseModel):
+    message: str
+
+
+class BotToggleRequest(BaseModel):
+    enabled: bool
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -149,6 +159,63 @@ async def admin_products():
         "last_sync":  store.get("last_sync", "never"),
         "errors":     store.get("last_sync_errors", []),
     }
+
+
+# ── Admin: Bot global toggle ────────────────────────────────────────────────
+@app.get("/admin/bot/status")
+async def bot_status():
+    return {"bot_globally_enabled": cs.get_bot_globally()}
+
+
+@app.post("/admin/bot/toggle")
+async def bot_toggle(req: BotToggleRequest):
+    cs.set_bot_globally(req.enabled)
+    return {"bot_globally_enabled": cs.get_bot_globally()}
+
+
+# ── Admin: Conversations ──────────────────────────────────────────────────────
+@app.get("/admin/conversations")
+async def admin_conversations():
+    """List all active conversations with summary."""
+    return {"conversations": cs.summary_list()}
+
+
+@app.get("/admin/conversations/{session_id}")
+async def admin_conversation_detail(session_id: str):
+    """Get full message history for a session."""
+    cs.mark_admin_read(session_id)
+    conv = cs.all_conversations().get(session_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="المحادثة غير موجودة")
+    return conv
+
+
+@app.post("/admin/conversations/{session_id}/reply")
+async def admin_reply(session_id: str, req: AdminReplyRequest):
+    """Admin sends a manual message to a specific session."""
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="الرسالة فارغة")
+    msg = cs.add_message(session_id, "admin", req.message.strip())
+    cs.mark_admin_read(session_id)
+    return {"status": "sent", "message": msg}
+
+
+@app.post("/admin/conversations/{session_id}/takeover")
+async def admin_takeover(session_id: str):
+    """Admin disables bot for this session and takes over the conversation."""
+    cs.set_session_bot(session_id, False)
+    cs.mark_admin_read(session_id)
+    return {"status": "ok", "bot_enabled": False, "session_id": session_id}
+
+
+@app.post("/admin/conversations/{session_id}/handback")
+async def admin_handback(session_id: str):
+    """Admin hands conversation back to the bot."""
+    cs.set_session_bot(session_id, True)
+    # Notify the widget
+    cs.add_message(session_id, "admin",
+                   "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟")
+    return {"status": "ok", "bot_enabled": True, "session_id": session_id}
 
 
 @app.get("/admin/debug")
@@ -297,15 +364,36 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="الرسالة فارغة")
 
     session_id = req.session_id or str(uuid.uuid4())
+    bot_on = cs.is_bot_enabled(session_id)
+
+    if not bot_on:
+        # Admin has taken over — store user message but don't auto-reply
+        cs.add_message(session_id, "user", req.message)
+        return ChatResponse(
+            reply="شكراً لرسالتك، سيتواصل معك أحد أعضاء فريق الدعم قريباً. 👨‍💼",
+            session_id=session_id,
+            bot_enabled=False,
+        )
+
     try:
         reply = await get_agent().chat(message=req.message, session_id=session_id)
     except Exception as e:
-        # Return full error detail for debugging
         raise HTTPException(
             status_code=500,
             detail=f"{type(e).__name__}: {str(e)}"
         )
-    return ChatResponse(reply=reply, session_id=session_id)
+    return ChatResponse(reply=reply, session_id=session_id, bot_enabled=True)
+
+
+@app.get("/chat/poll")
+async def chat_poll(session_id: str):
+    """Widget polls this endpoint to receive admin messages in real time."""
+    pending = cs.pop_pending_for_widget(session_id)
+    bot_on = cs.is_bot_enabled(session_id)
+    return {
+        "messages": pending,
+        "bot_enabled": bot_on,
+    }
 
 
 @app.post("/upload")

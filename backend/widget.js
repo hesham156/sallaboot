@@ -17,6 +17,9 @@
   var sessionId = null;
   var isOpen = false;
   var isLoading = false;
+  var botEnabled = true;          // tracks whether AI bot is handling this session
+  var pollTimer = null;           // setInterval handle for admin message polling
+  var humanBannerShown = false;   // prevent duplicate "human took over" banners
 
   // ── Styles ────────────────────────────────────────────────────────────────────
   var styles = `
@@ -60,8 +63,14 @@
     }
     #salla-chat-header .info { flex: 1; }
     #salla-chat-header .info .name { font-weight: 700; font-size: 15px; }
-    #salla-chat-header .info .status { font-size: 12px; opacity: 0.85; display: flex; align-items: center; gap: 4px; }
-    #salla-chat-header .info .status::before { content: ''; width: 7px; height: 7px; background: #4ade80; border-radius: 50%; display: inline-block; }
+    #salla-chat-header .info .status {
+      font-size: 12px; opacity: 0.85; display: flex; align-items: center; gap: 4px;
+    }
+    #salla-chat-header .info .status::before {
+      content: ''; width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+      background: #4ade80;
+    }
+    #salla-chat-header .info .status.human::before { background: #fb923c; }
     #salla-chat-close { background: none; border: none; color: white; cursor: pointer; opacity: 0.8; font-size: 22px; line-height: 1; padding: 2px; }
     #salla-chat-close:hover { opacity: 1; }
     #salla-chat-messages {
@@ -73,18 +82,36 @@
     #salla-chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     .chat-msg { display: flex; gap: 8px; max-width: 88%; }
     .chat-msg.user { align-self: flex-start; flex-direction: row-reverse; }
-    .chat-msg.bot { align-self: flex-end; }
+    .chat-msg.bot  { align-self: flex-end; }
+    .chat-msg.admin { align-self: flex-end; }
     .chat-msg .bubble {
       padding: 10px 13px; border-radius: 14px; font-size: 14px; line-height: 1.55;
       white-space: pre-wrap; word-break: break-word;
     }
-    .chat-msg.user .bubble { background: ${CONFIG.primaryColor}; color: white; border-bottom-right-radius: 4px; }
-    .chat-msg.bot .bubble { background: white; color: #1e293b; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .chat-msg.user  .bubble { background: ${CONFIG.primaryColor}; color: white; border-bottom-right-radius: 4px; }
+    .chat-msg.bot   .bubble { background: white; color: #1e293b; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .chat-msg.admin .bubble { background: #fff7ed; color: #92400e; border: 1px solid #fed7aa; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    .chat-msg.admin .bubble::before { content: '👨‍💼 '; }
+    .chat-msg.system-note { align-self: center; }
+    .chat-msg.system-note .bubble {
+      background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;
+      border-radius: 20px; font-size: 12px; padding: 6px 14px; text-align: center;
+    }
     .chat-typing { display: flex; gap: 4px; padding: 10px 14px; background: white; border-radius: 14px; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); align-self: flex-end; }
     .chat-typing span { width: 7px; height: 7px; background: #94a3b8; border-radius: 50%; animation: bounce 1.2s infinite; }
     .chat-typing span:nth-child(2) { animation-delay: 0.2s; }
     .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+    /* Human support banner */
+    #salla-human-banner {
+      background: #fff7ed; border-top: 2px solid #fb923c;
+      padding: 8px 14px; font-size: 12px; color: #92400e;
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+      display: none;
+    }
+    #salla-human-banner.visible { display: flex; }
+    #salla-human-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: #fb923c; flex-shrink: 0; animation: pulse-dot 1.5s infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
     #salla-chat-footer {
       padding: 10px 12px; border-top: 1px solid #e2e8f0; background: white; flex-shrink: 0;
     }
@@ -158,9 +185,13 @@
           <div class="avatar">🖨️</div>
           <div class="info">
             <div class="name">${CONFIG.storeName}</div>
-            <div class="status">متاح الآن</div>
+            <div class="status" id="salla-status-text">متاح الآن</div>
           </div>
           <button id="salla-chat-close" aria-label="إغلاق">✕</button>
+        </div>
+        <div id="salla-human-banner">
+          <div class="dot"></div>
+          <span>جارٍ التواصل مع فريق الدعم... سيرد عليك أحد المتخصصين قريباً</span>
         </div>
         <div id="salla-chat-messages"></div>
         <div id="salla-chat-footer">
@@ -190,7 +221,7 @@
     msg.className = "chat-msg " + role;
     var bubble = document.createElement("div");
     bubble.className = "bubble";
-    // Basic markdown bold support
+    // Basic markdown bold support + XSS protection
     bubble.innerHTML = text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -216,6 +247,84 @@
     if (el) el.remove();
   }
 
+  // ── Human Takeover UI ─────────────────────────────────────────────────────────
+  function setHumanMode(enabled) {
+    var banner = document.getElementById("salla-human-banner");
+    var statusEl = document.getElementById("salla-status-text");
+
+    if (enabled) {
+      // Bot disabled — human took over
+      if (!humanBannerShown) {
+        humanBannerShown = true;
+        appendMessage("system-note", "👨‍💼 تم تحويل المحادثة إلى فريق الدعم");
+      }
+      if (banner) banner.classList.add("visible");
+      if (statusEl) {
+        statusEl.textContent = "فريق الدعم";
+        statusEl.className = "status human";
+      }
+      startPolling();
+    } else {
+      // Bot re-enabled
+      humanBannerShown = false;
+      if (banner) banner.classList.remove("visible");
+      if (statusEl) {
+        statusEl.textContent = "متاح الآن";
+        statusEl.className = "status";
+      }
+      stopPolling();
+    }
+  }
+
+  function applyBotState(newBotEnabled) {
+    if (botEnabled === newBotEnabled) return; // no change
+    botEnabled = newBotEnabled;
+    setHumanMode(!botEnabled);
+  }
+
+  // ── Polling (admin → widget messages) ────────────────────────────────────────
+  function startPolling() {
+    if (pollTimer) return; // already running
+    pollTimer = setInterval(pollAdmin, 3000);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  async function pollAdmin() {
+    if (!sessionId) return;
+    try {
+      var res = await fetch(CONFIG.apiUrl + "/chat/poll?session_id=" + encodeURIComponent(sessionId));
+      if (!res.ok) return;
+      var data = await res.json();
+
+      // Render any admin messages
+      if (data.messages && data.messages.length > 0) {
+        data.messages.forEach(function (m) {
+          appendMessage("admin", m.content);
+        });
+        // Flash badge on chat button if panel is closed
+        if (!isOpen) {
+          var badge = document.getElementById("salla-chat-badge");
+          if (badge) badge.style.display = "flex";
+        }
+      }
+
+      // Check if bot was re-enabled by admin
+      if (data.bot_enabled && !botEnabled) {
+        botEnabled = true;
+        setHumanMode(false);
+        appendMessage("system-note", "✅ تم إعادة توصيلك بالمساعد الذكي");
+      }
+    } catch (e) {
+      // Silently ignore polling errors — non-critical
+    }
+  }
+
   // ── API ───────────────────────────────────────────────────────────────────────
   async function sendMessage(message) {
     if (isLoading) return;
@@ -223,7 +332,9 @@
     document.getElementById("salla-chat-send").disabled = true;
 
     appendMessage("user", message);
-    showTyping();
+
+    // Only show typing animation when bot is handling the conversation
+    if (botEnabled) showTyping();
 
     try {
       var res = await fetch(CONFIG.apiUrl + "/chat", {
@@ -233,11 +344,26 @@
       });
       var data = await res.json();
       hideTyping();
+
       if (!res.ok) {
         appendMessage("bot", "عذراً، حدث خطأ مؤقت. حاول مرة أخرى.");
       } else {
         if (data.session_id) sessionId = data.session_id;
-        appendMessage("bot", data.reply || "عذراً، لم أفهم طلبك. حاول مرة أخرى.");
+
+        // Check bot_enabled flag from response
+        if (typeof data.bot_enabled !== "undefined") {
+          if (!data.bot_enabled && botEnabled) {
+            // Bot just got disabled — human takeover
+            botEnabled = false;
+            setHumanMode(true);
+          } else if (data.bot_enabled && !botEnabled) {
+            botEnabled = true;
+            setHumanMode(false);
+          }
+        }
+
+        // Always show the reply (either bot reply or "support team notified" message)
+        appendMessage(botEnabled ? "bot" : "system-note", data.reply || "عذراً، لم أفهم طلبك. حاول مرة أخرى.");
       }
     } catch (e) {
       hideTyping();

@@ -4,6 +4,7 @@ import anthropic
 from groq import AsyncGroq
 from salla_client import SallaClient
 from store_sync import build_knowledge_summary, get_store_data
+import conversation_store as cs
 
 BASE_SYSTEM_PROMPT = """أنت مساعد ذكي لمتجر طباعة احترافي على منصة سلة. اسمك "مساعد المتجر".
 
@@ -149,8 +150,6 @@ class PrintingAgent:
 
         token = os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token) if token else None
-        # session_id -> list of messages
-        self.conversations: dict[str, list] = {}
 
     async def _run_tool(self, name: str, inputs: dict) -> str:
         try:
@@ -315,8 +314,11 @@ class PrintingAgent:
 
     # ── Groq (Llama 3) ────────────────────────────────────────────────────────────
     async def _chat_groq(self, message: str, session_id: str) -> str:
-        history = self.conversations.setdefault(session_id, [])
-        history.append({"role": "user", "content": message})
+        # Store user message in central store
+        cs.add_message(session_id, "user", message)
+
+        # Get conversation history for Groq
+        history = cs.get_groq_history(session_id)
 
         # Convert TOOLS to Groq format (OpenAI-compatible)
         groq_tools = [
@@ -331,10 +333,7 @@ class PrintingAgent:
             for t in TOOLS
         ]
 
-        messages = [{"role": "system", "content": get_system_prompt()}] + [
-            {"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else str(m["content"])}
-            for m in history
-        ]
+        messages = [{"role": "system", "content": get_system_prompt()}] + history
 
         tool_rounds = 0
         while True:
@@ -364,15 +363,14 @@ class PrintingAgent:
                 continue
 
             reply = msg.content or "عذراً، لم أستطع معالجة طلبك."
-            history.append({"role": "assistant", "content": reply})
-            if len(history) > 30:
-                self.conversations[session_id] = history[-30:]
+            # Store assistant reply in central store
+            cs.add_message(session_id, "assistant", reply)
             return reply
 
     # ── Anthropic (Claude) ────────────────────────────────────────────────────────
     async def _chat_anthropic(self, message: str, session_id: str) -> str:
-        history = self.conversations.setdefault(session_id, [])
-        history.append({"role": "user", "content": message})
+        cs.add_message(session_id, "user", message)
+        history = cs.get_groq_history(session_id)
 
         while True:
             response = self.ai.messages.create(
@@ -396,7 +394,5 @@ class PrintingAgent:
                 continue
 
             reply = "".join(b.text for b in response.content if hasattr(b, "text"))
-            history.append({"role": "assistant", "content": response.content})
-            if len(history) > 30:
-                self.conversations[session_id] = history[-30:]
+            cs.add_message(session_id, "assistant", reply)
             return reply
