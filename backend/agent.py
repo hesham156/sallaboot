@@ -115,7 +115,10 @@ ORDER_STATUS_AR = {
 
 class PrintingAgent:
     def __init__(self):
-        self.ai = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is not set. Please add it to your environment variables.")
+        self.ai = anthropic.Anthropic(api_key=api_key)
         token = os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token) if token else None
         # session_id -> list of messages

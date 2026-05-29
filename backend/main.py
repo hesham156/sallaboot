@@ -40,7 +40,14 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-agent = PrintingAgent()
+# Lazy-init: don't crash on startup if env vars are missing
+_agent = None
+
+def get_agent() -> PrintingAgent:
+    global _agent
+    if _agent is None:
+        _agent = PrintingAgent()
+    return _agent
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -77,9 +84,13 @@ async def salla_webhook(payload: dict):
 
         if access_token:
             save_tokens(access_token, refresh_token)
-            # Update running agent's Salla client
-            if agent.salla:
-                agent.salla.headers["Authorization"] = f"Bearer {access_token}"
+            # Update running agent's Salla client if initialized
+            try:
+                a = get_agent()
+                if a.salla:
+                    a.salla.headers["Authorization"] = f"Bearer {access_token}"
+            except Exception:
+                pass
             return {"status": "ok", "message": "Token saved successfully"}
 
     # Log other events silently
@@ -110,7 +121,9 @@ async def salla_callback(code: str = "", error: str = ""):
         tokens = await exchange_code(code, redirect_uri)
         save_tokens(tokens["access_token"], tokens.get("refresh_token", ""))
         # Reinitialize agent with new token
-        agent.salla.headers["Authorization"] = f"Bearer {tokens['access_token']}"
+        a = get_agent()
+        if a.salla:
+            a.salla.headers["Authorization"] = f"Bearer {tokens['access_token']}"
         return HTMLResponse("""
         <html><body style='font-family:Arial;text-align:center;padding:60px;direction:rtl'>
           <h2 style='color:#16a34a'>✅ تم ربط المتجر بنجاح!</h2>
@@ -130,7 +143,7 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="الرسالة فارغة")
 
     session_id = req.session_id or str(uuid.uuid4())
-    reply = await agent.chat(message=req.message, session_id=session_id)
+    reply = await get_agent().chat(message=req.message, session_id=session_id)
     return ChatResponse(reply=reply, session_id=session_id)
 
 
@@ -167,7 +180,7 @@ async def upload_file(
             f"[العميل أرسل ملف تصميم: {file.filename} — "
             f"تم حفظه بنجاح، سيتم مراجعته من فريق التصميم]"
         )
-        await agent.chat(message=notification, session_id=session_id)
+        await get_agent().chat(message=notification, session_id=session_id)
 
     return {
         "message": "تم رفع الملف بنجاح! سيتم مراجعته من فريق التصميم وسنتواصل معك قريباً.",
