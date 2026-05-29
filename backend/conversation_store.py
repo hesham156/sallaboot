@@ -10,9 +10,14 @@ Roles:
 Bot can be toggled:
   - Globally (affects all sessions)
   - Per-session (admin took over a specific chat)
+
+Storage:
+  - In-memory _conversations dict (primary read/write path)
+  - PostgreSQL via database.py (write-through; loaded on startup)
 """
 
 import datetime
+import database as db
 
 # ── Bot toggles ────────────────────────────────────────────────────────────────
 _bot_globally_enabled: bool = True          # legacy / single-store fallback
@@ -139,6 +144,10 @@ def add_message(session_id: str, role: str, content: str, store_id: str = "defau
     if role == "admin":
         # Queue for widget polling
         conv["pending_for_widget"].append({"content": content, "ts": msg["ts"]})
+
+    # Persist to DB (fire-and-forget — safe inside FastAPI event loop)
+    db.fire(db.save_conversation(session_id, conv.get("store_id", store_id), conv))
+
     return msg
 
 
@@ -236,6 +245,28 @@ def has_unread_user_messages(session_id: str) -> bool:
 
 def all_conversations() -> dict:
     return _conversations
+
+
+async def load_conversations_from_db():
+    """
+    Async — restore recent conversations from PostgreSQL on startup.
+    Only called when DB is available; in-memory state takes precedence if
+    the session already exists (shouldn't happen on a cold start).
+    """
+    rows = await db.load_conversations(limit=500)
+    if not rows:
+        return
+    loaded = 0
+    for row in rows:
+        sid = row["session_id"]
+        if sid in _conversations:
+            continue  # already loaded (shouldn't happen on cold start)
+        data = row["data"]
+        if not data.get("messages"):
+            continue
+        _conversations[sid] = data
+        loaded += 1
+    print(f"[conversation_store] Restored {loaded} conversation(s) from DB")
 
 
 def summary_list(store_id: str = None) -> list:

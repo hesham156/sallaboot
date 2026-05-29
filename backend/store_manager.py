@@ -1,14 +1,22 @@
 """
 Multi-tenant store registry.
-Each Salla store is identified by its merchant ID (store_id).
-Data is persisted at:  data/stores/{store_id}/tokens.json
-                       data/stores/{store_id}/cache.json
+
+Storage priority:
+  1. In-memory _registry (always used — primary read path)
+  2. PostgreSQL via database.py (write-through; loaded on startup)
+  3. JSON files in data/stores/ (fallback when no DB is available)
+
+All public functions keep their SYNCHRONOUS signatures so the rest of the
+codebase doesn't change. DB writes use database.fire() (fire-and-forget
+async tasks) which are safe to call from any async FastAPI handler.
 """
 
 import os
 import json
 import datetime
 from pathlib import Path
+
+import database as db
 
 DATA_DIR = Path(__file__).parent / "data" / "stores"
 
@@ -17,7 +25,7 @@ DATA_DIR = Path(__file__).parent / "data" / "stores"
 _registry: dict = {}
 
 
-# ── Directory helpers ──────────────────────────────────────────────────────────
+# ── Directory helpers (JSON fallback) ─────────────────────────────────────────
 
 def _store_dir(store_id: str) -> Path:
     d = DATA_DIR / str(store_id)
@@ -37,9 +45,8 @@ def _cache_path(store_id: str) -> Path:
 
 def load_all_stores() -> dict:
     """
-    Load all registered stores from disk into memory.
-    Also handles backward-compat: if SALLA_ACCESS_TOKEN env var is set
-    and no stores are found on disk, creates a 'default' in-memory entry.
+    Load registered stores from JSON files on disk (filesystem fallback).
+    Called at startup BEFORE load_from_db() — DB rows then overwrite file data.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -66,13 +73,12 @@ def load_all_stores() -> dict:
 
         if tokens.get("access_token"):
             _registry[store_id] = {"tokens": tokens, "cache": cache, "agent": None}
-            print(f"[store_manager] Loaded store {store_id!r}: {tokens.get('store_name', '?')}")
+            print(f"[store_manager] Loaded (file) store {store_id!r}: {tokens.get('store_name', '?')}")
 
-    # Backward-compat: single-store env var fallback
+    # Backward-compat: env-var fallback for single-store setups
     env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
     if env_token and "default" not in _registry:
         print("[store_manager] Using SALLA_ACCESS_TOKEN env var as 'default' store")
-        # Don't persist — env var is the source of truth for the default store
         _register_memory(
             store_id="default",
             access_token=env_token,
@@ -80,28 +86,61 @@ def load_all_stores() -> dict:
             store_info={"name": "المتجر الافتراضي"},
         )
 
-    print(f"[store_manager] {len(_registry)} store(s) loaded")
+    print(f"[store_manager] {len(_registry)} store(s) loaded from files")
     return _registry
+
+
+async def load_from_db():
+    """
+    Async — load stores from PostgreSQL (called from FastAPI startup event).
+    DB rows take precedence over JSON file data loaded earlier.
+    """
+    rows = await db.load_all_stores()
+    if not rows:
+        return
+
+    for row in rows:
+        sid    = row["store_id"]
+        tokens = row["tokens"]
+        if not tokens.get("access_token"):
+            continue
+        ai_cfg = row.get("ai_config", {})
+        cache  = row.get("cache",     {})
+
+        # Merge ai_config into tokens dict (that's where the rest of the code reads it)
+        if ai_cfg:
+            tokens["ai_config"] = ai_cfg
+
+        if sid in _registry:
+            _registry[sid]["tokens"] = tokens
+            _registry[sid]["cache"]  = cache if cache else _registry[sid].get("cache", {})
+            _registry[sid]["agent"]  = None  # reset so new token is picked up
+        else:
+            _registry[sid] = {"tokens": tokens, "cache": cache, "agent": None}
+
+        print(f"[store_manager] Loaded (DB) store {sid!r}: {tokens.get('store_name', '?')}")
+
+    print(f"[store_manager] {len(_registry)} total store(s) after DB merge")
 
 
 # ── Registration ───────────────────────────────────────────────────────────────
 
 def _register_memory(store_id: str, access_token: str, refresh_token: str = "", store_info: dict = None):
-    """Register in-memory only (no disk write). Used for env-var fallback."""
+    """Register in-memory only (no disk / DB write). Used for env-var fallback."""
     info = store_info or {}
     existing = _registry.get(store_id, {}).get("tokens", {})
     tokens = {
-        "access_token": access_token,
+        "access_token":  access_token,
         "refresh_token": refresh_token,
-        "store_name": info.get("name", existing.get("store_name", f"متجر {store_id}")),
-        "store_domain": info.get("domain", existing.get("store_domain", "")),
-        "store_avatar": info.get("avatar", existing.get("store_avatar", "")),
-        "store_url": info.get("url", existing.get("store_url", "")),
-        "connected_at": existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
+        "store_name":    info.get("name",   existing.get("store_name",   f"متجر {store_id}")),
+        "store_domain":  info.get("domain", existing.get("store_domain", "")),
+        "store_avatar":  info.get("avatar", existing.get("store_avatar", "")),
+        "store_url":     info.get("url",    existing.get("store_url",    "")),
+        "connected_at":  existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
     }
     if store_id in _registry:
         _registry[store_id]["tokens"] = tokens
-        _registry[store_id]["agent"] = None
+        _registry[store_id]["agent"]  = None
     else:
         _registry[store_id] = {"tokens": tokens, "cache": {}, "agent": None}
 
@@ -113,21 +152,21 @@ def register_store(
     store_info: dict = None,
 ):
     """
-    Register or update a store and persist to disk.
+    Register or update a store, persist to DB (fire-and-forget) and JSON file.
     Called from webhook (app.store.authorize) or OAuth callback.
     """
     store_id = str(store_id)
-    info = store_info or {}
+    info     = store_info or {}
     existing = _registry.get(store_id, {}).get("tokens", {})
 
     tokens = {
-        "access_token":        access_token,
-        "refresh_token":       refresh_token,
-        "store_name":          info.get("name")   or existing.get("store_name")   or f"متجر {store_id}",
-        "store_domain":        info.get("domain") or existing.get("store_domain") or "",
-        "store_avatar":        info.get("avatar") or existing.get("store_avatar") or "",
-        "store_url":           info.get("url")    or existing.get("store_url")    or "",
-        "connected_at":        existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
+        "access_token":       access_token,
+        "refresh_token":      refresh_token,
+        "store_name":         info.get("name")   or existing.get("store_name")   or f"متجر {store_id}",
+        "store_domain":       info.get("domain") or existing.get("store_domain") or "",
+        "store_avatar":       info.get("avatar") or existing.get("store_avatar") or "",
+        "store_url":          info.get("url")    or existing.get("store_url")    or "",
+        "connected_at":       existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
         # Preserve existing password hash and AI config
         "admin_password_hash": existing.get("admin_password_hash", ""),
         "ai_config":           existing.get("ai_config", {}),
@@ -141,11 +180,13 @@ def register_store(
 
     if store_id in _registry:
         _registry[store_id]["tokens"] = tokens
-        _registry[store_id]["agent"] = None  # reset so new token is picked up
+        _registry[store_id]["agent"]  = None  # reset so new token is picked up
     else:
         _registry[store_id] = {"tokens": tokens, "cache": {}, "agent": None}
 
-    # Persist to disk
+    # ── Persist: DB (primary) + JSON file (fallback) ───────────────────────────
+    db.fire(db.save_store(store_id, tokens))
+
     try:
         _store_dir(store_id)
         _tokens_path(store_id).write_text(
@@ -154,7 +195,7 @@ def register_store(
         )
         print(f"[store_manager] Saved store {store_id!r}: {tokens['store_name']}")
     except Exception as e:
-        print(f"[store_manager] Warning: could not save store {store_id!r}: {e}")
+        print(f"[store_manager] Warning: could not save store file {store_id!r}: {e}")
 
 
 # ── Token access ───────────────────────────────────────────────────────────────
@@ -184,6 +225,10 @@ def set_cache(store_id: str, data: dict):
         _registry[store_id] = {"tokens": {}, "cache": data, "agent": None}
     else:
         _registry[store_id]["cache"] = data
+
+    # ── Persist: DB (primary) + JSON file (fallback) ───────────────────────────
+    db.fire(db.save_cache(store_id, data))
+
     try:
         _store_dir(store_id)
         _cache_path(store_id).write_text(
@@ -191,7 +236,7 @@ def set_cache(store_id: str, data: dict):
             encoding="utf-8",
         )
     except Exception as e:
-        print(f"[store_manager] Warning: could not save cache for {store_id!r}: {e}")
+        print(f"[store_manager] Warning: could not save cache file {store_id!r}: {e}")
 
 
 # ── Agent factory ──────────────────────────────────────────────────────────────
@@ -220,18 +265,20 @@ def list_stores() -> list:
     result = []
     for sid, state in _registry.items():
         tokens = state.get("tokens", {})
-        cache  = state.get("cache", {})
+        cache  = state.get("cache",  {})
         result.append({
-            "store_id":          sid,
-            "store_name":        tokens.get("store_name",   f"متجر {sid}"),
-            "store_domain":      tokens.get("store_domain", ""),
-            "store_avatar":      tokens.get("store_avatar", ""),
-            "connected_at":      tokens.get("connected_at", ""),
-            "products_count":    cache.get("products_count", 0),
-            "last_sync":         cache.get("last_sync", "never"),
-            "last_sync_errors":  cache.get("last_sync_errors", []),
-            "has_ai_config":     bool(tokens.get("ai_config", {}).get("groq_api_key") or
-                                      tokens.get("ai_config", {}).get("anthropic_api_key")),
+            "store_id":         sid,
+            "store_name":       tokens.get("store_name",   f"متجر {sid}"),
+            "store_domain":     tokens.get("store_domain", ""),
+            "store_avatar":     tokens.get("store_avatar", ""),
+            "connected_at":     tokens.get("connected_at", ""),
+            "products_count":   cache.get("products_count", 0),
+            "last_sync":        cache.get("last_sync", "never"),
+            "last_sync_errors": cache.get("last_sync_errors", []),
+            "has_ai_config":    bool(
+                tokens.get("ai_config", {}).get("groq_api_key") or
+                tokens.get("ai_config", {}).get("anthropic_api_key")
+            ),
         })
     return sorted(result, key=lambda x: x.get("connected_at", ""), reverse=True)
 
@@ -250,7 +297,12 @@ def set_ai_config(store_id: str, config: dict):
         return
     tokens = _registry[store_id]["tokens"]
     tokens["ai_config"] = config
-    _registry[store_id]["agent"] = None          # force re-init with new keys
+    _registry[store_id]["agent"] = None  # force re-init with new keys
+
+    # ── Persist ────────────────────────────────────────────────────────────────
+    db.fire(db.save_store(store_id, tokens))   # full tokens upsert covers ai_config
+    db.fire(db.save_ai_config(store_id, config))
+
     try:
         _store_dir(store_id)
         _tokens_path(store_id).write_text(
@@ -258,7 +310,7 @@ def set_ai_config(store_id: str, config: dict):
         )
         print(f"[store_manager] AI config updated for {store_id!r}")
     except Exception as e:
-        print(f"[store_manager] Warning: could not save ai_config for {store_id!r}: {e}")
+        print(f"[store_manager] Warning: could not save ai_config file {store_id!r}: {e}")
 
 
 # ── Admin password ─────────────────────────────────────────────────────────────
@@ -274,6 +326,10 @@ def set_admin_password(store_id: str, password_hash: str):
         return
     tokens = _registry[store_id]["tokens"]
     tokens["admin_password_hash"] = password_hash
+
+    # ── Persist ────────────────────────────────────────────────────────────────
+    db.fire(db.save_store(store_id, tokens))
+
     try:
         _store_dir(store_id)
         _tokens_path(store_id).write_text(
@@ -281,4 +337,4 @@ def set_admin_password(store_id: str, password_hash: str):
         )
         print(f"[store_manager] Password updated for {store_id!r}")
     except Exception as e:
-        print(f"[store_manager] Warning: could not save password for {store_id!r}: {e}")
+        print(f"[store_manager] Warning: could not save password file {store_id!r}: {e}")

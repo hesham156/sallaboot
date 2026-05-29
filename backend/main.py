@@ -21,6 +21,7 @@ import hashlib
 import re as _re
 import store_manager as sm
 import auth as _auth
+import database as db
 from store_sync import sync_store
 from salla_oauth import get_auth_url, exchange_code, save_tokens
 import conversation_store as cs
@@ -41,7 +42,15 @@ app = FastAPI(title="Salla Printing Chatbot — Multi-tenant", version="2.0.0")
 @app.on_event("startup")
 async def startup_event():
     """Load all registered stores and trigger background sync for each."""
+    # 1. Connect to PostgreSQL (no-op if DATABASE_URL not set)
+    await db.init()
+
+    # 2. Load stores: JSON files first (fallback), then DB overwrites
     sm.load_all_stores()
+    await sm.load_from_db()
+
+    # 3. Restore recent conversations from DB
+    await cs.load_conversations_from_db()
 
     # Always register env-var token as "default" store — survives Railway restarts
     env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
@@ -721,6 +730,11 @@ async def _handle_abandoned_cart(merchant_id: str, data: dict):
         "recovered":      False,
     }
     _abandoned_carts[store_id].appendleft(notification)
+
+    # Persist to DB so carts survive restarts
+    if cart_id:
+        await db.save_abandoned_cart(store_id, cart_id, notification)
+
     _log_event(
         store_id, "abandoned.cart", "ok",
         f"cart_id={cart_id}  customer={notification['customer_name']}  "
@@ -849,8 +863,14 @@ async def store_abandoned_carts(store_id: str, source: str = "cache"):
         except Exception as e:
             raise HTTPException(500, f"{type(e).__name__}: {e}")
 
-    # cache source
+    # cache source — try in-memory first; fall back to DB on cold start
     carts = list(_abandoned_carts.get(store_id, []))
+    if not carts and db.available():
+        carts = await db.load_abandoned_carts(store_id)
+        # Warm the in-memory cache from DB
+        for cart in reversed(carts):
+            _abandoned_carts[store_id].appendleft(cart)
+        return {"source": "db", "carts": carts, "count": len(carts)}
     return {"source": "cache", "carts": carts, "count": len(carts)}
 
 
@@ -865,6 +885,8 @@ async def mark_cart_recovered(store_id: str, cart_id: str):
                 cart["recovered"] = True
                 found = True
                 break
+    # Persist recovery status to DB
+    asyncio.create_task(db.mark_cart_recovered(store_id, cart_id))
     return {"status": "ok", "cart_id": cart_id, "recovered": True, "found_in_cache": found}
 
 
