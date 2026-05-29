@@ -1320,15 +1320,18 @@ async def chat(req: ChatRequest):
                 agent    = sm.get_agent(fallback_id)
                 store_id = fallback_id
 
-        # 3) Nothing works → friendly message (not HTTP 500)
+        # 3) Nothing works → friendly message (NOT bot_enabled=False — that triggers
+        #    the widget's "admin takeover" UI which loops endlessly)
         if agent is None:
+            err_reply = (
+                "عذراً، المتجر غير مُعدّ بعد. "
+                "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
+            )
+            cs.add_message(session_id, "assistant", err_reply, store_id)
             return ChatResponse(
-                reply=(
-                    "عذراً، المتجر غير مُعدّ بعد. "
-                    "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
-                ),
-                session_id = session_id,
-                bot_enabled= False,
+                reply=err_reply,
+                session_id=session_id,
+                bot_enabled=True,   # keep widget in normal state; bot is just misconfigured
             )
 
     try:
@@ -1336,16 +1339,18 @@ async def chat(req: ChatRequest):
     except Exception as e:
         err_msg = str(e)
         print(f"[chat] ❌ agent.chat error for store={store_id!r} session={session_id!r}: {type(e).__name__}: {err_msg}")
-        # Return a user-friendly Arabic message instead of raw 500
+        # Return a user-friendly message — keep bot_enabled=True so the widget
+        # does NOT show "تم تحويل المحادثة" and does NOT loop into handback/takeover
         friendly = (
             "عذراً، حدث خطأ مؤقت في معالجة طلبك. يرجى المحاولة مرة أخرى. 🙏"
             if "API" not in err_msg and "key" not in err_msg.lower()
             else "عذراً، هناك مشكلة في إعدادات الذكاء الاصطناعي. يرجى التواصل مع الدعم."
         )
+        cs.add_message(session_id, "assistant", friendly, store_id)
         return ChatResponse(
             reply=friendly,
             session_id=session_id,
-            bot_enabled=False,
+            bot_enabled=True,   # error ≠ admin takeover; don't confuse the widget
         )
 
     # Pick up any rich UI component set by the agent tools this turn
