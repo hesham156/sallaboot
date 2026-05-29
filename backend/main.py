@@ -130,6 +130,27 @@ async def admin_sync():
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel():
+    """Serve the admin dashboard."""
+    html_path = Path(__file__).parent / "admin.html"
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/admin/products")
+async def admin_products():
+    """Return all cached products, categories and articles."""
+    store = get_store_data()
+    return {
+        "products":   store.get("products", []),
+        "categories": store.get("categories", []),
+        "articles":   store.get("articles", []),
+        "products_count": store.get("products_count", 0),
+        "last_sync":  store.get("last_sync", "never"),
+        "errors":     store.get("last_sync_errors", []),
+    }
+
+
 @app.get("/admin/debug")
 async def admin_debug():
     """
