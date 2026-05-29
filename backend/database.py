@@ -92,6 +92,50 @@ def available() -> bool:
     return _pool is not None
 
 
+def get_status() -> dict:
+    """Return a summary of DB connectivity for /env-check and admin UI."""
+    return {
+        "connected":     _pool is not None,
+        "database_url":  bool(os.getenv("DATABASE_URL", "").strip()),
+    }
+
+
+async def force_save_all_stores(stores: list[dict]) -> int:
+    """
+    Bulk-upsert every store from the in-memory registry into PostgreSQL.
+    Called when admin clicks 'Force Save to DB'.
+    Returns the number of stores saved.
+    """
+    if not _pool:
+        return 0
+    saved = 0
+    for s in stores:
+        sid    = s.get("store_id", "")
+        tokens = s.get("tokens",   {})
+        if not sid or not tokens:
+            continue
+        try:
+            ai_cfg = tokens.get("ai_config", {})
+            async with _pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO stores (store_id, tokens, ai_config, updated_at)
+                    VALUES ($1, $2::jsonb, $3::jsonb, NOW())
+                    ON CONFLICT (store_id) DO UPDATE
+                      SET tokens    = EXCLUDED.tokens,
+                          ai_config = EXCLUDED.ai_config,
+                          updated_at = NOW()
+                    """,
+                    sid,
+                    json.dumps(tokens,  ensure_ascii=False),
+                    json.dumps(ai_cfg,  ensure_ascii=False),
+                )
+            saved += 1
+        except Exception as e:
+            print(f"[db] force_save_all_stores({sid!r}) error: {e}")
+    return saved
+
+
 def fire(coro):
     """
     Schedule an async DB coroutine from synchronous code that is already

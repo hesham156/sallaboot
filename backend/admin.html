@@ -721,6 +721,24 @@ select.form-control{cursor:pointer}
         <div class="section-title">🛠️ متغيرات البيئة</div>
         <div id="dbg-env">جارٍ التحميل…</div>
       </div>
+
+      <!-- DB Persistence -->
+      <div class="section">
+        <div class="section-title">💾 استمرارية البيانات (Database)</div>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px;line-height:1.7">
+          Railway يمسح الملفات عند كل نشر. البيانات الدائمة تُخزّن في PostgreSQL فقط.
+          اضغط الزر أدناه لحفظ جميع بيانات المتاجر الحالية في قاعدة البيانات يدوياً.
+        </p>
+        <div id="db-save-status" style="margin-bottom:12px;font-size:13px"></div>
+        <button class="btn btn-primary" onclick="forceDbSync()">💾 احفظ جميع البيانات في DB الآن</button>
+        <div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px;color:#64748b;line-height:1.8">
+          <strong>كيف تضيف PostgreSQL في Railway؟</strong><br>
+          1. افتح مشروعك في <a href="https://railway.app/dashboard" target="_blank" style="color:#3b82f6">Railway Dashboard</a><br>
+          2. اضغط <strong>New</strong> ← <strong>Database</strong> ← <strong>Add PostgreSQL</strong><br>
+          3. في إعدادات التطبيق ← <strong>Variables</strong> ← تأكد أن <code>DATABASE_URL</code> موجودة<br>
+          4. أعد تشغيل التطبيق — سيتصل بـ DB تلقائياً
+        </div>
+      </div>
     </div>
 
     <!-- ── WEBHOOKS LOG ── -->
@@ -1410,13 +1428,36 @@ async function loadDashboard() {
     document.getElementById('c-sync').textContent =
       (ls && ls !== 'never') ? fmtDate(new Date(ls)) : 'لم تتم بعد';
 
-    // Alert banner
+    // Alert banner — token + DB warnings
     const alertDiv = document.getElementById('dash-alert');
-    alertDiv.innerHTML = !dbg.token_present
-      ? `<div class="alert alert-warn" style="margin-bottom:20px">
-          ⚠️ <strong>التوكن غير موجود.</strong>
-          روح متجرك على سلة ← التطبيقات ← ألغِ تثبيت تطبيقك ثم أعد تثبيته.
-        </div>` : '';
+    let alerts = '';
+    if (!dbg.token_present) {
+      alerts += `<div class="alert alert-warn" style="margin-bottom:12px">
+        ⚠️ <strong>التوكن غير موجود.</strong>
+        روح متجرك على سلة ← التطبيقات ← ألغِ تثبيت تطبيقك ثم أعد تثبيته.
+      </div>`;
+    }
+    // Check DB status from env-check
+    fetch('/env-check').then(r=>r.json()).then(env => {
+      if (!env.DB_CONNECTED) {
+        const dbMsg = !env.DATABASE_URL
+          ? `⛔ <strong>قاعدة البيانات غير مضبوطة</strong> — البيانات ستُحذف عند كل نشر (deploy)!
+             <br>الحل: أضف خدمة PostgreSQL في Railway وارتبطها بالتطبيق ← سيظهر DATABASE_URL تلقائياً.`
+          : `⛔ <strong>قاعدة البيانات غير متصلة</strong> — تم ضبط DATABASE_URL لكن الاتصال فشل.
+             <br>راجع سجلات Railway للتفاصيل.`;
+        const dbAlert = document.createElement('div');
+        dbAlert.className = 'alert alert-warn';
+        dbAlert.style.cssText = 'margin-bottom:12px;border-color:#ef4444;background:#fef2f2;color:#7f1d1d';
+        dbAlert.innerHTML = dbMsg + `
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <a href="https://railway.app/dashboard" target="_blank" class="btn btn-sm btn-outline" style="font-size:12px">
+              🚂 فتح Railway Dashboard
+            </a>
+          </div>`;
+        alertDiv.prepend(dbAlert);
+      }
+    }).catch(()=>{});
+    alertDiv.innerHTML = alerts;
 
     // API test
     const apiDiv = document.getElementById('api-status');
@@ -1613,6 +1654,30 @@ async function loadSyncInfo() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DB force-save
+// ─────────────────────────────────────────────────────────────────────────────
+async function forceDbSync() {
+  const statusEl = document.getElementById('db-save-status');
+  if (statusEl) { statusEl.innerHTML = '<span class="spin spin-blue" style="display:inline-block;width:16px;height:16px;border-width:2px;vertical-align:middle"></span> جاري الحفظ…'; }
+  try {
+    const res  = await fetch('/admin/force-db-sync', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast(data.message || 'تم الحفظ', 'success');
+      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a">✅ ${esc(data.message || 'تم')}</span>`;
+    } else {
+      const msg = data.detail || 'فشل الحفظ';
+      toast('❌ ' + msg, 'error');
+      if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626">❌ ${esc(msg)}</span>`;
+    }
+  } catch(e) {
+    toast('❌ خطأ في الاتصال', 'error');
+    if (statusEl) statusEl.innerHTML = `<span style="color:#dc2626">❌ خطأ في الاتصال: ${esc(e.message)}</span>`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Per-store: Debug
 // ─────────────────────────────────────────────────────────────────────────────
 async function loadDebug() {
@@ -1649,13 +1714,24 @@ async function loadDebug() {
       codeEl.textContent = 'HTTP ' + t.status_code;
       apiEl.innerHTML = `<span class="${ok?'log-ok':'log-err'}">HTTP ${t.status_code}</span>\n\n${esc(t.body_preview||'')}`;
     }
-    document.getElementById('dbg-env').innerHTML = Object.entries(env).map(([k,v]) =>
-      `<div class="kv">
+    document.getElementById('dbg-env').innerHTML = Object.entries(env).map(([k,v]) => {
+      let badge;
+      if (k === 'DB_CONNECTED') {
+        badge = v
+          ? '<span class="badge badge-green">✅ متصلة</span>'
+          : '<span class="badge badge-red" style="background:#fef2f2;color:#dc2626">⛔ غير متصلة — البيانات ستُحذف عند الـ deploy!</span>';
+      } else if (v === true) {
+        badge = '<span class="badge badge-green">✅ موجود</span>';
+      } else if (v === false) {
+        badge = '<span class="badge badge-red">❌ غير موجود</span>';
+      } else {
+        badge = `<span class="badge badge-blue">${esc(String(v))}</span>`;
+      }
+      return `<div class="kv">
         <span class="kv-key" style="font-family:monospace;font-size:13px">${esc(k)}</span>
-        <span>${v===true?'<span class="badge badge-green">✅ موجود</span>'
-                :v===false?'<span class="badge badge-red">❌ غير موجود</span>'
-                :`<span class="badge badge-blue">${esc(String(v))}</span>`}</span>
-      </div>`).join('');
+        <span>${badge}</span>
+      </div>`;
+    }).join('');
   } catch(e) { document.getElementById('dbg-token').textContent = 'فشل: ' + e.message; }
 }
 

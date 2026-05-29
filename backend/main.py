@@ -71,6 +71,24 @@ async def startup_event():
     asyncio.create_task(_token_refresh_loop())
     print("[startup] 🔄 Token auto-refresh loop started")
 
+    # ── Critical warning if DB is not connected ────────────────────────────────
+    db_st = db.get_status()
+    if not db_st["connected"]:
+        if not db_st["database_url"]:
+            print("=" * 60)
+            print("⛔  WARNING: DATABASE_URL is NOT set!")
+            print("    Store data (tokens, AI config, passwords) will be")
+            print("    DELETED on every Railway deploy / restart.")
+            print("    Fix: Add a PostgreSQL service in Railway and link it.")
+            print("=" * 60)
+        else:
+            print("=" * 60)
+            print("⛔  WARNING: DATABASE_URL is set but connection FAILED!")
+            print("    Store data will NOT be persisted between deploys.")
+            print("=" * 60)
+    else:
+        print(f"[startup] 💾 DB connected — {len(sm.list_stores())} stores persisted")
+
 
 async def _sync_task(store_id: str, token: str):
     try:
@@ -226,6 +244,7 @@ class RateRequest(BaseModel):
 @app.get("/env-check")
 async def env_check():
     stores = sm.list_stores()
+    db_status = db.get_status()
     store_agents = []
     for s in stores:
         sid = s["store_id"]
@@ -236,14 +255,55 @@ async def env_check():
             "agent_ok":   a is not None,
             "has_ai_cfg": s.get("has_ai_config", False),
         })
+
+    if not db_status["connected"]:
+        if not db_status["database_url"]:
+            print("[startup] ⚠️  DATABASE_URL not set — store data will be LOST on every deploy!")
+        else:
+            print("[startup] ⚠️  DATABASE_URL is set but DB connection failed — check Railway logs")
+
     return {
-        "GROQ_API_KEY":       bool(os.getenv("GROQ_API_KEY")),
-        "ANTHROPIC_API_KEY":  bool(os.getenv("ANTHROPIC_API_KEY")),
-        "SALLA_ACCESS_TOKEN": bool(os.getenv("SALLA_ACCESS_TOKEN")),
-        "DATABASE_URL":       bool(os.getenv("DATABASE_URL")),
-        "BASE_URL":           os.getenv("BASE_URL", "not set"),
-        "stores_registered":  len(stores),
-        "stores":             store_agents,
+        "GROQ_API_KEY":         bool(os.getenv("GROQ_API_KEY")),
+        "ANTHROPIC_API_KEY":    bool(os.getenv("ANTHROPIC_API_KEY")),
+        "SALLA_ACCESS_TOKEN":   bool(os.getenv("SALLA_ACCESS_TOKEN")),
+        "DATABASE_URL":         db_status["database_url"],
+        "DB_CONNECTED":         db_status["connected"],
+        "BASE_URL":             os.getenv("BASE_URL", "not set"),
+        "stores_registered":    len(stores),
+        "stores":               store_agents,
+    }
+
+
+@app.post("/admin/force-db-sync")
+async def force_db_sync(request: Request):
+    """
+    Super-admin: force-save every in-memory store to PostgreSQL.
+    Use this to migrate data after connecting a new DB, or to recover
+    from a situation where DB wasn't connected during registration.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(403, "مصرح للمدير العام فقط")
+
+    if not db.available():
+        raise HTTPException(503, "قاعدة البيانات غير متصلة. تأكد من إعداد DATABASE_URL في Railway.")
+
+    # Build the list of all stores with their full token dicts
+    stores_data = []
+    for s in sm.list_stores():
+        sid    = s["store_id"]
+        tokens = sm.get_store_info(sid)
+        if tokens:
+            stores_data.append({"store_id": sid, "tokens": tokens})
+
+    saved = await db.force_save_all_stores(stores_data)
+    print(f"[admin] force-db-sync: saved {saved}/{len(stores_data)} stores to DB")
+    return {
+        "status":  "ok",
+        "saved":   saved,
+        "total":   len(stores_data),
+        "message": f"تم حفظ {saved} متجر في قاعدة البيانات بنجاح ✅",
     }
 
 
@@ -949,6 +1009,14 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         refresh_token=refresh_token,
         store_info=merged_info,
     )
+
+    # Directly await the DB save for this critical event so data is never
+    # lost even if the server restarts seconds after the webhook.
+    if db.available():
+        tokens = sm.get_store_info(store_id)
+        await db.save_store(store_id, tokens)
+        print(f"[webhook] 💾 Store {store_id!r} directly saved to DB")
+
     asyncio.create_task(_sync_task(store_id, access_token))
     _log_event(store_id, "app.store.authorize", "ok",
                f"token …{access_token[-6:]}  expires={expires}")
