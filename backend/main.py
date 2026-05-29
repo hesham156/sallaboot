@@ -150,7 +150,12 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="الرسالة فارغة")
 
     session_id = req.session_id or str(uuid.uuid4())
-    reply = await get_agent().chat(message=req.message, session_id=session_id)
+    try:
+        reply = await get_agent().chat(message=req.message, session_id=session_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطأ في الخادم: {str(e)}")
     return ChatResponse(reply=reply, session_id=session_id)
 
 
