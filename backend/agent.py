@@ -175,6 +175,23 @@ TOOLS = [
         },
     },
     {
+        "name": "get_abandoned_carts",
+        "description": (
+            "ابحث في السلات المتروكة لمعرفة ما إذا كان العميل قد ترك منتجات من قبل. "
+            "استخدم هذه الأداة عندما يذكر العميل أنه أضاف منتجات سابقاً ولم يكمل الطلب، "
+            "أو عندما يسأل عن سلته السابقة. تُعيد الرابط المباشر لإكمال الدفع."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "customer_phone": {
+                    "type": "string",
+                    "description": "رقم جوال العميل للبحث في السلات المتروكة (اختياري)",
+                },
+            },
+        },
+    },
+    {
         "name": "calculate_print_quote",
         "description": "احسب سعراً تقديرياً للطباعة بناءً على نوع المنتج والكمية.",
         "input_schema": {
@@ -565,6 +582,47 @@ class PrintingAgent:
                     f"طلب رقم: {ref}\nالحالة: {status}\n"
                     f"الإجمالي: {total} {currency}\nالتاريخ: {date}"
                 )
+
+            # ── get_abandoned_carts ─────────────────────────────────────────
+            elif name == "get_abandoned_carts":
+                if not self.salla:
+                    return "⚠️ لم يتم ربط المتجر بعد."
+                try:
+                    data  = await self.salla.get_abandoned_carts(per_page=10)
+                    carts = data.get("data", [])
+                except Exception as e:
+                    return f"⚠️ تعذّر جلب السلات المتروكة: {type(e).__name__}: {e}"
+
+                if not carts:
+                    return "لا توجد سلات متروكة حالياً."
+
+                # Optional phone filter
+                phone_filter = inputs.get("customer_phone", "").strip()
+                if phone_filter:
+                    carts = [
+                        c for c in carts
+                        if phone_filter in str((c.get("customer") or {}).get("mobile", ""))
+                    ]
+                    if not carts:
+                        return f"لا توجد سلة متروكة مرتبطة بالرقم {phone_filter}."
+
+                lines = [f"السلات المتروكة ({len(carts)}):"]
+                for c in carts[:5]:
+                    customer = c.get("customer") or {}
+                    total    = c.get("total") or {}
+                    amt      = total.get("amount", "—") if isinstance(total, dict) else str(total or "—")
+                    cur      = total.get("currency", "SAR") if isinstance(total, dict) else "SAR"
+                    age      = c.get("age_in_minutes", 0)
+                    age_str  = (f"{age // 1440} يوم" if age >= 1440
+                                else f"{age // 60} ساعة" if age >= 60
+                                else f"{age} دقيقة")
+                    checkout = c.get("checkout_url", "")
+                    name_str = customer.get("name", "—")
+                    lines.append(
+                        f"• {name_str} | الإجمالي: {amt} {cur} | منذ {age_str}"
+                        + (f"\n  رابط إكمال الطلب: {checkout}" if checkout else "")
+                    )
+                return "\n".join(lines)
 
             # ── calculate_print_quote ────────────────────────────────────────
             elif name == "calculate_print_quote":

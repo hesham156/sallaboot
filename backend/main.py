@@ -83,7 +83,7 @@ _ADMIN_HTML = Path(__file__).parent / "admin.html"
 # ── Auth middleware ────────────────────────────────────────────────────────────
 # Protects all per-store admin API routes (not the HTML pages or auth endpoints).
 _PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts)"
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
@@ -484,6 +484,10 @@ _raw_attempts: collections.deque = collections.deque(maxlen=50)
 # Salla retries up to 3× every 5 min — we must not double-process.
 _seen_events: collections.deque = collections.deque(maxlen=1000)
 
+# Abandoned carts: store_id → deque of cart notification dicts (from webhooks).
+# Each entry is enriched with customer/total/checkout_url for the admin dashboard.
+_abandoned_carts: dict = collections.defaultdict(lambda: collections.deque(maxlen=500))
+
 
 def _log_event(store_id: str, event: str, status: str, detail: str = ""):
     _webhook_log[store_id].appendleft({
@@ -606,6 +610,45 @@ async def _handle_customer_event(event: str, merchant_id: str, data: dict):
     print(f"[webhook] {event!r} customer={customer_id} store={store_id}")
 
 
+async def _handle_abandoned_cart(merchant_id: str, data: dict):
+    """
+    abandoned.cart — a customer added items but didn't complete checkout.
+    Stores a normalised notification in the per-store in-memory deque so the
+    admin dashboard can show it without a live API call.
+    """
+    store_id = merchant_id or "default"
+    cart_id  = str(data.get("id", ""))
+    customer = data.get("customer") or {}
+    total    = data.get("total")    or {}
+
+    notification = {
+        "id":             cart_id,
+        "ts":             _dt.datetime.utcnow().isoformat() + "Z",
+        "customer_name":  customer.get("name", "—"),
+        "customer_phone": customer.get("mobile", customer.get("phone", "—")),
+        "customer_email": customer.get("email", "—"),
+        "total":          (total.get("amount", "—") if isinstance(total, dict) else str(total or "—")),
+        "currency":       (total.get("currency", "SAR") if isinstance(total, dict) else "SAR"),
+        "items_count":    len(data.get("items") or []),
+        "age_minutes":    data.get("age_in_minutes", 0),
+        "checkout_url":   data.get("checkout_url", ""),
+        "status":         data.get("status", "active"),   # active | purchased
+        "recovered":      False,
+    }
+    _abandoned_carts[store_id].appendleft(notification)
+    _log_event(
+        store_id, "abandoned.cart", "ok",
+        f"cart_id={cart_id}  customer={notification['customer_name']}  "
+        f"total={notification['total']} {notification['currency']}"
+    )
+    print(
+        f"[webhook] 🛒 Abandoned cart {cart_id!r} — "
+        f"{notification['customer_name']} — "
+        f"{notification['total']} {notification['currency']} — "
+        f"store={store_id!r}"
+    )
+
+
 # ── Salla Webhook endpoint ─────────────────────────────────────────────────────
 @app.post("/webhook/salla")
 async def salla_webhook(request: Request):
@@ -679,6 +722,9 @@ async def salla_webhook(request: Request):
     elif event.startswith("customer."):
         asyncio.create_task(_handle_customer_event(event, merchant_id, data))
 
+    elif event == "abandoned.cart":
+        asyncio.create_task(_handle_abandoned_cart(merchant_id, data))
+
     else:
         # Unknown / unhandled event — log and acknowledge
         _log_event(merchant_id or "default", event, "unhandled")
@@ -693,6 +739,48 @@ async def store_webhook_log(store_id: str):
     """Return the last 200 webhook events received for this store."""
     events = list(_webhook_log.get(store_id, []))
     return {"store_id": store_id, "count": len(events), "events": events}
+
+
+# ── Abandoned carts ────────────────────────────────────────────────────────────
+
+@app.get("/admin/{store_id}/abandoned-carts")
+async def store_abandoned_carts(store_id: str, source: str = "cache"):
+    """
+    Return abandoned carts for a store.
+
+    ?source=cache  (default) — in-memory webhook notifications received since last restart.
+    ?source=api    — live fetch from Salla GET /carts/abandoned (requires carts.read scope).
+    """
+    if source == "api":
+        token = sm.get_access_token(store_id)
+        if not token:
+            raise HTTPException(400, f"No access token for store '{store_id}'")
+        from salla_client import SallaClient
+        client = SallaClient(token, store_id=store_id)
+        try:
+            data  = await client.get_abandoned_carts(per_page=50)
+            carts = data.get("data", [])
+            return {"source": "api", "carts": carts, "count": len(carts)}
+        except Exception as e:
+            raise HTTPException(500, f"{type(e).__name__}: {e}")
+
+    # cache source
+    carts = list(_abandoned_carts.get(store_id, []))
+    return {"source": "cache", "carts": carts, "count": len(carts)}
+
+
+@app.post("/admin/{store_id}/abandoned-carts/{cart_id}/recover")
+async def mark_cart_recovered(store_id: str, cart_id: str):
+    """Mark an abandoned cart notification as handled / recovered."""
+    carts = _abandoned_carts.get(store_id)
+    found = False
+    if carts:
+        for cart in carts:
+            if cart.get("id") == cart_id:
+                cart["recovered"] = True
+                found = True
+                break
+    return {"status": "ok", "cart_id": cart_id, "recovered": True, "found_in_cache": found}
 
 
 # ── Webhook raw attempts debug (no auth — shows last 50 raw attempts) ──────────

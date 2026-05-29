@@ -96,3 +96,25 @@ class SallaClient:
 
     async def get_customer_by_phone(self, phone: str) -> dict:
         return await self._request("GET", "/customers", params={"keyword": phone})
+
+    # ── Abandoned Carts endpoints ──────────────────────────────────────────────
+
+    async def get_abandoned_carts(
+        self,
+        per_page: int = 20,
+        keyword: Optional[str] = None,
+    ) -> dict:
+        """
+        List abandoned carts.
+        Requires scope: carts.read
+        Returns: {data: [{id, total, subtotal, checkout_url, age_in_minutes,
+                           customer: {name, mobile, email}, items: [...]}]}
+        """
+        params: dict = {"per_page": per_page}
+        if keyword:
+            params["keyword"] = keyword
+        return await self._request("GET", "/carts/abandoned", params=params)
+
+    async def get_abandoned_cart(self, cart_id: str) -> dict:
+        """Get a single abandoned cart with status (active / purchased)."""
+        return await self._request("GET", f"/carts/abandoned/{cart_id}")
