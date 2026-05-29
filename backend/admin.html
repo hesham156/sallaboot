@@ -385,6 +385,37 @@ select.form-control{cursor:pointer}
           <p>٣. يُسجَّل المتجر تلقائياً ويُجلَب كتالوجه في الخلفية</p>
           <p>٤. كود التضمين في المتجر: <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">window.SallaChatConfig = &#123; storeId: "STORE_ID" &#125;</code></p>
         </div>
+        <div style="margin-top:12px">
+          <a href="/webhook/salla/debug" target="_blank" class="btn btn-outline btn-sm">🔍 فحص وصول الـ Webhooks</a>
+        </div>
+      </div>
+
+      <!-- Manual Registration -->
+      <div class="section">
+        <div class="section-title">🔧 تسجيل متجر يدوياً</div>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">
+          إذا لم يصل الـ webhook تلقائياً (مثلاً بعد إعادة تشغيل Railway)، يمكنك تسجيل المتجر يدوياً بإدخال بياناته هنا.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label class="form-label">رقم المتجر (Store ID / Merchant ID)</label>
+            <input type="text" id="reg-store-id" class="form-control" placeholder="مثال: 1234567">
+          </div>
+          <div>
+            <label class="form-label">اسم المتجر (اختياري)</label>
+            <input type="text" id="reg-store-name" class="form-control" placeholder="مثال: متجر الطباعة">
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <label class="form-label">Access Token</label>
+          <input type="password" id="reg-access-token" class="form-control" placeholder="eyJ...">
+        </div>
+        <div style="margin-bottom:16px">
+          <label class="form-label">Refresh Token (اختياري)</label>
+          <input type="password" id="reg-refresh-token" class="form-control" placeholder="اختياري">
+        </div>
+        <div id="reg-status" style="margin-bottom:12px;font-size:13px"></div>
+        <button class="btn btn-primary" onclick="manualRegister()">➕ تسجيل المتجر</button>
       </div>
 
       <div id="stores-grid-wrap">
@@ -935,6 +966,42 @@ function storeCard(s) {
         فتح اللوحة →
       </a>
     </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Super admin: Manual store registration
+// ─────────────────────────────────────────────────────────────────────────────
+async function manualRegister() {
+  const storeId      = document.getElementById('reg-store-id').value.trim();
+  const accessToken  = document.getElementById('reg-access-token').value.trim();
+  const refreshToken = document.getElementById('reg-refresh-token').value.trim();
+  const storeName    = document.getElementById('reg-store-name').value.trim();
+  const statusEl     = document.getElementById('reg-status');
+
+  if (!storeId || !accessToken) {
+    statusEl.innerHTML = '<span class="badge badge-red">رقم المتجر و Access Token مطلوبان</span>';
+    return;
+  }
+  statusEl.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><span class="spin spin-blue"></span> جارٍ التسجيل…</span>';
+  try {
+    const r = await fetch('/admin/stores/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store_id:      storeId,
+        access_token:  accessToken,
+        refresh_token: refreshToken,
+        store_name:    storeName,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'فشل التسجيل');
+    statusEl.innerHTML = `<span class="badge badge-green">✅ ${esc(d.message)}</span>`;
+    toast('تم تسجيل المتجر بنجاح ✅');
+    setTimeout(() => loadStores(), 1500);
+  } catch(e) {
+    statusEl.innerHTML = `<span class="badge badge-red">❌ ${esc(e.message)}</span>`;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

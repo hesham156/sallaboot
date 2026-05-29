@@ -476,6 +476,10 @@ async def admin_handback_compat(session_id: str):
 # Key: store_id → deque of event dicts.
 _webhook_log: dict = collections.defaultdict(lambda: collections.deque(maxlen=200))
 
+# Raw attempts log — captures EVERY incoming request before any processing.
+# Useful for diagnosing missing webhooks / signature failures.
+_raw_attempts: collections.deque = collections.deque(maxlen=50)
+
 # Idempotency: remember (event, merchant_id, event_id) tuples we already handled.
 # Salla retries up to 3× every 5 min — we must not double-process.
 _seen_events: collections.deque = collections.deque(maxlen=1000)
@@ -497,27 +501,32 @@ def _already_seen(dedup_key: str) -> bool:
     return False
 
 
-def _verify_signature(body: bytes, headers) -> bool:
+def _verify_signature(body: bytes, headers) -> tuple:
     """
     Verify X-Salla-Signature using HMAC-SHA256.
-    Returns False (reject) if the secret is set but signature is missing or wrong.
-    Returns True (accept) if secret is not configured (dev mode).
+    Returns (ok: bool, detail: str).
+
+    Behaviour:
+    - No secret configured → accept (dev mode).
+    - Secret configured + signature present → verify strictly.
+    - Secret configured + signature ABSENT → accept with warning.
+      (Some Salla easy-mode events don't include the header.)
     """
     secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
     if not secret:
-        return True          # No secret configured — accept all (dev/test mode)
+        return True, "no_secret_configured"
 
     sig = headers.get("X-Salla-Signature", "")
     if not sig:
-        print("[webhook] ⛔ Missing X-Salla-Signature — rejected")
-        return False
+        print("[webhook] ⚠️ Missing X-Salla-Signature — accepted with warning")
+        return True, "signature_absent_accepted"
 
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig):
         print(f"[webhook] ⛔ Signature mismatch — rejected (got {sig[:16]}…)")
-        return False
+        return False, f"signature_mismatch got={sig[:16]}"
 
-    return True
+    return True, "signature_ok"
 
 
 # ── Per-event async handlers ───────────────────────────────────────────────────
@@ -602,15 +611,28 @@ async def _handle_customer_event(event: str, merchant_id: str, data: dict):
 async def salla_webhook(request: Request):
     """
     Central Salla webhook receiver.
-    • Verifies HMAC-SHA256 signature (strict — rejects missing signatures when secret is set)
+    • Logs every raw attempt before any processing (for debugging)
+    • Verifies HMAC-SHA256 signature; missing signature = warning only (easy-mode compat)
     • Deduplicates retries (Salla retries up to 3× every 5 min)
     • Routes to per-event async handlers and always returns 200 within the 30 s timeout
     """
     body = await request.body()
+    ts_now = _dt.datetime.utcnow().isoformat() + "Z"
 
     # ── 1. Signature verification ──────────────────────────────────────────────
-    if not _verify_signature(body, request.headers):
-        raise HTTPException(401, "Invalid or missing webhook signature")
+    sig_ok, sig_detail = _verify_signature(body, request.headers)
+
+    # Log raw attempt BEFORE any JSON parsing (helps diagnose delivery failures)
+    _raw_attempts.appendleft({
+        "ts":         ts_now,
+        "sig":        sig_detail,
+        "body_head":  body[:200].decode("utf-8", errors="replace"),
+        "content_type": request.headers.get("Content-Type", ""),
+        "user_agent": request.headers.get("User-Agent", ""),
+    })
+
+    if not sig_ok:
+        raise HTTPException(401, f"Webhook signature invalid: {sig_detail}")
 
     # ── 2. Parse JSON ──────────────────────────────────────────────────────────
     import json as _json
@@ -623,6 +645,11 @@ async def salla_webhook(request: Request):
     merchant_id = str(payload.get("merchant", ""))
     data        = payload.get("data", {})
     created_at  = payload.get("created_at", "")
+
+    # Update raw log entry with parsed event info
+    if _raw_attempts:
+        _raw_attempts[0]["event"]       = event
+        _raw_attempts[0]["merchant_id"] = merchant_id
 
     print(f"[webhook] {event!r}  merchant={merchant_id or '—'}  ts={created_at}")
 
@@ -666,6 +693,61 @@ async def store_webhook_log(store_id: str):
     """Return the last 200 webhook events received for this store."""
     events = list(_webhook_log.get(store_id, []))
     return {"store_id": store_id, "count": len(events), "events": events}
+
+
+# ── Webhook raw attempts debug (no auth — shows last 50 raw attempts) ──────────
+@app.get("/webhook/salla/debug")
+async def webhook_debug():
+    """
+    Public debug endpoint — shows last 50 raw webhook attempts.
+    Useful for diagnosing whether Salla webhooks are reaching the server.
+    Remove or protect in production once confirmed working.
+    """
+    return {
+        "webhook_url":     f"{os.getenv('BASE_URL','http://localhost:8000')}/webhook/salla",
+        "secret_set":      bool(os.getenv("SALLA_WEBHOOK_SECRET", "")),
+        "total_attempts":  len(_raw_attempts),
+        "attempts":        list(_raw_attempts),
+    }
+
+
+# ── Manual store registration (super admin) ────────────────────────────────────
+class ManualRegisterRequest(BaseModel):
+    store_id:      str
+    access_token:  str
+    refresh_token: Optional[str] = ""
+    store_name:    Optional[str] = ""
+
+
+@app.post("/admin/stores/register")
+async def manual_register_store(req: ManualRegisterRequest, request: Request):
+    """
+    Manually register / re-register a store when the webhook wasn't received
+    (e.g. Railway filesystem wipe, Salla Partners URL misconfiguration, etc.)
+    Requires super-admin token.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(403, "مصرح للمدير العام فقط")
+
+    store_id = req.store_id.strip()
+    if not store_id or not req.access_token.strip():
+        raise HTTPException(400, "store_id و access_token مطلوبان")
+
+    sm.register_store(
+        store_id=store_id,
+        access_token=req.access_token.strip(),
+        refresh_token=req.refresh_token.strip(),
+        store_info={"name": req.store_name.strip() or f"متجر {store_id}"},
+    )
+    # Kick off a background sync
+    asyncio.create_task(_sync_task(store_id, req.access_token.strip()))
+    return {
+        "status":    "ok",
+        "store_id":  store_id,
+        "message":   f"تم تسجيل المتجر {store_id!r} وبدأت المزامنة في الخلفية",
+    }
 
 
 # ── Salla OAuth ────────────────────────────────────────────────────────────────
