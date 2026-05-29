@@ -233,8 +233,12 @@
       });
       var data = await res.json();
       hideTyping();
-      if (data.session_id) sessionId = data.session_id;
-      appendMessage("bot", data.reply || "عذراً، حدث خطأ. حاول مرة أخرى.");
+      if (!res.ok) {
+        appendMessage("bot", "عذراً، حدث خطأ مؤقت. حاول مرة أخرى.");
+      } else {
+        if (data.session_id) sessionId = data.session_id;
+        appendMessage("bot", data.reply || "عذراً، لم أفهم طلبك. حاول مرة أخرى.");
+      }
     } catch (e) {
       hideTyping();
       appendMessage("bot", "⚠️ تعذر الاتصال بالخادم. تأكد من اتصالك بالإنترنت وحاول مرة أخرى.");
