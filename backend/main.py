@@ -1632,10 +1632,19 @@ async def chat(req: ChatRequest):
         # Never return bot_enabled=False here — that triggers the widget's
         # admin-takeover loop and confuses the user.
         err_lower = err_msg.lower()
-        if "rate" in err_lower or "429" in err_lower or "quota" in err_lower:
-            friendly = "عذراً، المساعد مشغول الآن بسبب الضغط الزائد. انتظر لحظة وحاول مجدداً. ⏳"
-        elif "401" in err_lower or "invalid" in err_lower and "key" in err_lower:
+        # Check auth/key errors FIRST (before rate-limit) to avoid mis-classification.
+        # OpenAI 401 contains "401" and "incorrect api key" or "invalid_api_key".
+        # Groq 401 contains "401" and "invalid api key".
+        if (
+            "401" in err_lower
+            or "authentication" in err_lower
+            or ("invalid" in err_lower and "key" in err_lower)
+            or "incorrect api key" in err_lower
+            or "invalid_api_key" in err_lower
+        ):
             friendly = "عذراً، هناك مشكلة في مفتاح API للذكاء الاصطناعي. يرجى مراجعة الإعدادات من لوحة التحكم. 🔑"
+        elif "rate" in err_lower or "429" in err_lower or "quota" in err_lower:
+            friendly = "عذراً، المساعد مشغول الآن بسبب الضغط الزائد. انتظر لحظة وحاول مجدداً. ⏳"
         elif "timeout" in err_lower or "connect" in err_lower or "connection" in err_lower:
             friendly = "عذراً، انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى. 🌐"
         elif "key" in err_lower or "api" in err_lower:

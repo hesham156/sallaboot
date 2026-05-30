@@ -268,11 +268,29 @@ class PrintingAgent:
     def __init__(self, store_id: str = "default", access_token: str = ""):
         self.store_id = store_id
 
-        # Per-store AI config takes priority over env vars
-        ai_cfg        = sm.get_ai_config(store_id) if store_id else {}
-        groq_key      = ai_cfg.get("groq_api_key",      "").strip() or os.getenv("GROQ_API_KEY",      "")
-        anthropic_key = ai_cfg.get("anthropic_api_key", "").strip() or os.getenv("ANTHROPIC_API_KEY", "")
-        openai_key    = ai_cfg.get("openai_api_key",    "").strip() or os.getenv("OPENAI_API_KEY",    "")
+        # Per-store AI config takes priority over env vars.
+        # IMPORTANT: if ANY per-store key is configured, use ONLY per-store keys —
+        # do NOT mix with env vars.  Mixing causes provider switching to fail:
+        # e.g. user clears Groq and sets OpenAI, but groq_key = "" or GROQ_ENV_VAR
+        # would fall back to the env var and silently keep using Groq.
+        ai_cfg = sm.get_ai_config(store_id) if store_id else {}
+        has_per_store_key = bool(
+            ai_cfg.get("groq_api_key")      or
+            ai_cfg.get("anthropic_api_key") or
+            ai_cfg.get("openai_api_key")
+        )
+
+        if has_per_store_key:
+            # Per-store config is explicit — respect exactly what the admin set
+            groq_key      = ai_cfg.get("groq_api_key",      "").strip()
+            anthropic_key = ai_cfg.get("anthropic_api_key", "").strip()
+            openai_key    = ai_cfg.get("openai_api_key",    "").strip()
+        else:
+            # No per-store keys at all — fall back to global env vars
+            groq_key      = os.getenv("GROQ_API_KEY",      "")
+            anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+            openai_key    = os.getenv("OPENAI_API_KEY",    "")
+
         self._bot_name = ai_cfg.get("bot_name", "").strip()
 
         # Per-store model override — sensible defaults per provider
