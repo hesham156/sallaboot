@@ -649,7 +649,15 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
         config["anthropic_api_key"] = ""
 
     sm.set_ai_config(store_id, config)
-    return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي"}
+
+    # Await DB writes directly (instead of fire-and-forget) to guarantee
+    # settings survive server restarts. save_store saves ai_config inside the
+    # tokens JSONB column; save_ai_config also persists it in the separate column.
+    tokens = sm.get_store_info(store_id)
+    await db.save_store(store_id, tokens)
+    await db.save_ai_config(store_id, config)
+
+    return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي ✅"}
 
 
 # ── Settings: Change password ──────────────────────────────────────────────────
@@ -663,6 +671,8 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest):
     if len(req.new_password) < 6:
         raise HTTPException(400, "كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل")
     sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
+    # Persist immediately to DB so password survives server restarts
+    await db.save_store(store_id, sm.get_store_info(store_id))
     return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
 
 

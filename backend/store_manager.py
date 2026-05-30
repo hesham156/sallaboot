@@ -301,8 +301,9 @@ def list_stores() -> list:
             "last_sync":        cache.get("last_sync", "never"),
             "last_sync_errors": cache.get("last_sync_errors", []),
             "has_ai_config":    bool(
-                tokens.get("ai_config", {}).get("groq_api_key") or
-                tokens.get("ai_config", {}).get("anthropic_api_key")
+                tokens.get("ai_config", {}).get("groq_api_key")      or
+                tokens.get("ai_config", {}).get("anthropic_api_key") or
+                tokens.get("ai_config", {}).get("openai_api_key")
             ),
         })
     return sorted(result, key=lambda x: x.get("connected_at", ""), reverse=True)
