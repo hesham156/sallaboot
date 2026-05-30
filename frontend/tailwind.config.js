@@ -22,13 +22,13 @@ export default {
         dark: {
           extend: 'dark',
           colors: {
-            background: '#020617',
-            foreground: '#f8fafc',
-            divider: '#1e293b',
-            content1: '#0f172a',
-            content2: '#1e293b',
-            content3: '#334155',
-            content4: '#475569',
+            background: '#020917',
+            foreground: '#f1f5f9',
+            divider: '#1c2d42',
+            content1: '#0c1627',
+            content2: '#111e32',
+            content3: '#1c2d42',
+            content4: '#2d4060',
             primary: {
               50:  '#eff6ff',
               100: '#dbeafe',
@@ -43,18 +43,13 @@ export default {
               DEFAULT: '#3b82f6',
               foreground: '#ffffff',
             },
-            success: {
-              DEFAULT: '#22c55e',
+            secondary: {
+              DEFAULT: '#8b5cf6',
               foreground: '#ffffff',
             },
-            warning: {
-              DEFAULT: '#f59e0b',
-              foreground: '#ffffff',
-            },
-            danger: {
-              DEFAULT: '#ef4444',
-              foreground: '#ffffff',
-            },
+            success: { DEFAULT: '#22c55e', foreground: '#ffffff' },
+            warning: { DEFAULT: '#f59e0b', foreground: '#ffffff' },
+            danger:  { DEFAULT: '#ef4444', foreground: '#ffffff' },
           },
         },
       },

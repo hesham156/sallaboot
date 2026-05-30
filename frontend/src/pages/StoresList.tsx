@@ -1,13 +1,84 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Card, CardBody, CardHeader,
-  Table, TableHeader, TableColumn, TableBody, TableRow, TableCell,
   Button, Chip, Avatar, Tooltip, Spinner,
   Modal, ModalContent, ModalHeader, ModalBody, ModalFooter,
-  Input, useDisclosure, Divider,
+  Input, useDisclosure,
+  Table, TableHeader, TableColumn, TableBody, TableRow, TableCell,
 } from '@heroui/react'
 import { api, StoreInfo, clearAuth } from '../api'
+
+/* ── Icon helper ── */
+function Icon({ paths, size = 16, className = '' }: {
+  paths: string | string[]
+  size?: number
+  className?: string
+}) {
+  const arr = Array.isArray(paths) ? paths : [paths]
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth={2}
+      strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {arr.map((d, i) => <path key={i} d={d} />)}
+    </svg>
+  )
+}
+
+/* ── Stat card definitions ── */
+const STATS = [
+  {
+    key: 'stores',
+    label: 'المتاجر',
+    glow: 'card-blue',
+    gradient: 'from-blue-500/10 via-blue-500/5 to-transparent',
+    border: 'border-blue-500/20 hover:border-blue-500/40',
+    iconBg: 'bg-blue-500/15',
+    iconColor: 'text-blue-400',
+    numColor: 'text-blue-400',
+    iconPaths: ['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10'],
+    getValue: (s: StoreInfo[]) => s.length,
+  },
+  {
+    key: 'products',
+    label: 'إجمالي المنتجات',
+    glow: 'card-green',
+    gradient: 'from-emerald-500/10 via-emerald-500/5 to-transparent',
+    border: 'border-emerald-500/20 hover:border-emerald-500/40',
+    iconBg: 'bg-emerald-500/15',
+    iconColor: 'text-emerald-400',
+    numColor: 'text-emerald-400',
+    iconPaths: ['M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'],
+    getValue: (s: StoreInfo[]) => s.reduce((a, x) => a + x.products_count, 0),
+  },
+  {
+    key: 'ai',
+    label: 'مع AI مُعدّ',
+    glow: 'card-purple',
+    gradient: 'from-violet-500/10 via-violet-500/5 to-transparent',
+    border: 'border-violet-500/20 hover:border-violet-500/40',
+    iconBg: 'bg-violet-500/15',
+    iconColor: 'text-violet-400',
+    numColor: 'text-violet-400',
+    iconPaths: [
+      'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+    ],
+    getValue: (s: StoreInfo[]) => s.filter(x => x.has_ai_config).length,
+  },
+  {
+    key: 'sync',
+    label: 'تمت المزامنة',
+    glow: 'card-amber',
+    gradient: 'from-amber-500/10 via-amber-500/5 to-transparent',
+    border: 'border-amber-500/20 hover:border-amber-500/40',
+    iconBg: 'bg-amber-500/15',
+    iconColor: 'text-amber-400',
+    numColor: 'text-amber-400',
+    iconPaths: [
+      'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+    ],
+    getValue: (s: StoreInfo[]) => s.filter(x => x.last_sync !== 'never').length,
+  },
+]
 
 export default function StoresList() {
   const navigate = useNavigate()
@@ -17,44 +88,31 @@ export default function StoresList() {
   const [env, setEnv] = useState<Record<string, unknown>>({})
   const [msg, setMsg] = useState('')
 
-  // Register store modal
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const [regStoreId, setRegStoreId] = useState('')
-  const [regToken, setRegToken] = useState('')
-  const [regRefresh, setRegRefresh] = useState('')
-  const [regName, setRegName] = useState('')
-  const [regLoading, setRegLoading] = useState(false)
-  const [regError, setRegError] = useState('')
+  const [regStoreId, setRegStoreId]   = useState('')
+  const [regToken, setRegToken]       = useState('')
+  const [regRefresh, setRegRefresh]   = useState('')
+  const [regName, setRegName]         = useState('')
+  const [regLoading, setRegLoading]   = useState(false)
+  const [regError, setRegError]       = useState('')
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
     try {
-      const [storeRes, envRes] = await Promise.all([
-        api.listStores(),
-        api.envCheck(),
-      ])
+      const [storeRes, envRes] = await Promise.all([api.listStores(), api.envCheck()])
       setStores(storeRes.stores)
       setEnv(envRes)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
   }
 
   async function handleForceSync() {
-    setSyncing(true)
-    setMsg('')
-    try {
-      const res = await api.forceDbSync()
-      setMsg(res.message)
-    } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'خطأ')
-    } finally {
-      setSyncing(false)
-    }
+    setSyncing(true); setMsg('')
+    try { setMsg((await api.forceDbSync()).message) }
+    catch (e: unknown) { setMsg(e instanceof Error ? e.message : 'خطأ') }
+    finally { setSyncing(false) }
   }
 
   async function handleReset(storeId: string) {
@@ -62,9 +120,7 @@ export default function StoresList() {
     try {
       await api.resetPassword(storeId)
       setMsg(`تمت إعادة التعيين — كلمة المرور الجديدة: ${storeId}`)
-    } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'خطأ')
-    }
+    } catch (e: unknown) { setMsg(e instanceof Error ? e.message : 'خطأ') }
   }
 
   async function handleRegister() {
@@ -84,92 +140,133 @@ export default function StoresList() {
       })
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail) }
       onClose(); loadData()
-    } catch (e: unknown) {
-      setRegError(e instanceof Error ? e.message : 'خطأ')
-    } finally {
-      setRegLoading(false)
-    }
+    } catch (e: unknown) { setRegError(e instanceof Error ? e.message : 'خطأ') }
+    finally { setRegLoading(false) }
   }
 
   function logout() { clearAuth(); navigate('/login', { replace: true }) }
-
   const dbConnected = Boolean(env['DB_CONNECTED'])
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+    <div className="min-h-screen bg-background p-6 space-y-6" dir="rtl">
+
+      {/* ════════════════ HEADER ════════════════ */}
+      <div className="flex items-center justify-between">
+        {/* Brand */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30 flex-shrink-0">
+            <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">لوحة التحكم الرئيسية</h1>
-            <p className="text-xs text-default-400">إدارة جميع المتاجر</p>
+            <h1 className="text-xl font-black text-white leading-tight">لوحة التحكم</h1>
+            <p className="text-xs text-slate-500 mt-0.5">إدارة جميع المتاجر</p>
           </div>
         </div>
+
+        {/* Actions */}
         <div className="flex items-center gap-2">
-          <Chip
-            size="sm"
-            color={dbConnected ? 'success' : 'danger'}
-            variant="dot"
-          >
+          {/* DB badge */}
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border ${
+            dbConnected
+              ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+              : 'bg-red-500/10 border-red-500/25 text-red-400'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+              dbConnected ? 'bg-emerald-400 animate-pulse-dot' : 'bg-red-400'
+            }`} />
             {dbConnected ? 'DB متصل' : 'DB غير متصل'}
-          </Chip>
-          <Button size="sm" variant="bordered" onPress={onOpen}>
-            + تسجيل متجر
-          </Button>
-          <Button size="sm" variant="bordered" color="warning" isLoading={syncing} onPress={handleForceSync}>
+          </div>
+
+          <button
+            onClick={onOpen}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-[#0c1627] border-[#1c2d42] text-slate-300 hover:text-white hover:border-slate-500 hover:bg-[#111e32]"
+          >
+            <Icon paths="M12 4v16m8-8H4" size={13} />
+            تسجيل متجر
+          </button>
+
+          <button
+            onClick={handleForceSync}
+            disabled={syncing}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/15 disabled:opacity-60"
+          >
+            {syncing
+              ? <Spinner size="sm" color="warning" className="scale-75" />
+              : <Icon paths="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" size={13} />
+            }
             مزامنة DB
-          </Button>
-          <Button size="sm" variant="flat" color="danger" onPress={logout}>
+          </button>
+
+          <button
+            onClick={logout}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/15"
+          >
+            <Icon paths="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" size={13} />
             خروج
-          </Button>
+          </button>
         </div>
       </div>
 
+      {/* ════════════════ TOAST ════════════════ */}
       {msg && (
-        <div className="mb-4 bg-success/10 border border-success/20 rounded-lg p-3 text-success text-sm">
-          {msg}
+        <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-4 py-3 text-sm text-emerald-400">
+          <Icon paths="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" size={16} className="flex-shrink-0" />
+          <span className="flex-1">{msg}</span>
+          <button onClick={() => setMsg('')} className="text-emerald-600 hover:text-emerald-400">
+            <Icon paths="M6 18L18 6M6 6l12 12" size={14} />
+          </button>
         </div>
       )}
 
-      {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        {[
-          { label: 'المتاجر', value: stores.length, color: 'text-primary' },
-          { label: 'إجمالي المنتجات', value: stores.reduce((a, s) => a + s.products_count, 0), color: 'text-success' },
-          { label: 'مع إعدادات AI', value: stores.filter(s => s.has_ai_config).length, color: 'text-warning' },
-          { label: 'مزامنة اليوم', value: stores.filter(s => s.last_sync !== 'never').length, color: 'text-secondary' },
-        ].map(s => (
-          <Card key={s.label} className="bg-content1 border border-divider">
-            <CardBody className="py-4 px-5">
-              <p className="text-xs text-default-400 font-medium">{s.label}</p>
-              <p className={`text-3xl font-black mt-1 ${s.color}`}>{s.value}</p>
-            </CardBody>
-          </Card>
+      {/* ════════════════ STATS ════════════════ */}
+      <div className="grid grid-cols-4 gap-4">
+        {STATS.map(s => (
+          <div
+            key={s.key}
+            className={`relative overflow-hidden rounded-2xl bg-[#0c1627] border ${s.border} p-5 ${s.glow} transition-all duration-300`}
+          >
+            <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} pointer-events-none`} />
+            <div className="relative flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium mb-3 truncate">{s.label}</p>
+                <p className={`text-4xl font-black tracking-tight leading-none ${s.numColor}`}>
+                  {s.getValue(stores)}
+                </p>
+              </div>
+              <div className={`w-10 h-10 ${s.iconBg} rounded-xl flex items-center justify-center flex-shrink-0 ${s.iconColor}`}>
+                <Icon paths={s.iconPaths} size={18} />
+              </div>
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* Stores table */}
-      <Card className="bg-content1 border border-divider">
-        <CardHeader className="px-5 py-4">
-          <h2 className="font-bold text-base">المتاجر المسجلة</h2>
-        </CardHeader>
-        <Divider />
+      {/* ════════════════ TABLE ════════════════ */}
+      <div className="rounded-2xl bg-[#0c1627] border border-[#1c2d42] overflow-hidden">
+
+        {/* Table header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1c2d42]">
+          <h2 className="font-bold text-white text-sm flex items-center gap-2.5">
+            <span className="w-1 h-5 bg-gradient-to-b from-blue-400 to-indigo-500 rounded-full" />
+            المتاجر المسجلة
+          </h2>
+          <span className="text-xs text-slate-500 bg-[#111e32] px-2.5 py-1 rounded-lg border border-[#1c2d42]">
+            {stores.length} متجر
+          </span>
+        </div>
+
         {loading ? (
-          <CardBody className="flex items-center justify-center py-16">
+          <div className="flex items-center justify-center py-24">
             <Spinner size="lg" color="primary" />
-          </CardBody>
+          </div>
         ) : (
           <Table
-            aria-label="stores"
+            aria-label="stores-table"
             classNames={{
-              wrapper: 'bg-transparent shadow-none p-0',
-              th: 'bg-content2 text-default-400 text-xs font-semibold',
-              td: 'py-3',
+              wrapper: 'bg-transparent shadow-none p-0 rounded-none',
+              th: 'bg-[#0a1422] text-slate-500 text-xs font-semibold uppercase tracking-wide border-0 first:rounded-none last:rounded-none',
+              td: 'py-3.5 border-b border-[#1c2d42]/60 last-of-type:border-0',
+              tr: 'hover:bg-[#111e32] transition-colors',
             }}
           >
             <TableHeader>
@@ -180,59 +277,78 @@ export default function StoresList() {
               <TableColumn>آخر مزامنة</TableColumn>
               <TableColumn>الإجراءات</TableColumn>
             </TableHeader>
-            <TableBody emptyContent="لا يوجد متاجر مسجلة">
+            <TableBody emptyContent={
+              <div className="py-20 text-center">
+                <div className="w-16 h-16 bg-[#111e32] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={26} className="text-slate-600" />
+                </div>
+                <p className="text-slate-400 text-sm font-semibold">لا يوجد متاجر مسجلة</p>
+                <p className="text-slate-600 text-xs mt-1">أضف متجراً جديداً للبدء</p>
+              </div>
+            }>
               {stores.map(s => (
-                <TableRow key={s.store_id} className="hover:bg-content2/50 cursor-pointer">
-                  <TableCell onClick={() => navigate(`/store/${s.store_id}`)}>
-                    <div className="flex items-center gap-3">
+                <TableRow key={s.store_id}>
+                  <TableCell>
+                    <button
+                      onClick={() => navigate(`/store/${s.store_id}`)}
+                      className="flex items-center gap-3 text-right group"
+                    >
                       <Avatar
                         src={s.store_avatar || undefined}
                         name={s.store_name[0]}
                         size="sm"
-                        className="bg-primary/20 text-primary"
+                        className="bg-blue-500/20 text-blue-400 font-bold flex-shrink-0"
                       />
-                      <div>
-                        <p className="font-semibold text-sm text-foreground">{s.store_name}</p>
-                        <p className="text-xs text-default-400">{s.store_id}</p>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm text-slate-200 group-hover:text-blue-400 transition-colors truncate">
+                          {s.store_name}
+                        </p>
+                        <p className="text-xs text-slate-600 font-mono truncate">{s.store_id}</p>
                       </div>
-                    </div>
+                    </button>
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm text-default-300">{s.store_domain || '—'}</span>
+                    <span className="text-sm text-slate-400">{s.store_domain || '—'}</span>
                   </TableCell>
                   <TableCell>
-                    <span className="font-semibold text-primary">{s.products_count}</span>
-                  </TableCell>
-                  <TableCell>
-                    <Chip size="sm" color={s.has_ai_config ? 'success' : 'default'} variant="flat">
-                      {s.has_ai_config ? '✓ مُعدّ' : 'بيئة'}
-                    </Chip>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs text-default-400">
-                      {s.last_sync === 'never' ? 'لم تتم بعد' : new Date(s.last_sync).toLocaleString('ar-SA')}
+                    <span className="inline-flex items-center text-sm font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded-lg">
+                      {s.products_count}
                     </span>
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
-                      <Tooltip content="فتح لوحة المتجر">
-                        <Button size="sm" variant="flat" color="primary" isIconOnly
-                          onPress={() => navigate(`/store/${s.store_id}`)}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15 3 21 3 21 9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                          </svg>
-                        </Button>
+                    <Chip
+                      size="sm"
+                      color={s.has_ai_config ? 'success' : 'default'}
+                      variant="flat"
+                      classNames={{ content: 'font-semibold text-xs' }}
+                    >
+                      {s.has_ai_config ? '✓ مُعدّ' : 'env'}
+                    </Chip>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-xs text-slate-500">
+                      {s.last_sync === 'never'
+                        ? 'لم تتم بعد'
+                        : new Date(s.last_sync).toLocaleString('ar-SA')}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      <Tooltip content="فتح لوحة المتجر" placement="top">
+                        <button
+                          onClick={() => navigate(`/store/${s.store_id}`)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                        >
+                          <Icon paths="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" size={13} />
+                        </button>
                       </Tooltip>
                       <Tooltip content="إعادة تعيين كلمة المرور">
-                        <Button size="sm" variant="flat" color="warning" isIconOnly
-                          onPress={() => handleReset(s.store_id)}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                          </svg>
-                        </Button>
+                        <button
+                          onClick={() => handleReset(s.store_id)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                        >
+                          <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={13} />
+                        </button>
                       </Tooltip>
                     </div>
                   </TableCell>
@@ -241,22 +357,67 @@ export default function StoresList() {
             </TableBody>
           </Table>
         )}
-      </Card>
+      </div>
 
-      {/* Register store modal */}
+      {/* ════════════════ REGISTER MODAL ════════════════ */}
       <Modal isOpen={isOpen} onClose={onClose} placement="center">
-        <ModalContent className="bg-content1 border border-divider">
-          <ModalHeader>تسجيل متجر جديد يدوياً</ModalHeader>
-          <ModalBody className="gap-3">
-            <Input label="معرف المتجر *" value={regStoreId} onValueChange={setRegStoreId} variant="bordered" classNames={{ inputWrapper: 'border-divider' }} />
-            <Input label="Access Token *" value={regToken} onValueChange={setRegToken} variant="bordered" classNames={{ inputWrapper: 'border-divider' }} />
-            <Input label="Refresh Token" value={regRefresh} onValueChange={setRegRefresh} variant="bordered" classNames={{ inputWrapper: 'border-divider' }} />
-            <Input label="اسم المتجر" value={regName} onValueChange={setRegName} variant="bordered" classNames={{ inputWrapper: 'border-divider' }} />
-            {regError && <p className="text-danger text-sm">{regError}</p>}
+        <ModalContent className="bg-[#0c1627] border border-[#1c2d42]">
+          <ModalHeader className="text-white font-bold border-b border-[#1c2d42] pb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-blue-500/15 rounded-xl flex items-center justify-center text-blue-400">
+                <Icon paths="M12 4v16m8-8H4" size={15} />
+              </div>
+              تسجيل متجر جديد
+            </div>
+          </ModalHeader>
+          <ModalBody className="gap-3 pt-4">
+            <Input
+              label="معرف المتجر *"
+              placeholder="store-123"
+              value={regStoreId}
+              onValueChange={setRegStoreId}
+              variant="bordered"
+              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+            />
+            <Input
+              label="Access Token *"
+              placeholder="ey..."
+              type="password"
+              value={regToken}
+              onValueChange={setRegToken}
+              variant="bordered"
+              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+            />
+            <Input
+              label="Refresh Token"
+              placeholder="اختياري"
+              value={regRefresh}
+              onValueChange={setRegRefresh}
+              variant="bordered"
+              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+            />
+            <Input
+              label="اسم المتجر"
+              placeholder="متجري"
+              value={regName}
+              onValueChange={setRegName}
+              variant="bordered"
+              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+            />
+            {regError && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 text-red-400 text-sm">
+                <Icon paths="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" size={15} className="flex-shrink-0" />
+                {regError}
+              </div>
+            )}
           </ModalBody>
-          <ModalFooter>
-            <Button variant="flat" onPress={onClose}>إلغاء</Button>
-            <Button color="primary" isLoading={regLoading} onPress={handleRegister}>تسجيل</Button>
+          <ModalFooter className="border-t border-[#1c2d42] pt-4">
+            <Button variant="flat" onPress={onClose} className="text-slate-400 bg-[#111e32]">
+              إلغاء
+            </Button>
+            <Button color="primary" isLoading={regLoading} onPress={handleRegister} className="font-bold">
+              تسجيل المتجر
+            </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>

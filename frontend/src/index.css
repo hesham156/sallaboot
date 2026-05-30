@@ -6,15 +6,39 @@
   font-family: 'Tajawal', sans-serif !important;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar        { width: 6px; height: 6px; }
+/* ── Scrollbar ── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: #334155; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #475569; }
+::-webkit-scrollbar-thumb  { background: #1c2d42; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #2d4060; }
 
-/* RTL overrides for HeroUI */
-[dir="rtl"] .heroui-sidebar { right: 0; left: auto; }
+/* ── Transitions ── */
+*, *::before, *::after {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
 
-/* Smooth transitions */
-* { transition-property: color, background-color, border-color, opacity;
-    transition-duration: 150ms; }
+/* ── Gradient text ── */
+.text-gradient {
+  background: linear-gradient(135deg, #93c5fd 0%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Status pulse ── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* ── Stat card hover glow ── */
+.card-blue:hover   { box-shadow: 0 0 28px rgba(59,130,246,0.12); }
+.card-green:hover  { box-shadow: 0 0 28px rgba(34,197,94,0.12);  }
+.card-purple:hover { box-shadow: 0 0 28px rgba(139,92,246,0.12); }
+.card-amber:hover  { box-shadow: 0 0 28px rgba(245,158,11,0.12); }
+
+/* ── Sidebar active glow ── */
+.nav-active { box-shadow: inset -3px 0 0 #3b82f6; }
