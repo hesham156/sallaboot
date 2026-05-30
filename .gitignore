@@ -33,3 +33,6 @@ Thumbs.db
 
 # Claude local config
 .claude/
+
+# Frontend node_modules (never commit)
+frontend/node_modules/

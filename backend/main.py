@@ -179,7 +179,25 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-_ADMIN_HTML = Path(__file__).parent / "admin.html"
+_ADMIN_HTML     = Path(__file__).parent / "admin.html"
+_ADMIN_DIST_DIR = Path(__file__).parent / "admin-dist"
+_ADMIN_DIST_IDX = _ADMIN_DIST_DIR / "index.html"
+
+# Mount React static assets (JS/CSS bundles) — only if the dist folder exists.
+# The dist folder is produced by `npm run build` in the frontend/ directory.
+if _ADMIN_DIST_DIR.exists():
+    from fastapi.staticfiles import StaticFiles as _StaticFiles
+    # Mount /assets separately so API routes under /admin/* still take priority.
+    _assets_dir = _ADMIN_DIST_DIR / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", _StaticFiles(directory=str(_assets_dir)), name="admin-assets")
+
+
+def _serve_react_or_legacy() -> HTMLResponse:
+    """Serve the new React app if built; fall back to legacy admin.html."""
+    if _ADMIN_DIST_IDX.exists():
+        return HTMLResponse(_ADMIN_DIST_IDX.read_text(encoding="utf-8"))
+    return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
 
 
 # ── Auth middleware ────────────────────────────────────────────────────────────
@@ -503,11 +521,11 @@ async def health():
     }
 
 
-# ── Admin HTML ─────────────────────────────────────────────────────────────────
+# ── Admin HTML (React app or legacy fallback) ──────────────────────────────────
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_index():
-    """Super-admin dashboard (lists all connected stores)."""
-    return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
+    """Super-admin dashboard — serves the React app if built, legacy HTML otherwise."""
+    return _serve_react_or_legacy()
 
 
 @app.get("/admin/stores")
@@ -520,8 +538,8 @@ async def admin_list_stores():
 # the literal 'stores' path first.
 @app.get("/admin/{store_id}", response_class=HTMLResponse)
 async def admin_store_page(store_id: str):
-    """Per-store admin dashboard. Same HTML; JS reads the store_id from the URL."""
-    return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
+    """Per-store admin dashboard — serves the React SPA (hash-router handles sub-routes)."""
+    return _serve_react_or_legacy()
 
 
 # ── Auth: Super admin login ────────────────────────────────────────────────────

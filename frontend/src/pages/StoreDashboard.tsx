@@ -1,0 +1,174 @@
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams, Routes, Route, useLocation } from 'react-router-dom'
+import {
+  Avatar, Button, Chip, Divider, Spinner,
+  Dropdown, DropdownTrigger, DropdownMenu, DropdownItem,
+} from '@heroui/react'
+import { api, StoreInfo, clearAuth, getIsSuper, getStoreId } from '../api'
+import Overview    from './store/Overview'
+import Conversations from './store/Conversations'
+import Products    from './store/Products'
+import Analytics   from './store/Analytics'
+import Settings    from './store/Settings'
+import Orders      from './store/Orders'
+import AbandonedCarts from './store/AbandonedCarts'
+
+const NAV_ITEMS = [
+  { key: '',             label: 'نظرة عامة',   icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { key: 'conversations',label: 'المحادثات',   icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
+  { key: 'products',     label: 'المنتجات',    icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
+  { key: 'orders',       label: 'الطلبات',     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+  { key: 'carts',        label: 'سلات متروكة', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z' },
+  { key: 'analytics',   label: 'التحليلات',   icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+  { key: 'settings',    label: 'الإعدادات',   icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+]
+
+export default function StoreDashboard() {
+  const { storeId = '' } = useParams<{ storeId: string }>()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [store, setStore] = useState<StoreInfo | null>(null)
+  const [botEnabled, setBotEnabled] = useState(true)
+  const [loadingBot, setLoadingBot] = useState(false)
+
+  // Active tab: extract path after /store/{storeId}/
+  const basePath = `/store/${storeId}`
+  const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
+  const activeTab = NAV_ITEMS.find(n => n.key === relativePath)?.key ?? ''
+
+  useEffect(() => {
+    loadStore()
+  }, [storeId])
+
+  async function loadStore() {
+    try {
+      const [storeRes, botRes] = await Promise.all([
+        api.listStores(),
+        api.botStatus(storeId),
+      ])
+      const found = storeRes.stores.find(s => s.store_id === storeId)
+      if (found) setStore(found)
+      setBotEnabled(botRes.bot_globally_enabled)
+    } catch (e) { console.error(e) }
+  }
+
+  async function toggleBot() {
+    setLoadingBot(true)
+    try {
+      const res = await api.botToggle(storeId, !botEnabled)
+      setBotEnabled(res.bot_globally_enabled)
+    } finally { setLoadingBot(false) }
+  }
+
+  function logout() { clearAuth(); navigate('/login', { replace: true }) }
+  function goTab(key: string) {
+    navigate(key ? `${basePath}/${key}` : basePath)
+  }
+
+  if (!store) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Spinner size="lg" color="primary" label="جاري التحميل..." />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-screen bg-background" dir="rtl">
+      {/* ── Sidebar ── */}
+      <aside className="w-60 bg-content1 border-l border-divider flex flex-col fixed right-0 h-screen z-40">
+        {/* Logo */}
+        <div className="p-4 border-b border-divider flex items-center gap-3">
+          <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center flex-shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-sm text-foreground truncate">{store.store_name}</p>
+            <p className="text-xs text-default-400 truncate">{store.store_id}</p>
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 py-3 overflow-y-auto">
+          {NAV_ITEMS.map(item => (
+            <button
+              key={item.key}
+              onClick={() => goTab(item.key)}
+              className={`
+                w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium
+                transition-colors border-l-2 text-right
+                ${activeTab === item.key
+                  ? 'bg-primary/10 text-primary border-l-primary'
+                  : 'text-default-400 hover:text-foreground hover:bg-content2 border-l-transparent'
+                }
+              `}
+            >
+              <svg
+                className={`w-4 h-4 flex-shrink-0 ${activeTab === item.key ? 'text-primary' : 'text-default-500'}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round"
+              >
+                {item.icon.includes('M') && item.icon.split(' M').map((d, i) => (
+                  <path key={i} d={i === 0 ? d : `M${d}`} />
+                ))}
+              </svg>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer: bot status + actions */}
+        <div className="p-3 border-t border-divider space-y-2">
+          {/* Bot toggle */}
+          <div
+            onClick={!loadingBot ? toggleBot : undefined}
+            className={`
+              flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer
+              border transition-colors
+              ${botEnabled
+                ? 'bg-success/10 border-success/30 text-success'
+                : 'bg-default/10 border-divider text-default-400'
+              }
+            `}
+          >
+            {loadingBot
+              ? <Spinner size="sm" color="success" />
+              : <span className={`w-2 h-2 rounded-full flex-shrink-0 ${botEnabled ? 'bg-success shadow-success/50 shadow-[0_0_6px]' : 'bg-default-400'}`} />
+            }
+            <span className="text-xs font-semibold flex-1">
+              {botEnabled ? 'البوت شغّال' : 'البوت موقوف'}
+            </span>
+            <span className="text-xs opacity-60">{botEnabled ? 'إيقاف' : 'تشغيل'}</span>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-1">
+            {getIsSuper() && (
+              <Button size="sm" variant="flat" className="flex-1 text-xs" onPress={() => navigate('/')}>
+                كل المتاجر
+              </Button>
+            )}
+            <Button size="sm" variant="flat" color="danger" className="flex-1 text-xs" onPress={logout}>
+              خروج
+            </Button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <main className="mr-60 flex-1 min-h-screen overflow-y-auto">
+        <Routes>
+          <Route index element={<Overview storeId={storeId} store={store} />} />
+          <Route path="conversations/*" element={<Conversations storeId={storeId} />} />
+          <Route path="products" element={<Products storeId={storeId} />} />
+          <Route path="orders" element={<Orders storeId={storeId} />} />
+          <Route path="carts" element={<AbandonedCarts storeId={storeId} />} />
+          <Route path="analytics" element={<Analytics storeId={storeId} />} />
+          <Route path="settings" element={<Settings storeId={storeId} />} />
+        </Routes>
+      </main>
+    </div>
+  )
+}

@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  font-family: 'Tajawal', sans-serif !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* RTL overrides for HeroUI */
+[dir="rtl"] .heroui-sidebar { right: 0; left: auto; }
+
+/* Smooth transitions */
+* { transition-property: color, background-color, border-color, opacity;
+    transition-duration: 150ms; }
