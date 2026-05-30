@@ -245,7 +245,8 @@ class LoginRequest(BaseModel):
 class AIConfigRequest(BaseModel):
     groq_api_key:      Optional[str] = ""
     anthropic_api_key: Optional[str] = ""
-    ai_model:          Optional[str] = ""  # e.g. "llama-3.3-70b-versatile" or "claude-sonnet-4-6"
+    openai_api_key:    Optional[str] = ""  # sk-proj-...
+    ai_model:          Optional[str] = ""  # e.g. "gpt-4o", "llama-3.3-70b-versatile", "claude-sonnet-4-6"
     bot_name:          Optional[str] = ""
 
 
@@ -592,14 +593,25 @@ async def verify_store_token(store_id: str, request: Request):
 @app.get("/admin/{store_id}/settings/ai")
 async def get_ai_settings(store_id: str):
     cfg = sm.get_ai_config(store_id)
-    # Mask the keys — return only whether they exist, not the actual value
+    # Mask the keys — return only whether they exist, not the actual values
+    groq_set      = bool(cfg.get("groq_api_key"))
+    anthropic_set = bool(cfg.get("anthropic_api_key"))
+    openai_set    = bool(cfg.get("openai_api_key"))
+    if groq_set:
+        provider = "groq"
+    elif anthropic_set:
+        provider = "anthropic"
+    elif openai_set:
+        provider = "openai"
+    else:
+        provider = "env"
     return {
-        "groq_api_key":      "••••" if cfg.get("groq_api_key")      else "",
-        "anthropic_api_key": "••••" if cfg.get("anthropic_api_key") else "",
+        "groq_api_key":      "••••" if groq_set      else "",
+        "anthropic_api_key": "••••" if anthropic_set else "",
+        "openai_api_key":    "••••" if openai_set    else "",
         "ai_model":          cfg.get("ai_model",  ""),
         "bot_name":          cfg.get("bot_name",  ""),
-        "provider":          "groq" if cfg.get("groq_api_key") else
-                             ("anthropic" if cfg.get("anthropic_api_key") else "env"),
+        "provider":          provider,
     }
 
 
@@ -608,13 +620,34 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     existing = sm.get_ai_config(store_id)
+
+    # Clear other providers' keys when a specific provider is chosen
+    # (frontend sends "" for providers that are not selected)
+    groq_key      = (req.groq_api_key      or "").strip()
+    anthropic_key = (req.anthropic_api_key or "").strip()
+    openai_key    = (req.openai_api_key    or "").strip()
+
     config = {
-        # Only update a key if a non-empty value was sent; keep existing otherwise
-        "groq_api_key":      req.groq_api_key.strip()      or existing.get("groq_api_key",      ""),
-        "anthropic_api_key": req.anthropic_api_key.strip() or existing.get("anthropic_api_key", ""),
-        "ai_model":          req.ai_model.strip()          or existing.get("ai_model",          ""),
-        "bot_name":          req.bot_name.strip()          or existing.get("bot_name",          ""),
+        # Keep existing key when frontend sends empty string (masked value)
+        "groq_api_key":      groq_key      or existing.get("groq_api_key",      ""),
+        "anthropic_api_key": anthropic_key or existing.get("anthropic_api_key", ""),
+        "openai_api_key":    openai_key    or existing.get("openai_api_key",    ""),
+        "ai_model":          (req.ai_model  or "").strip() or existing.get("ai_model",  ""),
+        "bot_name":          (req.bot_name  or "").strip() or existing.get("bot_name",  ""),
     }
+
+    # When a specific provider key is explicitly set, clear the other two
+    # so only one provider is active at a time
+    if groq_key:
+        config["anthropic_api_key"] = ""
+        config["openai_api_key"]    = ""
+    elif anthropic_key:
+        config["groq_api_key"]   = ""
+        config["openai_api_key"] = ""
+    elif openai_key:
+        config["groq_api_key"]      = ""
+        config["anthropic_api_key"] = ""
+
     sm.set_ai_config(store_id, config)
     return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي"}
 

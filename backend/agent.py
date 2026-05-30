@@ -4,6 +4,7 @@ import json
 import anthropic
 from anthropic import AsyncAnthropic
 from groq import AsyncGroq
+from openai import AsyncOpenAI
 from salla_client import SallaClient
 from store_sync import build_knowledge_summary, get_store_data
 import conversation_store as cs
@@ -271,24 +272,36 @@ class PrintingAgent:
         ai_cfg        = sm.get_ai_config(store_id) if store_id else {}
         groq_key      = ai_cfg.get("groq_api_key",      "").strip() or os.getenv("GROQ_API_KEY",      "")
         anthropic_key = ai_cfg.get("anthropic_api_key", "").strip() or os.getenv("ANTHROPIC_API_KEY", "")
+        openai_key    = ai_cfg.get("openai_api_key",    "").strip() or os.getenv("OPENAI_API_KEY",    "")
         self._bot_name = ai_cfg.get("bot_name", "").strip()
 
-        # Per-store model override
-        self._groq_model      = (ai_cfg.get("ai_model", "").strip()
-                                  if ai_cfg.get("groq_api_key") else "") or "llama-3.3-70b-versatile"
-        self._anthropic_model = (ai_cfg.get("ai_model", "").strip()
-                                  if ai_cfg.get("anthropic_api_key") else "") or "claude-sonnet-4-6"
+        # Per-store model override — sensible defaults per provider
+        cfg_model = ai_cfg.get("ai_model", "").strip()
+        self._groq_model      = (cfg_model if ai_cfg.get("groq_api_key")      else "") or "llama-3.3-70b-versatile"
+        self._anthropic_model = (cfg_model if ai_cfg.get("anthropic_api_key") else "") or "claude-sonnet-4-6"
+        self._openai_model    = (cfg_model if ai_cfg.get("openai_api_key")    else "") or "gpt-4o-mini"
 
+        # Provider priority: Groq → Anthropic → OpenAI (fallback to env vars)
         if groq_key:
-            self.provider     = "groq"
-            self.groq_client  = AsyncGroq(api_key=groq_key)
-            self.ai           = None
+            self.provider       = "groq"
+            self.groq_client    = AsyncGroq(api_key=groq_key)
+            self.ai             = None
+            self.openai_client  = None
         elif anthropic_key:
-            self.provider    = "anthropic"
-            self.ai          = AsyncAnthropic(api_key=anthropic_key)  # async client
-            self.groq_client = None
+            self.provider       = "anthropic"
+            self.ai             = AsyncAnthropic(api_key=anthropic_key)
+            self.groq_client    = None
+            self.openai_client  = None
+        elif openai_key:
+            self.provider       = "openai"
+            self.openai_client  = AsyncOpenAI(api_key=openai_key)
+            self.ai             = None
+            self.groq_client    = None
         else:
-            raise RuntimeError("يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY في إعدادات المتجر أو متغيرات البيئة.")
+            raise RuntimeError(
+                "يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY أو OPENAI_API_KEY "
+                "في إعدادات المتجر أو متغيرات البيئة."
+            )
 
         token      = access_token or os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token, store_id=store_id) if token else None
@@ -811,6 +824,8 @@ class PrintingAgent:
     async def chat(self, message: str, session_id: str) -> str:
         if self.provider == "groq":
             return await self._chat_groq(message, session_id)
+        if self.provider == "openai":
+            return await self._chat_openai(message, session_id)
         return await self._chat_anthropic(message, session_id)
 
     # ── Groq (Llama 3.3-70b) ──────────────────────────────────────────────────
@@ -874,6 +889,79 @@ class PrintingAgent:
             reply = _clean_reply(msg.content or "")
             if not reply:
                 reply = "عذراً، لم أستطع معالجة طلبك."
+            cs.add_message(session_id, "assistant", reply)
+            return reply
+
+    # ── OpenAI (GPT) ──────────────────────────────────────────────────────────
+    async def _chat_openai(self, message: str, session_id: str) -> str:
+        """
+        OpenAI-compatible chat with tool use.
+        Uses the same OpenAI function-calling format as Groq — the two APIs
+        are fully wire-compatible so the implementation is nearly identical.
+        """
+        cs.add_message(session_id, "user", message)
+        history = cs.get_groq_history(session_id)
+
+        # Convert tools to OpenAI function-calling format
+        openai_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name":        t["name"],
+                    "description": t["description"],
+                    "parameters":  t["input_schema"],
+                },
+            }
+            for t in TOOLS
+        ]
+
+        messages = [{"role": "system", "content": get_system_prompt(self.store_id)}] + history
+
+        tool_rounds = 0
+        while True:
+            response = await self.openai_client.chat.completions.create(
+                model=self._openai_model,
+                messages=messages,
+                tools=openai_tools,
+                tool_choice="auto",
+                max_tokens=1024,
+            )
+
+            msg = response.choices[0].message
+
+            if msg.tool_calls and tool_rounds < 5:
+                tool_rounds += 1
+                messages.append({
+                    "role":       "assistant",
+                    "content":    msg.content or "",
+                    "tool_calls": [
+                        {
+                            "id":       tc.id,
+                            "type":     "function",
+                            "function": {
+                                "name":      tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                })
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except Exception:
+                        args = {}
+                    result = await self._run_tool(tc.function.name, args, session_id)
+                    messages.append({
+                        "role":         "tool",
+                        "tool_call_id": tc.id,
+                        "content":      str(result),
+                    })
+                continue
+
+            reply = _clean_reply(msg.content or "")
+            if not reply:
+                reply = "عذراً، لم أستطع معالجة طلبك. حاول مرة أخرى."
             cs.add_message(session_id, "assistant", reply)
             return reply
 

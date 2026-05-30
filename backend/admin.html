@@ -1039,7 +1039,8 @@ select.form-control{cursor:pointer}
           <div>
             <label class="form-label">مزود الخدمة (Provider)</label>
             <select id="ai-provider" class="form-control" onchange="toggleAIFields()">
-              <option value="groq">Groq — Llama 3.3 70B (مجاني)</option>
+              <option value="groq">Groq — Llama 3.3 70B (مجاني وسريع)</option>
+              <option value="openai">OpenAI — GPT-4o / GPT-4o mini</option>
               <option value="anthropic">Anthropic — Claude Sonnet</option>
             </select>
           </div>
@@ -1054,6 +1055,16 @@ select.form-control{cursor:pointer}
             <input type="password" id="groq-api-key" class="form-control" placeholder="gsk_...">
             <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility('groq-api-key',this)" style="flex-shrink:0">👁</button>
           </div>
+        </div>
+        <div id="openai-key-wrap" style="display:none">
+          <label class="form-label">OpenAI API Key</label>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <input type="password" id="openai-api-key" class="form-control" placeholder="sk-proj-...">
+            <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility('openai-api-key',this)" style="flex-shrink:0">👁</button>
+          </div>
+          <p style="font-size:12px;color:#64748b;margin:-10px 0 16px">
+            الموديل الافتراضي: <code>gpt-4o-mini</code> (اقتصادي) — أو اكتب <code>gpt-4o</code> لأعلى جودة
+          </p>
         </div>
         <div id="anthropic-key-wrap" style="display:none">
           <label class="form-label">Anthropic API Key</label>
@@ -2105,16 +2116,22 @@ async function loadAISettings() {
   loadTokenStatus();   // load token health alongside AI settings
   try {
     const cfg = await fetch(`${API}/settings/ai`).then(r => r.json());
-    document.getElementById('ai-provider').value = cfg.provider === 'anthropic' ? 'anthropic' : 'groq';
-    document.getElementById('ai-model').value    = cfg.ai_model  || '';
-    document.getElementById('bot-name').value    = cfg.bot_name  || '';
-    // Keys are masked server-side — just indicate if configured
+    const provider = cfg.provider || 'groq';
+    document.getElementById('ai-provider').value = provider;
+    document.getElementById('ai-model').value    = cfg.ai_model || '';
+    document.getElementById('bot-name').value    = cfg.bot_name || '';
+
+    // Keys are masked server-side — indicate if one is already saved
     document.getElementById('groq-api-key').placeholder      = cfg.provider === 'groq'      ? '••••••• (محفوظ)' : 'gsk_...';
+    document.getElementById('openai-api-key').placeholder    = cfg.provider === 'openai'    ? '••••••• (محفوظ)' : 'sk-proj-...';
     document.getElementById('anthropic-api-key').placeholder = cfg.provider === 'anthropic' ? '••••••• (محفوظ)' : 'sk-ant-...';
+
+    const providerLabels = { groq:'Groq', openai:'OpenAI', anthropic:'Anthropic' };
     document.getElementById('ai-status').innerHTML =
       cfg.provider === 'env'
-        ? '<span style="color:#f59e0b">⚠️ يُستخدم مفتاح النظام العام</span>'
-        : `<span style="color:#16a34a">✅ يُستخدم مفتاح المتجر الخاص (${cfg.provider})</span>`;
+        ? '<span style="color:#f59e0b">⚠️ يُستخدم مفتاح النظام العام (GROQ_API_KEY من متغيرات البيئة)</span>'
+        : `<span style="color:#16a34a">✅ يُستخدم مفتاح المتجر الخاص (${providerLabels[cfg.provider] || cfg.provider})</span>`;
+
     toggleAIFields();
   } catch(e) {
     console.error('loadAISettings', e);
@@ -2123,8 +2140,17 @@ async function loadAISettings() {
 
 function toggleAIFields() {
   const provider = document.getElementById('ai-provider').value;
-  document.getElementById('groq-key-wrap').style.display      = provider === 'groq'      ? '' : 'none';
-  document.getElementById('anthropic-key-wrap').style.display = provider === 'anthropic' ? '' : 'none';
+  document.getElementById('groq-key-wrap').style.display     = provider === 'groq'      ? '' : 'none';
+  document.getElementById('openai-key-wrap').style.display   = provider === 'openai'    ? '' : 'none';
+  document.getElementById('anthropic-key-wrap').style.display= provider === 'anthropic' ? '' : 'none';
+  // Placeholder hints per provider
+  const modelInput = document.getElementById('ai-model');
+  const placeholders = {
+    groq:      'مثال: llama-3.3-70b-versatile',
+    openai:    'مثال: gpt-4o  أو  gpt-4o-mini',
+    anthropic: 'مثال: claude-sonnet-4-6',
+  };
+  if (modelInput) modelInput.placeholder = placeholders[provider] || 'اتركه فارغاً للافتراضي';
 }
 
 function toggleKeyVisibility(inputId, btn) {
@@ -2136,12 +2162,15 @@ function toggleKeyVisibility(inputId, btn) {
 async function saveAIConfig() {
   const provider     = document.getElementById('ai-provider').value;
   const groqKey      = document.getElementById('groq-api-key').value.trim();
+  const openaiKey    = document.getElementById('openai-api-key').value.trim();
   const anthropicKey = document.getElementById('anthropic-api-key').value.trim();
   const model        = document.getElementById('ai-model').value.trim();
   const botName      = document.getElementById('bot-name').value.trim();
 
+  // Only send the key for the selected provider; empty string clears the others
   const body = {
     groq_api_key:      provider === 'groq'      ? groqKey      : '',
+    openai_api_key:    provider === 'openai'    ? openaiKey    : '',
     anthropic_api_key: provider === 'anthropic' ? anthropicKey : '',
     ai_model:  model,
     bot_name:  botName,
