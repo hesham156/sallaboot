@@ -112,6 +112,96 @@ export default function Brain({ storeId }: Props) {
         }`}>{msg}</div>
       )}
 
+      {/* ════════════ STORE PROFILE (from Salla /store/info) ════════════ */}
+      {data.store_info && data.store_info.name && (
+        <Card className="bg-content1 border border-divider">
+          <CardHeader className="px-5 py-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-400" />
+              <h2 className="font-bold text-sm">ملف المتجر (من سلة)</h2>
+            </div>
+            {data.store_info.verified && (
+              <Chip size="sm" color="success" variant="flat">✓ موثّق</Chip>
+            )}
+          </CardHeader>
+          <Divider />
+          <CardBody className="px-5 py-4">
+            <div className="flex items-start gap-4">
+              {data.store_info.avatar && (
+                <img
+                  src={data.store_info.avatar}
+                  alt={data.store_info.name}
+                  className="w-16 h-16 rounded-2xl object-cover border border-divider flex-shrink-0"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              )}
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <h3 className="font-bold text-base text-foreground">{data.store_info.name}</h3>
+                {data.store_info.description && (
+                  <p className="text-xs text-default-400 leading-relaxed">
+                    {data.store_info.description}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {data.store_info.entity && (
+                    <Chip size="sm" variant="flat" color="default">
+                      {data.store_info.entity === 'company' ? 'شركة'
+                       : data.store_info.entity === 'person' ? 'متجر فردي'
+                       : data.store_info.entity === 'charity' ? 'جمعية خيرية'
+                       : data.store_info.entity === 'firm' ? 'مؤسسة'
+                       : data.store_info.entity}
+                    </Chip>
+                  )}
+                  {data.store_info.plan && (
+                    <Chip size="sm" variant="flat" color="primary">خطة {data.store_info.plan}</Chip>
+                  )}
+                  {data.store_info.currency && (
+                    <Chip size="sm" variant="flat" color="warning">{data.store_info.currency}</Chip>
+                  )}
+                </div>
+                {(data.store_info.domain || data.store_info.email) && (
+                  <div className="text-xs text-default-500 pt-2 space-y-0.5">
+                    {data.store_info.domain && <div>🌐 {data.store_info.domain}</div>}
+                    {data.store_info.email  && <div>📧 {data.store_info.email}</div>}
+                  </div>
+                )}
+                {data.store_info.social && Object.entries(data.store_info.social)
+                    .filter(([, v]) => v && !['https://', 'http://'].includes(String(v))).length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-2">
+                    {data.store_info.social.whatsapp && (
+                      <Chip size="sm" variant="flat" color="success">💬 {data.store_info.social.whatsapp}</Chip>
+                    )}
+                    {(['twitter', 'instagram', 'facebook', 'snapchat', 'youtube', 'telegram', 'maroof', 'appstore_link', 'googleplay_link'] as const)
+                      .filter(k => data.store_info!.social![k] && !['https://', 'http://'].includes(String(data.store_info!.social![k])))
+                      .map(k => (
+                        <Chip key={k} size="sm" variant="flat" color="default">
+                          {({
+                            twitter: '🐦 X',
+                            instagram: '📷 IG',
+                            facebook: '📘 FB',
+                            snapchat: '👻 Snap',
+                            youtube: '▶️ YT',
+                            telegram: '✈️ TG',
+                            maroof: '🏅 معروف',
+                            appstore_link: '🍎 iOS',
+                            googleplay_link: '🤖 Play',
+                          } as Record<string, string>)[k]}
+                        </Chip>
+                      ))}
+                  </div>
+                )}
+                {data.store_info.licenses && (data.store_info.licenses.commercial_number || data.store_info.licenses.tax_number) && (
+                  <div className="flex flex-wrap gap-1 pt-2 text-[10px] text-default-500">
+                    {data.store_info.licenses.commercial_number && <span>📋 س.ت: {data.store_info.licenses.commercial_number}</span>}
+                    {data.store_info.licenses.tax_number && <span> · 🧾 ضريبي: {data.store_info.licenses.tax_number}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       {/* ════════════ STATS GRID ════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard

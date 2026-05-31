@@ -128,6 +128,37 @@ def _strip_html(text: str) -> str:
 
 # ── Main sync ──────────────────────────────────────────────────────────────────
 
+async def _fetch_store_info(client: httpx.AsyncClient, headers: dict, store_id: str) -> tuple:
+    """Fetch /store/info (returns the merchant's profile dict, or empty + error)."""
+    try:
+        r = await client.get(
+            "https://api.salla.dev/admin/v2/store/info",
+            headers=headers, timeout=15,
+        )
+        if r.status_code == 200:
+            data = r.json().get("data") or {}
+            # Extract only the fields we care about — keeps the cache small
+            return {
+                "id":          data.get("id"),
+                "name":        data.get("name", ""),
+                "entity":      data.get("entity", ""),
+                "email":       data.get("email", ""),
+                "avatar":      data.get("avatar", ""),
+                "plan":        data.get("plan", ""),
+                "type":        data.get("type", ""),
+                "status":      data.get("status", ""),
+                "verified":    bool(data.get("verified", False)),
+                "currency":    data.get("currency", "SAR"),
+                "domain":      data.get("domain", ""),
+                "description": data.get("description", ""),
+                "licenses":    data.get("licenses", {}) or {},
+                "social":      data.get("social", {}) or {},
+            }, None
+        return {}, f"HTTP {r.status_code} from /store/info: {r.text[:200]}"
+    except Exception as e:
+        return {}, f"Exception fetching /store/info: {type(e).__name__}: {e}"
+
+
 async def _do_sync(access_token: str, store_id: str) -> dict:
     """Inner sync — one attempt with the given token."""
     headers = {
@@ -138,9 +169,13 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
     errors = []
 
     async with httpx.AsyncClient(timeout=30) as client:
-        (products_raw, prod_err), (categories_raw, cats_err) = await asyncio.gather(
-            _fetch_all_pages(client, f"{base}/products", headers),
-            _fetch_all_pages(client, f"{base}/categories", headers),
+        # Run products, categories, and store info concurrently
+        (products_raw, prod_err), (categories_raw, cats_err), (store_info, info_err) = (
+            await asyncio.gather(
+                _fetch_all_pages(client, f"{base}/products",   headers),
+                _fetch_all_pages(client, f"{base}/categories", headers),
+                _fetch_store_info(client, headers, store_id),
+            )
         )
         if prod_err:
             print(f"[store_sync:{store_id}] products error: {prod_err}")
@@ -148,6 +183,9 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
         if cats_err:
             print(f"[store_sync:{store_id}] categories error: {cats_err}")
             errors.append(cats_err)
+        if info_err:
+            print(f"[store_sync:{store_id}] store_info error: {info_err}")
+            errors.append(info_err)
 
         articles_raw = []
         for endpoint in [f"{base}/blogs/posts", f"{base}/blog/posts", f"{base}/blogs"]:
@@ -173,6 +211,7 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
         "products":         products,
         "categories":       categories,
         "articles":         articles,
+        "store_info":       store_info,
         "products_count":   len(products),
         "last_sync":        datetime.datetime.utcnow().isoformat(),
         "last_sync_errors": errors,
@@ -210,7 +249,9 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
     n_p = data.get("products_count", 0)
     n_c = len(data.get("categories", []))
     n_a = len(data.get("articles",   []))
-    print(f"[store_sync:{store_id}] ✅ Sync done — {n_p} products, {n_c} cats, {n_a} articles")
+    si  = data.get("store_info") or {}
+    info_str = f"store='{si.get('name','?')}' ({si.get('plan','?')})" if si else "no store_info"
+    print(f"[store_sync:{store_id}] ✅ Sync done — {n_p} products, {n_c} cats, {n_a} articles, {info_str}")
     return data
 
 

@@ -355,8 +355,30 @@ export interface BrainOverview {
   last_sync: string
 }
 
+export interface StoreInfoSnapshot {
+  id?: number
+  name?: string
+  entity?: string
+  email?: string
+  avatar?: string
+  plan?: string
+  type?: string
+  status?: string
+  verified?: boolean
+  currency?: string
+  domain?: string
+  description?: string
+  licenses?: { tax_number?: string; commercial_number?: string; freelance_number?: string }
+  social?: {
+    telegram?: string; twitter?: string; facebook?: string; maroof?: string
+    youtube?: string; snapchat?: string; whatsapp?: string; instagram?: string
+    appstore_link?: string; googleplay_link?: string
+  }
+}
+
 export interface BrainData {
   overview: BrainOverview
+  store_info?: StoreInfoSnapshot
   knowledge_chars: number
   knowledge_budget: number
   custom_knowledge: string

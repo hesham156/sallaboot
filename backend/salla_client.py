@@ -210,6 +210,21 @@ class SallaClient:
         """
         return await self._request("GET", f"/orders/{order_id}/invoices")
 
+    # ── Store info ─────────────────────────────────────────────────────────────
+
+    async def get_store_info(self) -> dict:
+        """
+        GET /admin/v2/store/info — full store profile:
+          id, name, entity, email, avatar, plan, type, status, verified,
+          currency, domain, description, licenses{tax/commercial/freelance},
+          social{telegram, twitter, facebook, maroof, youtube, snapchat,
+                 whatsapp, appstore_link, googleplay_link}
+
+        Returned to the agent's brain so the bot can answer "ايش رقم
+        الواتساب؟" / "اشمعنى دمتم شركة موثقة؟" / "وين المتجر؟" etc.
+        """
+        return await self._request("GET", "/store/info")
+
     # ── Customer endpoints ────────────────────────────────────────────────────
 
     async def get_customer(self, customer_id: int, fields: list[str] = None) -> dict:

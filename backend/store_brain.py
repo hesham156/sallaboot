@@ -68,6 +68,11 @@ def set_custom_knowledge(store_id: str, text: str) -> None:
 
 # ── Overview / stats ────────────────────────────────────────────────────────
 
+def get_store_info(store_id: str) -> dict:
+    """Return the cached Salla /store/info response (or {} if not synced yet)."""
+    return (sm.get_cache(store_id) or {}).get("store_info") or {}
+
+
 def get_overview(store_id: str) -> dict:
     """
     Compute a quick numeric overview of the store's catalog.
@@ -79,11 +84,14 @@ def get_overview(store_id: str) -> dict:
     available = [p for p in products if p.get("status") != "hidden"]
     categories = cache.get("categories", [])
     last_sync  = cache.get("last_sync", "never")
+    store_info = cache.get("store_info") or {}
 
     prices = [pn for p in available if (pn := _price_num(p.get("price")))]
-    currency = next(
-        (p.get("currency", "SAR") for p in available if p.get("currency")),
-        "SAR",
+    # Prefer the currency from /store/info, then any product, then SAR default
+    currency = (
+        store_info.get("currency")
+        or next((p.get("currency") for p in available if p.get("currency")), None)
+        or "SAR"
     )
 
     cat_counts: dict[str, int] = defaultdict(int)
@@ -102,7 +110,101 @@ def get_overview(store_id: str) -> dict:
         "avg_price":          round(sum(prices) / len(prices), 2) if prices else None,
         "top_categories":     [{"name": n, "count": c} for n, c in top_cats],
         "last_sync":          last_sync,
+        # ── Store profile (from /store/info) ──
+        "store_name":         store_info.get("name", ""),
+        "store_description":  store_info.get("description", ""),
+        "store_domain":       store_info.get("domain", ""),
+        "store_email":        store_info.get("email", ""),
+        "store_avatar":       store_info.get("avatar", ""),
+        "store_entity":       store_info.get("entity", ""),
+        "store_plan":         store_info.get("plan", ""),
+        "store_verified":     store_info.get("verified", False),
+        "store_social":       store_info.get("social", {}),
+        "store_licenses":     store_info.get("licenses", {}),
     }
+
+
+def _build_store_profile_block(store_id: str) -> str:
+    """
+    Build the high-priority store-profile block that goes at the very top
+    of the AI's system prompt. Includes the merchant's own description,
+    contact channels, and any legal info that signals trust.
+    """
+    info = get_store_info(store_id)
+    if not info:
+        return ""
+
+    lines = ["══ ملف المتجر ══"]
+    name = info.get("name", "")
+    if name:
+        lines.append(f"اسم المتجر: {name}")
+
+    entity_ar = {
+        "person":  "متجر فردي",
+        "company": "شركة",
+        "charity": "جمعية خيرية",
+        "firm":    "مؤسسة",
+    }.get(info.get("entity", ""), info.get("entity", ""))
+    if entity_ar:
+        lines.append(f"الكيان: {entity_ar}")
+
+    if info.get("verified"):
+        lines.append("✓ متجر موثّق من سلة")
+
+    currency = info.get("currency", "")
+    if currency:
+        lines.append(f"العملة: {currency}")
+
+    domain = info.get("domain", "")
+    if domain:
+        lines.append(f"رابط المتجر: {domain}")
+
+    description = (info.get("description") or "").strip()
+    if description:
+        lines.append(f"وصف المتجر: {description}")
+
+    # Contact channels — the bot can share these when a customer asks
+    social = info.get("social") or {}
+    contacts = []
+    if social.get("whatsapp"):
+        contacts.append(f"واتساب: {social['whatsapp']}")
+    if info.get("email"):
+        contacts.append(f"البريد: {info['email']}")
+    if contacts:
+        lines.append("للتواصل المباشر: " + " | ".join(contacts))
+
+    # Social links (suppress empty / placeholder values)
+    social_pairs = []
+    for key, label in [
+        ("twitter",         "تويتر/X"),
+        ("instagram",       "انستقرام"),
+        ("facebook",        "فيسبوك"),
+        ("snapchat",        "سناب شات"),
+        ("youtube",         "يوتيوب"),
+        ("telegram",        "تليجرام"),
+        ("maroof",          "معروف"),
+        ("appstore_link",   "تطبيق iOS"),
+        ("googleplay_link", "تطبيق أندرويد"),
+    ]:
+        v = (social.get(key) or "").strip()
+        if v and not v.endswith("/"):  # skip blank placeholders like "https://"
+            social_pairs.append(f"{label}: {v}")
+    if social_pairs:
+        lines.append("الحسابات الرسمية: " + " | ".join(social_pairs))
+
+    # Legal/trust signals
+    lic = info.get("licenses") or {}
+    licenses = []
+    if lic.get("commercial_number"):
+        licenses.append(f"سجل تجاري {lic['commercial_number']}")
+    if lic.get("tax_number"):
+        licenses.append(f"ضريبي {lic['tax_number']}")
+    if lic.get("freelance_number"):
+        licenses.append(f"عمل حر {lic['freelance_number']}")
+    if licenses:
+        lines.append("الترخيص: " + " | ".join(licenses))
+
+    return "\n".join(lines)
 
 
 # ── Category map (mid-level summary) ────────────────────────────────────────
@@ -232,7 +334,13 @@ def get_knowledge_for_prompt(store_id: str) -> str:
     blocks: list[str] = []
     budget_left = PROMPT_BUDGET_CHARS
 
-    # ── 1. Custom knowledge (highest priority — the admin's own words) ──
+    # ── 0. Store profile from Salla /store/info (highest signal) ──
+    profile = _build_store_profile_block(store_id)
+    if profile:
+        blocks.append(profile)
+        budget_left -= len(profile) + 2
+
+    # ── 1. Custom knowledge (the admin's own words) ──
     custom = _get_custom_knowledge(store_id)
     if custom:
         section = f"══ معلومات خاصة بالمتجر (من الإدارة) ══\n{custom}\n══ نهاية المعلومات الخاصة ══"
@@ -285,8 +393,10 @@ def preview_knowledge(store_id: str) -> dict:
     """Used by the admin 'AI Memory' page to show what the bot will see."""
     knowledge = get_knowledge_for_prompt(store_id)
     overview  = get_overview(store_id)
+    store_info = get_store_info(store_id)
     return {
         "overview":         overview,
+        "store_info":       store_info,     # raw /store/info payload (admin can see what was synced)
         "knowledge_chars":  len(knowledge),
         "knowledge_budget": PROMPT_BUDGET_CHARS,
         "custom_knowledge": _get_custom_knowledge(store_id),
