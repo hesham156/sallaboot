@@ -314,15 +314,25 @@ def has_unread_user_messages(session_id: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def set_rating(session_id: str, rating: int, comment: str = ""):
-    """Save a customer rating (1-5) for a conversation. Awaits the DB write."""
+    """
+    Save a customer rating (1-5) for a conversation. Awaits the DB write.
+
+    Important: pulls the session from DB into memory first if it's not
+    already loaded. Without this, ratings submitted after a server restart
+    (when the session hasn't been re-cached yet) would silently disappear
+    because `_conversations.get(session_id)` would return None.
+    """
+    await restore_to_memory(session_id)
     conv = _conversations.get(session_id)
-    if conv:
-        conv["rating"]         = max(1, min(5, int(rating)))
-        conv["rating_comment"] = comment
-        try:
-            await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
-        except Exception as exc:
-            print(f"[conversation_store] ❌ Failed to persist rating for {session_id!r}: {exc}")
+    if not conv:
+        print(f"[conversation_store] ⚠️ set_rating: session {session_id!r} not found anywhere (DB + memory)")
+        return
+    conv["rating"]         = max(1, min(5, int(rating)))
+    conv["rating_comment"] = comment
+    try:
+        await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
+    except Exception as exc:
+        print(f"[conversation_store] ❌ Failed to persist rating for {session_id!r}: {exc}")
 
 
 async def flush(session_id: str):
