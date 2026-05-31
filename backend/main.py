@@ -30,20 +30,25 @@ import conversation_store as cs
 import pricing_calculator as pc
 import store_brain as brain
 
-# ── Simple in-memory rate limiter for login endpoints ─────────────────────────
-_login_attempts: dict = _collections.defaultdict(list)   # ip → [timestamp, …]
+# ── Rate limiter for login endpoints (DB-backed, survives restarts) ──────────
 
-def _is_rate_limited(ip: str, max_attempts: int = 5, window: int = 300) -> bool:
+async def _is_rate_limited(attempt_key: str, max_attempts: int = 5, window: int = 300) -> bool:
     """
-    Return True if *ip* has exceeded *max_attempts* login attempts in the
-    last *window* seconds.  Automatically ages out old entries.
+    Return True if `attempt_key` has exceeded `max_attempts` login attempts in
+    the last `window` seconds. Persists to PostgreSQL so a server restart
+    doesn't reset an attacker's counter.
+
+    Records the new attempt as a side effect — call once per login try.
     """
-    now  = _time.monotonic()
-    past = [t for t in _login_attempts[ip] if now - t < window]
-    _login_attempts[ip] = past
-    if len(past) >= max_attempts:
-        return True
-    _login_attempts[ip].append(now)
+    if db.available():
+        count = await db.count_recent_login_attempts(attempt_key, window)
+        if count >= max_attempts:
+            return True
+        await db.record_login_attempt(attempt_key)
+        return False
+
+    # DB unavailable fallback — fail open (allow), since rejecting all logins
+    # when the DB is down would brick the admin panel.
     return False
 
 # Store IDs that are reserved and must never be used as real Salla merchant IDs
@@ -75,6 +80,9 @@ async def startup_event():
     # 3. Restore recent conversations from DB
     await cs.load_conversations_from_db()
 
+    # 4. Restore global app-level settings (e.g. bot_globally_enabled)
+    await cs.load_globals_from_db()
+
     # Always register env-var token as "default" store — survives Railway restarts
     env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
     if env_token and not sm.is_registered("default"):
@@ -97,6 +105,10 @@ async def startup_event():
     # Start periodic flush loop (safety net: saves dirty sessions every 5 min)
     asyncio.create_task(_periodic_flush_loop())
     print("[startup] 💾 Periodic conversation flush loop started (every 5 min)")
+
+    # Start periodic cleanup loop (prunes old webhook_seen / login_attempts / webhook_log)
+    asyncio.create_task(_periodic_cleanup_loop())
+    print("[startup] 🧹 Periodic DB cleanup loop started (every 6 hours)")
 
     # ── Critical warning if DB is not connected ────────────────────────────────
     db_st = db.get_status()
@@ -146,6 +158,30 @@ async def _periodic_flush_loop():
         except Exception as exc:
             print(f"[periodic_flush] ❌ Error: {exc}")
         await asyncio.sleep(300)  # every 5 minutes
+
+
+async def _periodic_cleanup_loop():
+    """
+    Background DB hygiene — runs every 6 hours:
+      • webhook_seen: drop dedup keys older than 24h (Salla retries cap at 15 min)
+      • login_attempts: drop attempts older than 24h (rate-limit window is 5 min)
+      • webhook_log: drop log rows older than 30 days
+    Without this the small tables grow forever and slow down queries.
+    """
+    await asyncio.sleep(300)   # wait 5 min after startup
+    while True:
+        try:
+            seen   = await db.prune_webhook_seen(keep_last_hours=24)
+            logins = await db.prune_login_attempts(keep_last_hours=24)
+            wlog   = await db.prune_webhook_log(keep_last_days=30)
+            if seen or logins or wlog:
+                print(
+                    f"[periodic_cleanup] 🧹 Pruned: webhook_seen={seen}, "
+                    f"login_attempts={logins}, webhook_log={wlog}"
+                )
+        except Exception as exc:
+            print(f"[periodic_cleanup] ❌ Error: {exc}")
+        await asyncio.sleep(6 * 3600)  # every 6 hours
 
 
 async def _sync_task(store_id: str, token: str):
@@ -604,7 +640,7 @@ async def super_login(req: LoginRequest, request: Request):
     if super_pass == "admin":
         print("⚠️  [auth] SUPER_ADMIN_PASSWORD is still the default 'admin' — please change it!")
 
-    if _is_rate_limited(f"super:{ip}"):
+    if await _is_rate_limited(f"super:{ip}"):
         raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
 
     if not req.password or req.password != super_pass:
@@ -621,7 +657,7 @@ async def super_login(req: LoginRequest, request: Request):
 async def store_login(store_id: str, req: LoginRequest, request: Request):
     ip = request.client.host if request.client else "unknown"
 
-    if _is_rate_limited(f"{store_id}:{ip}"):
+    if await _is_rate_limited(f"{store_id}:{ip}"):
         raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
 
     if not sm.is_registered(store_id):
@@ -1276,7 +1312,7 @@ async def admin_bot_status_compat():
 
 @app.post("/admin/bot/toggle")
 async def admin_bot_toggle_compat(req: BotToggleRequest):
-    cs.set_bot_globally(req.enabled)
+    await cs.set_bot_globally(req.enabled)
     return {"bot_globally_enabled": cs.get_bot_globally()}
 
 
@@ -1305,39 +1341,35 @@ async def admin_handback_compat(session_id: str):
     return await store_handback("default", session_id)
 
 
-# ── Webhook infrastructure ─────────────────────────────────────────────────────
+# ── Webhook infrastructure (all state persisted to PostgreSQL) ───────────────
 
-# In-memory log of the last 200 webhook events (per-process; lost on restart).
-# Key: store_id → deque of event dicts.
-_webhook_log: dict = collections.defaultdict(lambda: collections.deque(maxlen=200))
-
-# Raw attempts log — captures EVERY incoming request before any processing.
-# Useful for diagnosing missing webhooks / signature failures.
-_raw_attempts: collections.deque = collections.deque(maxlen=50)
-
-# Idempotency: remember (event, merchant_id, event_id) tuples we already handled.
-# Salla retries up to 3× every 5 min — we must not double-process.
-_seen_events: collections.deque = collections.deque(maxlen=1000)
-
-# Abandoned carts: store_id → deque of cart notification dicts (from webhooks).
-# Each entry is enriched with customer/total/checkout_url for the admin dashboard.
+# Abandoned carts: in-memory hot cache mirroring the abandoned_carts table.
+# DB is the source of truth — this exists only to avoid a query per page load.
 _abandoned_carts: dict = collections.defaultdict(lambda: collections.deque(maxlen=500))
 
 
-def _log_event(store_id: str, event: str, status: str, detail: str = ""):
-    _webhook_log[store_id].appendleft({
-        "event":   event,
-        "status":  status,
-        "detail":  detail,
-        "ts":      _dt.datetime.utcnow().isoformat() + "Z",
-    })
+def _log_event(store_id: str, event: str, status: str, detail: str = "",
+                sig_status: str = "", body_head: str = "",
+                content_type: str = "", user_agent: str = ""):
+    """
+    Fire-and-forget webhook log row. Writes to webhook_log table so the
+    full audit trail survives every Railway redeploy. Errors are logged
+    by the db.fire callback (no silent loss).
+    """
+    db.fire(db.log_webhook(
+        store_id=store_id, event=event, status=status, detail=detail,
+        sig_status=sig_status, body_head=body_head,
+        content_type=content_type, user_agent=user_agent,
+    ))
 
 
-def _already_seen(dedup_key: str) -> bool:
-    if dedup_key in _seen_events:
-        return True
-    _seen_events.append(dedup_key)
-    return False
+async def _already_seen(dedup_key: str) -> bool:
+    """
+    Atomic check-and-set on webhook_seen table. Returns True if this key
+    has already been processed (Salla retried). Persisted across restarts
+    so a redeploy mid-retry-window doesn't re-process old events.
+    """
+    return await db.is_webhook_seen(dedup_key)
 
 
 def _verify_signature(body: bytes, headers) -> tuple:
@@ -1530,21 +1562,18 @@ async def salla_webhook(request: Request):
     • Routes to per-event async handlers and always returns 200 within the 30 s timeout
     """
     body = await request.body()
-    ts_now = _dt.datetime.utcnow().isoformat() + "Z"
+    body_head = body[:200].decode("utf-8", errors="replace")
+    content_type = request.headers.get("Content-Type", "")
+    user_agent   = request.headers.get("User-Agent", "")
 
     # ── 1. Signature verification ──────────────────────────────────────────────
     sig_ok, sig_detail = _verify_signature(body, request.headers)
 
-    # Log raw attempt BEFORE any JSON parsing (helps diagnose delivery failures)
-    _raw_attempts.appendleft({
-        "ts":         ts_now,
-        "sig":        sig_detail,
-        "body_head":  body[:200].decode("utf-8", errors="replace"),
-        "content_type": request.headers.get("Content-Type", ""),
-        "user_agent": request.headers.get("User-Agent", ""),
-    })
-
     if not sig_ok:
+        # Log the rejection too — useful for debugging mismatched secrets
+        _log_event("", "", "rejected", f"signature: {sig_detail}",
+                   sig_status=sig_detail, body_head=body_head,
+                   content_type=content_type, user_agent=user_agent)
         raise HTTPException(401, f"Webhook signature invalid: {sig_detail}")
 
     # ── 2. Parse JSON ──────────────────────────────────────────────────────────
@@ -1552,6 +1581,9 @@ async def salla_webhook(request: Request):
     try:
         payload = _json.loads(body)
     except Exception as exc:
+        _log_event("", "", "error", f"invalid JSON: {exc}",
+                   sig_status=sig_detail, body_head=body_head,
+                   content_type=content_type, user_agent=user_agent)
         raise HTTPException(400, f"Invalid JSON: {exc}")
 
     event       = payload.get("event", "")
@@ -1559,18 +1591,23 @@ async def salla_webhook(request: Request):
     data        = payload.get("data", {})
     created_at  = payload.get("created_at", "")
 
-    # Update raw log entry with parsed event info
-    if _raw_attempts:
-        _raw_attempts[0]["event"]       = event
-        _raw_attempts[0]["merchant_id"] = merchant_id
-
     print(f"[webhook] {event!r}  merchant={merchant_id or '—'}  ts={created_at}")
 
-    # ── 3. Idempotency — skip duplicate deliveries ─────────────────────────────
+    # ── 3. Idempotency — skip duplicate deliveries (DB-backed) ────────────────
     dedup_key = f"{event}:{merchant_id}:{created_at}"
-    if _already_seen(dedup_key):
+    if await _already_seen(dedup_key):
         print(f"[webhook] Duplicate event skipped: {dedup_key}")
+        _log_event(merchant_id or "", event, "duplicate", dedup_key,
+                   sig_status=sig_detail, body_head=body_head,
+                   content_type=content_type, user_agent=user_agent)
         return {"status": "ok", "duplicate": True}
+
+    # Stash these on the request so the per-event handlers can include them
+    # in their own log rows (we don't want to log the same event twice).
+    _webhook_ctx = {
+        "sig_status": sig_detail, "body_head": body_head,
+        "content_type": content_type, "user_agent": user_agent,
+    }
 
     # ── 4. Route to handler ────────────────────────────────────────────────────
     if event == "app.store.authorize":
@@ -1580,7 +1617,8 @@ async def salla_webhook(request: Request):
     elif event == "app.updated":
         # Salla will immediately follow up with app.store.authorize containing
         # new tokens — nothing to do here except log it.
-        _log_event(merchant_id or "default", event, "ok", "awaiting app.store.authorize")
+        _log_event(merchant_id or "default", event, "ok", "awaiting app.store.authorize",
+                   **_webhook_ctx)
         print(f"[webhook] app.updated for merchant {merchant_id} — new tokens incoming")
 
     elif event.startswith("product."):
@@ -1597,7 +1635,7 @@ async def salla_webhook(request: Request):
 
     else:
         # Unknown / unhandled event — log and acknowledge
-        _log_event(merchant_id or "default", event, "unhandled")
+        _log_event(merchant_id or "default", event, "unhandled", **_webhook_ctx)
         print(f"[webhook] Unhandled event: {event!r}")
 
     return {"status": "ok", "event": event}
@@ -1606,8 +1644,8 @@ async def salla_webhook(request: Request):
 # ── Webhook events log (per-store) ─────────────────────────────────────────────
 @app.get("/admin/{store_id}/webhooks/log")
 async def store_webhook_log(store_id: str):
-    """Return the last 200 webhook events received for this store."""
-    events = list(_webhook_log.get(store_id, []))
+    """Return the newest 200 webhook events for this store from the DB."""
+    events = await db.get_webhook_log(store_id=store_id, limit=200)
     return {"store_id": store_id, "count": len(events), "events": events}
 
 
@@ -1719,11 +1757,12 @@ async def webhook_debug(request: Request):
     if not claims or not claims.get("su"):
         raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
 
+    attempts = await db.get_webhook_log(store_id=None, limit=50)
     return {
         "webhook_url":    f"{os.getenv('BASE_URL','http://localhost:8000')}/webhook/salla",
         "secret_set":     bool(os.getenv("SALLA_WEBHOOK_SECRET", "")),
-        "total_attempts": len(_raw_attempts),
-        "attempts":       list(_raw_attempts),
+        "total_attempts": len(attempts),
+        "attempts":       attempts,
     }
 
 

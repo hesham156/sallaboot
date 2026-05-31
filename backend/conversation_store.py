@@ -20,8 +20,9 @@ import datetime
 import database as db
 
 # ── Bot toggles ────────────────────────────────────────────────────────────────
-_bot_globally_enabled: bool = True          # legacy / single-store fallback
-_store_bot_enabled:    dict[str, bool] = {} # per-store override {store_id: bool}
+# Global toggle: hot-cached in memory but the DB (app_settings table) is the
+# source of truth. Loaded once at startup via load_globals_from_db().
+_bot_globally_enabled: bool = True
 
 # ── Conversations dict: session_id → conv dict ─────────────────────────────────
 _conversations: dict[str, dict] = {}
@@ -222,16 +223,18 @@ def pop_pending_for_widget(session_id: str) -> list:
 def is_bot_enabled(session_id: str) -> bool:
     """Check if bot should respond for this session.
     Priority: per-session override → per-store toggle → global toggle.
+    Reads from the persisted store tokens, not in-memory state.
     """
+    import store_manager as sm
     conv = _conversations.get(session_id, {})
     # per-session override (human takeover)
     if not conv.get("bot_enabled", True):
         return False
-    # per-store toggle
+    # per-store toggle (persisted in tokens.bot_enabled)
     store_id = conv.get("store_id", "default")
-    if not _store_bot_enabled.get(store_id, True):
+    if not sm.get_store_info(store_id).get("bot_enabled", True):
         return False
-    # global toggle (legacy)
+    # global toggle (persisted in app_settings)
     return _bot_globally_enabled
 
 
@@ -244,22 +247,40 @@ def get_bot_globally() -> bool:
     return _bot_globally_enabled
 
 
-def set_bot_globally(enabled: bool):
+async def set_bot_globally(enabled: bool):
+    """Update the global bot toggle and persist to DB so it survives restarts."""
     global _bot_globally_enabled
-    _bot_globally_enabled = enabled
+    _bot_globally_enabled = bool(enabled)
+    try:
+        await db.set_app_setting("bot_globally_enabled", _bot_globally_enabled)
+    except Exception as exc:
+        print(f"[conversation_store] ❌ Failed to persist global bot toggle: {exc}")
+
+
+async def load_globals_from_db():
+    """
+    Restore the global bot toggle from app_settings on startup. Called from
+    main.py's startup_event after db.init() succeeds.
+    """
+    global _bot_globally_enabled
+    try:
+        val = await db.get_app_setting("bot_globally_enabled", True)
+        _bot_globally_enabled = bool(val) if val is not None else True
+        print(f"[conversation_store] global bot toggle loaded: {_bot_globally_enabled}")
+    except Exception as exc:
+        print(f"[conversation_store] ⚠️ Failed to load global bot toggle, defaulting to True: {exc}")
 
 
 # ── Per-store bot toggle ───────────────────────────────────────────────────────
 
 def get_store_bot(store_id: str) -> bool:
-    """Return per-store bot enabled state (defaults to True)."""
+    """Return per-store bot enabled state (defaults to True). Reads from DB-backed tokens."""
     import store_manager as sm
-    info = sm.get_store_info(store_id)
-    return info.get("bot_enabled", True)
+    return sm.get_store_info(store_id).get("bot_enabled", True)
 
 
 def set_store_bot(store_id: str, enabled: bool):
-    """Enable/disable bot for a specific store only."""
+    """Enable/disable bot for a specific store only. Persisted via store_manager → DB."""
     import store_manager as sm
     if sm.is_registered(store_id):
         tokens = sm.get_store_info(store_id)

@@ -122,7 +122,277 @@ async def _create_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_uploads_session
                 ON uploads (session_id, created_at DESC);
+
+            -- Webhook event log (replaces in-memory _webhook_log + _raw_attempts).
+            -- One row per incoming webhook attempt, with both the parsed event
+            -- (after JSON parse + signature check) and the raw body head for
+            -- debugging failed deliveries.
+            CREATE TABLE IF NOT EXISTS webhook_log (
+                pk           BIGSERIAL PRIMARY KEY,
+                store_id     TEXT,
+                event        TEXT,
+                status       TEXT,        -- 'ok' | 'unhandled' | 'skip' | 'error' | 'duplicate'
+                detail       TEXT,
+                sig_status   TEXT,        -- 'signature_ok' | 'signature_absent_accepted' | ...
+                body_head    TEXT,        -- first 200 chars of the raw request body
+                content_type TEXT,
+                user_agent   TEXT,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_wh_store_ts ON webhook_log (store_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_wh_ts       ON webhook_log (created_at DESC);
+
+            -- Webhook idempotency (replaces in-memory _seen_events deque).
+            -- Key = "{event}:{merchant_id}:{created_at}" — Salla retries up to
+            -- 3× every 5 min; this must survive restarts or duplicates leak
+            -- through and re-create rows / re-trigger syncs.
+            CREATE TABLE IF NOT EXISTS webhook_seen (
+                dedup_key    TEXT PRIMARY KEY,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_wh_seen_ts ON webhook_seen (created_at);
+
+            -- Login rate-limiting (replaces in-memory _login_attempts).
+            -- Persisting this means a server restart doesn't reset an attacker's
+            -- attempt counter, so the 5-attempts-per-5-min lockout actually works.
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                pk           BIGSERIAL PRIMARY KEY,
+                attempt_key  TEXT NOT NULL,      -- "super:<ip>" or "<store_id>:<ip>"
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_login_key_ts ON login_attempts (attempt_key, created_at DESC);
+
+            -- App-level settings (single-row JSON blobs keyed by name).
+            -- Used for things like the global bot toggle that aren't per-store.
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key    TEXT PRIMARY KEY,
+                value  JSONB NOT NULL DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
+
+
+# ── Webhook log (debugging + audit trail) ───────────────────────────────────
+
+async def log_webhook(*, store_id: str = "", event: str = "", status: str = "ok",
+                       detail: str = "", sig_status: str = "", body_head: str = "",
+                       content_type: str = "", user_agent: str = "") -> None:
+    """Append one webhook attempt row. Silent no-op when DB is unavailable."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO webhook_log
+                  (store_id, event, status, detail, sig_status, body_head, content_type, user_agent)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                store_id or "", event or "", status or "", detail or "",
+                sig_status or "", body_head or "", content_type or "", user_agent or "",
+            )
+    except Exception as e:
+        print(f"[db] log_webhook error: {e}")
+
+
+async def get_webhook_log(store_id: str | None = None, limit: int = 200) -> list[dict]:
+    """Return the newest `limit` webhook rows, optionally filtered by store_id."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            if store_id:
+                rows = await conn.fetch(
+                    """
+                    SELECT event, status, detail, sig_status, body_head,
+                           content_type, user_agent, created_at
+                    FROM webhook_log
+                    WHERE store_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                    """,
+                    store_id, limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT store_id, event, status, detail, sig_status, body_head,
+                           content_type, user_agent, created_at
+                    FROM webhook_log
+                    ORDER BY created_at DESC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+        return [
+            {k: (v.isoformat() + "Z" if k == "created_at" and v else v) for k, v in dict(r).items()}
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] get_webhook_log error: {e}")
+        return []
+
+
+async def prune_webhook_log(keep_last_days: int = 30) -> int:
+    """Delete webhook_log rows older than `keep_last_days`. Returns count deleted."""
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                f"DELETE FROM webhook_log WHERE created_at < NOW() - INTERVAL '{int(keep_last_days)} days'"
+            )
+        # asyncpg returns 'DELETE <n>' — parse the n
+        try:
+            return int(r.split()[-1])
+        except Exception:
+            return 0
+    except Exception as e:
+        print(f"[db] prune_webhook_log error: {e}")
+        return 0
+
+
+# ── Webhook idempotency ─────────────────────────────────────────────────────
+
+async def is_webhook_seen(dedup_key: str) -> bool:
+    """True if this webhook key has already been processed. Atomic insert."""
+    if not _pool or not dedup_key:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            # ON CONFLICT DO NOTHING + RETURNING tells us whether this was a new row
+            row = await conn.fetchrow(
+                """
+                INSERT INTO webhook_seen (dedup_key) VALUES ($1)
+                ON CONFLICT (dedup_key) DO NOTHING
+                RETURNING dedup_key
+                """,
+                dedup_key,
+            )
+        # row is None when conflict happened → we've seen it before
+        return row is None
+    except Exception as e:
+        print(f"[db] is_webhook_seen error: {e}")
+        return False  # Fail-open: better to process duplicate than drop a real event
+
+
+async def prune_webhook_seen(keep_last_hours: int = 24) -> int:
+    """
+    Drop dedup keys older than `keep_last_hours`. Salla retries up to 3× over
+    15 min so 24h is plenty of safety margin.
+    """
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                f"DELETE FROM webhook_seen WHERE created_at < NOW() - INTERVAL '{int(keep_last_hours)} hours'"
+            )
+        try:
+            return int(r.split()[-1])
+        except Exception:
+            return 0
+    except Exception as e:
+        print(f"[db] prune_webhook_seen error: {e}")
+        return 0
+
+
+# ── Login rate-limiting ─────────────────────────────────────────────────────
+
+async def count_recent_login_attempts(attempt_key: str, window_secs: int) -> int:
+    """Count attempts for this key in the last `window_secs` seconds."""
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            n = await conn.fetchval(
+                f"""
+                SELECT COUNT(*) FROM login_attempts
+                WHERE attempt_key = $1
+                  AND created_at >= NOW() - INTERVAL '{int(window_secs)} seconds'
+                """,
+                attempt_key,
+            )
+        return int(n or 0)
+    except Exception as e:
+        print(f"[db] count_recent_login_attempts error: {e}")
+        return 0
+
+
+async def record_login_attempt(attempt_key: str) -> None:
+    """Record a login attempt (success or failure)."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO login_attempts (attempt_key) VALUES ($1)",
+                attempt_key,
+            )
+    except Exception as e:
+        print(f"[db] record_login_attempt error: {e}")
+
+
+async def prune_login_attempts(keep_last_hours: int = 24) -> int:
+    """Delete old login attempts to keep the table small."""
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                f"DELETE FROM login_attempts WHERE created_at < NOW() - INTERVAL '{int(keep_last_hours)} hours'"
+            )
+        try:
+            return int(r.split()[-1])
+        except Exception:
+            return 0
+    except Exception as e:
+        print(f"[db] prune_login_attempts error: {e}")
+        return 0
+
+
+# ── App-level settings (global flags) ───────────────────────────────────────
+
+async def get_app_setting(key: str, default=None):
+    """Read a JSON value from app_settings, falling back to `default`."""
+    if not _pool:
+        return default
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT value FROM app_settings WHERE key = $1", key,
+            )
+        if not row:
+            return default
+        val = row["value"]
+        # JSONB codec decodes to dict; for primitive values we stored {value: x}
+        if isinstance(val, dict) and "value" in val and len(val) == 1:
+            return val["value"]
+        return val
+    except Exception as e:
+        print(f"[db] get_app_setting({key!r}) error: {e}")
+        return default
+
+
+async def set_app_setting(key: str, value) -> None:
+    """Upsert a JSON value into app_settings."""
+    if not _pool:
+        return
+    try:
+        # Wrap primitives so the codec serialises cleanly
+        payload = value if isinstance(value, dict) else {"value": value}
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES ($1, $2::jsonb, NOW())
+                ON CONFLICT (key) DO UPDATE
+                  SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                key, json.dumps(payload, ensure_ascii=False, default=str),
+            )
+    except Exception as e:
+        print(f"[db] set_app_setting({key!r}) error: {e}")
 
 
 # ── Uploads (persistent file storage in PostgreSQL) ──────────────────────────
