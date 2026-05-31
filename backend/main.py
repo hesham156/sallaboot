@@ -1108,6 +1108,26 @@ async def store_analytics(store_id: str):
     }
 
 
+
+# ── Conversation insights (advanced analytics) ─────────────────────────────────
+@app.get("/admin/{store_id}/analytics/insights")
+async def store_insights(store_id: str):
+    """
+    Deep analysis of conversations for a store.
+    Returns: top question topics, non-purchase reasons,
+             at-risk customers, sentiment breakdown, conversion rate.
+    """
+    import conversation_analyzer as ca
+
+    all_convs = {
+        sid: conv
+        for sid, conv in cs.all_conversations().items()
+        if conv.get("store_id", "default") == store_id
+    }
+
+    return ca.analyze_insights(all_convs)
+
+
 # ── Per-store bot toggle ───────────────────────────────────────────────────────
 @app.get("/admin/{store_id}/bot/status")
 async def store_bot_status(store_id: str):

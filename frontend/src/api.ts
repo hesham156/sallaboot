@@ -113,6 +113,8 @@ export const api = {
   // Analytics
   analytics: (storeId: string) =>
     get<Analytics>(`/admin/${storeId}/analytics`),
+  insights: (storeId: string) =>
+    get<ConversationInsights>(`/admin/${storeId}/analytics/insights`),
 
   // AI settings
   getAI: (storeId: string) =>
@@ -285,6 +287,49 @@ export interface Analytics {
   abandoned_carts: { total: number; recovered: number; pending: number; recovery_rate: number }
   products: { count: number; last_sync: string }
   ratings: { count: number; avg: number; distribution: number[] }
+}
+
+// ── Conversation Insights ─────────────────────────────────────────────────
+
+export interface TopicItem {
+  id: string
+  label: string
+  icon: string
+  count: number
+  percent: number
+  examples: string[]
+}
+
+export interface NonPurchaseItem {
+  id: string
+  label: string
+  icon: string
+  count: number
+  percent: number
+}
+
+export interface AtRiskCustomer {
+  session_id: string
+  signal: string
+  last_message: string
+  last_role: string
+  ts: string
+  customer_name: string
+  customer_phone: string
+  rating: number | null
+}
+
+export interface ConversationInsights {
+  top_questions: TopicItem[]
+  non_purchase: NonPurchaseItem[]
+  at_risk_customers: AtRiskCustomer[]
+  sentiment_summary: { happy: number; neutral: number; angry: number; total: number }
+  conversion: {
+    total_convs: number
+    with_checkout: number
+    without_checkout: number
+    conversion_rate: number
+  }
 }
 
 export interface AIConfig {
