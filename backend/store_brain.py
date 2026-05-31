@@ -73,6 +73,11 @@ def get_store_info(store_id: str) -> dict:
     return (sm.get_cache(store_id) or {}).get("store_info") or {}
 
 
+def get_shipping_companies(store_id: str) -> list[dict]:
+    """Return the cached /shipping/companies list (or [] if not synced yet)."""
+    return (sm.get_cache(store_id) or {}).get("shipping_companies") or []
+
+
 def get_overview(store_id: str) -> dict:
     """
     Compute a quick numeric overview of the store's catalog.
@@ -203,6 +208,13 @@ def _build_store_profile_block(store_id: str) -> str:
         licenses.append(f"عمل حر {lic['freelance_number']}")
     if licenses:
         lines.append("الترخيص: " + " | ".join(licenses))
+
+    # Shipping carriers — read from cache (separate /shipping/companies fetch)
+    carriers = get_shipping_companies(store_id)
+    if carriers:
+        names = [c.get("name", "") for c in carriers if c.get("name")]
+        if names:
+            lines.append(f"شركات الشحن المتاحة ({len(names)}): " + "، ".join(names))
 
     return "\n".join(lines)
 
@@ -394,11 +406,13 @@ def preview_knowledge(store_id: str) -> dict:
     knowledge = get_knowledge_for_prompt(store_id)
     overview  = get_overview(store_id)
     store_info = get_store_info(store_id)
+    carriers   = get_shipping_companies(store_id)
     return {
-        "overview":         overview,
-        "store_info":       store_info,     # raw /store/info payload (admin can see what was synced)
-        "knowledge_chars":  len(knowledge),
-        "knowledge_budget": PROMPT_BUDGET_CHARS,
-        "custom_knowledge": _get_custom_knowledge(store_id),
-        "knowledge_preview": knowledge,
+        "overview":           overview,
+        "store_info":         store_info,
+        "shipping_companies": carriers,
+        "knowledge_chars":    len(knowledge),
+        "knowledge_budget":   PROMPT_BUDGET_CHARS,
+        "custom_knowledge":   _get_custom_knowledge(store_id),
+        "knowledge_preview":  knowledge,
     }

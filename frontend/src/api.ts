@@ -376,9 +376,17 @@ export interface StoreInfoSnapshot {
   }
 }
 
+export interface ShippingCompany {
+  id?: number
+  name: string
+  slug?: string
+  activation_type?: 'manual' | 'api' | string
+}
+
 export interface BrainData {
   overview: BrainOverview
   store_info?: StoreInfoSnapshot
+  shipping_companies?: ShippingCompany[]
   knowledge_chars: number
   knowledge_budget: number
   custom_knowledge: string

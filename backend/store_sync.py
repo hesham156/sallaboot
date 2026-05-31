@@ -128,6 +128,33 @@ def _strip_html(text: str) -> str:
 
 # ── Main sync ──────────────────────────────────────────────────────────────────
 
+async def _fetch_shipping_companies(client: httpx.AsyncClient, headers: dict, store_id: str) -> tuple:
+    """Fetch /shipping/companies (active carriers + activation type)."""
+    try:
+        r = await client.get(
+            "https://api.salla.dev/admin/v2/shipping/companies/",
+            headers=headers, timeout=15,
+        )
+        if r.status_code == 200:
+            raw = r.json().get("data") or []
+            companies = [
+                {
+                    "id":              c.get("id"),
+                    "name":            c.get("name", ""),
+                    "slug":            c.get("slug") or "",
+                    "activation_type": c.get("activation_type", ""),
+                }
+                for c in raw if c.get("name")
+            ]
+            return companies, None
+        if r.status_code == 403:
+            # Missing scope is non-fatal — the rest of the sync still works
+            return [], "shipping.read scope missing (403) — shipping list not synced"
+        return [], f"HTTP {r.status_code} from /shipping/companies: {r.text[:200]}"
+    except Exception as e:
+        return [], f"Exception fetching /shipping/companies: {type(e).__name__}: {e}"
+
+
 async def _fetch_store_info(client: httpx.AsyncClient, headers: dict, store_id: str) -> tuple:
     """Fetch /store/info (returns the merchant's profile dict, or empty + error)."""
     try:
@@ -169,13 +196,17 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
     errors = []
 
     async with httpx.AsyncClient(timeout=30) as client:
-        # Run products, categories, and store info concurrently
-        (products_raw, prod_err), (categories_raw, cats_err), (store_info, info_err) = (
-            await asyncio.gather(
-                _fetch_all_pages(client, f"{base}/products",   headers),
-                _fetch_all_pages(client, f"{base}/categories", headers),
-                _fetch_store_info(client, headers, store_id),
-            )
+        # Run products, categories, store info, and shipping companies concurrently
+        (
+            (products_raw, prod_err),
+            (categories_raw, cats_err),
+            (store_info, info_err),
+            (shipping_companies, ship_err),
+        ) = await asyncio.gather(
+            _fetch_all_pages(client, f"{base}/products",   headers),
+            _fetch_all_pages(client, f"{base}/categories", headers),
+            _fetch_store_info(client, headers, store_id),
+            _fetch_shipping_companies(client, headers, store_id),
         )
         if prod_err:
             print(f"[store_sync:{store_id}] products error: {prod_err}")
@@ -186,6 +217,9 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
         if info_err:
             print(f"[store_sync:{store_id}] store_info error: {info_err}")
             errors.append(info_err)
+        if ship_err:
+            print(f"[store_sync:{store_id}] shipping error: {ship_err}")
+            errors.append(ship_err)
 
         articles_raw = []
         for endpoint in [f"{base}/blogs/posts", f"{base}/blog/posts", f"{base}/blogs"]:
@@ -208,13 +242,14 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
     articles = [_format_article(a) for a in articles_raw]
 
     return {
-        "products":         products,
-        "categories":       categories,
-        "articles":         articles,
-        "store_info":       store_info,
-        "products_count":   len(products),
-        "last_sync":        datetime.datetime.utcnow().isoformat(),
-        "last_sync_errors": errors,
+        "products":           products,
+        "categories":         categories,
+        "articles":           articles,
+        "store_info":         store_info,
+        "shipping_companies": shipping_companies or [],
+        "products_count":     len(products),
+        "last_sync":          datetime.datetime.utcnow().isoformat(),
+        "last_sync_errors":   errors,
     }
 
 
@@ -251,7 +286,11 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
     n_a = len(data.get("articles",   []))
     si  = data.get("store_info") or {}
     info_str = f"store='{si.get('name','?')}' ({si.get('plan','?')})" if si else "no store_info"
-    print(f"[store_sync:{store_id}] ✅ Sync done — {n_p} products, {n_c} cats, {n_a} articles, {info_str}")
+    n_s = len(data.get("shipping_companies") or [])
+    print(
+        f"[store_sync:{store_id}] ✅ Sync done — {n_p} products, {n_c} cats, "
+        f"{n_a} articles, {n_s} shipping carriers, {info_str}"
+    )
     return data
 
 

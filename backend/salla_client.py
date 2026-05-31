@@ -210,6 +210,22 @@ class SallaClient:
         """
         return await self._request("GET", f"/orders/{order_id}/invoices")
 
+    # ── Shipping companies ─────────────────────────────────────────────────────
+
+    async def get_shipping_companies(self) -> dict:
+        """
+        GET /admin/v2/shipping/companies — list active shipping carriers
+        linked to the store. Each item has:
+          id, name, app_id, activation_type ('manual'|'api'), slug
+
+        Scope required: shipping.read
+        """
+        return await self._request("GET", "/shipping/companies/")
+
+    async def get_shipping_company(self, company_id) -> dict:
+        """GET /admin/v2/shipping/companies/{id} — single carrier detail."""
+        return await self._request("GET", f"/shipping/companies/{company_id}")
+
     # ── Store info ─────────────────────────────────────────────────────────────
 
     async def get_store_info(self) -> dict:

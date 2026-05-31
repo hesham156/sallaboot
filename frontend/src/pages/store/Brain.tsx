@@ -202,6 +202,45 @@ export default function Brain({ storeId }: Props) {
         </Card>
       )}
 
+      {/* ════════════ SHIPPING COMPANIES ════════════ */}
+      {data.shipping_companies && data.shipping_companies.length > 0 && (
+        <Card className="bg-content1 border border-divider">
+          <CardHeader className="px-5 py-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-400" />
+              <h2 className="font-bold text-sm">🚚 شركات الشحن المتاحة</h2>
+            </div>
+            <Chip size="sm" variant="flat" color="default">
+              {data.shipping_companies.length} شركة
+            </Chip>
+          </CardHeader>
+          <Divider />
+          <CardBody className="px-5 py-4">
+            <div className="flex flex-wrap gap-2">
+              {data.shipping_companies.map(c => (
+                <Chip
+                  key={c.id ?? c.name}
+                  size="md" variant="flat"
+                  color={c.activation_type === 'api' ? 'success' : 'default'}
+                  startContent={
+                    <span className="text-xs">
+                      {c.activation_type === 'api' ? '🔗' : '📝'}
+                    </span>
+                  }
+                  className="font-semibold pl-1"
+                >
+                  {c.name}
+                </Chip>
+              ))}
+            </div>
+            <p className="text-[11px] text-default-500 mt-3">
+              <span className="text-emerald-400">🔗 API</span> = مفعّل تلقائياً عبر سلة ·
+              <span className="text-default-400 mr-1">📝 يدوي</span> = يربطه التاجر يدوياً
+            </p>
+          </CardBody>
+        </Card>
+      )}
+
       {/* ════════════ STATS GRID ════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
