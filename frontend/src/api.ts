@@ -216,7 +216,8 @@ export interface Message {
 export interface Conversation extends ConvSummary {
   messages: Message[]
   cart?: unknown[]
-  customer?: { name?: string; phone?: string; email?: string }
+  // Backend field name is customer_info, not customer
+  customer_info?: { name?: string; phone?: string; email?: string }
 }
 
 export interface Product {
