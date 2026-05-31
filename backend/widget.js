@@ -192,6 +192,33 @@
     @media (max-width: 420px) {
       #salla-chat-panel { width: calc(100vw - 16px); ${_side}: 8px; bottom: 80px; height: 70vh; }
     }
+    /* ── Quick action buttons ────────────────────────────────── */
+    .quick-actions-row { align-self: stretch; max-width: 100%; }
+    .quick-actions-title {
+      font-size: 11px; color: #94a3b8; text-align: center; margin: 4px 0 6px;
+      font-weight: 600;
+    }
+    .quick-actions-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .qa-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px; justify-content: center;
+      padding: 12px 6px; border-radius: 12px; cursor: pointer;
+      font-size: 12px; font-weight: 700; font-family: inherit;
+      border: 1.5px solid; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+      text-align: center; line-height: 1.2;
+    }
+    .qa-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.10); }
+    .qa-btn:active { transform: translateY(0); }
+    .qa-btn .qa-icon { font-size: 20px; line-height: 1; }
+    .qa-blue   { color: #1e40af; border-color: #bfdbfe; background: #eff6ff; }
+    .qa-blue:hover   { border-color: #3b82f6; background: #dbeafe; }
+    .qa-green  { color: #166534; border-color: #bbf7d0; background: #f0fdf4; }
+    .qa-green:hover  { border-color: #22c55e; background: #dcfce7; }
+    .qa-purple { color: #6b21a8; border-color: #e9d5ff; background: #faf5ff; }
+    .qa-purple:hover { border-color: #a855f7; background: #f3e8ff; }
+    .qa-amber  { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+    .qa-amber:hover  { border-color: #f59e0b; background: #fef3c7; }
     /* ── Cart badge on header ─────────────────────────────────── */
     #salla-cart-badge {
       background: #ef4444; color: white; border-radius: 20px;
@@ -404,6 +431,52 @@
 
   function hideTyping() {
     var el = document.getElementById("typing-indicator");
+    if (el) el.remove();
+  }
+
+  // ── Quick action buttons (shown after welcome message) ───────────────────────
+  var QUICK_ACTIONS = [
+    { msg: "أريد طلب منتج جديد، ساعدني في اختيار الأنسب لي", icon: "🛍️", label: "طلب جديد",       color: "blue"   },
+    { msg: "أحتاج عرض سعر للطباعة",                          icon: "💰", label: "عرض سعر",        color: "green"  },
+    { msg: "أريد تتبع طلبي السابق",                          icon: "📦", label: "تتبع طلب",       color: "purple" },
+    { msg: "أحتاج التحدث مع موظف دعم بشري من فضلك",          icon: "👨‍💼", label: "التواصل مع الدعم", color: "amber"  },
+  ];
+
+  function appendQuickActions() {
+    if (document.getElementById("quick-actions")) return;
+    var container = document.getElementById("salla-chat-messages");
+    var wrap = document.createElement("div");
+    wrap.className = "chat-msg quick-actions-row";
+    wrap.id = "quick-actions";
+
+    var html = '<div class="quick-actions-title">كيف أقدر أساعدك؟</div>' +
+               '<div class="quick-actions-grid">';
+    for (var i = 0; i < QUICK_ACTIONS.length; i++) {
+      var a = QUICK_ACTIONS[i];
+      html += '<button class="qa-btn qa-' + a.color + '" data-idx="' + i + '">' +
+                '<span class="qa-icon">' + a.icon + '</span>' +
+                '<span>' + a.label + '</span>' +
+              '</button>';
+    }
+    html += '</div>';
+    wrap.innerHTML = html;
+    container.appendChild(wrap);
+    container.scrollTop = container.scrollHeight;
+
+    wrap.querySelectorAll(".qa-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var idx = parseInt(btn.getAttribute("data-idx"), 10);
+        var action = QUICK_ACTIONS[idx];
+        if (action) {
+          removeQuickActions();
+          sendMessage(action.msg);
+        }
+      });
+    });
+  }
+
+  function removeQuickActions() {
+    var el = document.getElementById("quick-actions");
     if (el) el.remove();
   }
 
@@ -732,6 +805,9 @@
     isLoading = true;
     document.getElementById("salla-chat-send").disabled = true;
 
+    // Hide quick-action buttons once the user starts chatting
+    removeQuickActions();
+
     appendMessage("user", message);
 
     // Only show typing animation when bot is handling the conversation
@@ -859,6 +935,7 @@
       badge.style.display = "none";
       if (isOpen && document.getElementById("salla-chat-messages").children.length === 0) {
         appendMessage("bot", CONFIG.welcomeMessage);
+        appendQuickActions();
       }
       if (isOpen) input.focus();
     });
