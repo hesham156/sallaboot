@@ -106,7 +106,67 @@ async def _create_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_abn_store_crt
                 ON abandoned_carts (store_id, created_at DESC);
+
+            -- Customer file uploads — stored as bytea so they survive every
+            -- Railway deploy (the filesystem is ephemeral and wipes on
+            -- every restart)
+            CREATE TABLE IF NOT EXISTS uploads (
+                file_id      TEXT PRIMARY KEY,
+                filename     TEXT NOT NULL,
+                content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+                size_bytes   INTEGER NOT NULL DEFAULT 0,
+                data         BYTEA NOT NULL,
+                store_id     TEXT,
+                session_id   TEXT,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_uploads_session
+                ON uploads (session_id, created_at DESC);
         """)
+
+
+# ── Uploads (persistent file storage in PostgreSQL) ──────────────────────────
+
+async def save_upload(file_id: str, filename: str, content_type: str,
+                       data: bytes, store_id: str = "", session_id: str = "") -> bool:
+    """Persist an uploaded file to PostgreSQL. Returns True on success."""
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO uploads (file_id, filename, content_type, size_bytes, data, store_id, session_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                file_id, filename, content_type, len(data), data, store_id, session_id,
+            )
+        return True
+    except Exception as e:
+        print(f"[db] save_upload({file_id!r}) error: {e}")
+        return False
+
+
+async def load_upload(file_id: str) -> dict | None:
+    """Read an uploaded file back from PostgreSQL. Returns None if missing."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT filename, content_type, data FROM uploads WHERE file_id = $1",
+                file_id,
+            )
+        if not row:
+            return None
+        return {
+            "filename":     row["filename"],
+            "content_type": row["content_type"],
+            "data":         bytes(row["data"]),
+        }
+    except Exception as e:
+        print(f"[db] load_upload({file_id!r}) error: {e}")
+        return None
 
 
 def available() -> bool:

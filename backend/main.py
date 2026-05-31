@@ -1881,6 +1881,19 @@ async def chat_poll(session_id: str):
 
 
 # ── File upload ────────────────────────────────────────────────────────────────
+# MIME content-type lookup for the few extensions we care about
+_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    ".tif": "image/tiff", ".tiff": "image/tiff",
+    ".ai":  "application/postscript", ".eps": "application/postscript",
+    ".psd": "image/vnd.adobe.photoshop",
+    ".cdr": "application/vnd.corel-draw",
+    ".zip": "application/zip",
+}
+
+
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -1888,19 +1901,16 @@ async def upload_file(
     store_id: str    = Form(default="default"),
 ):
     """
-    Handle a customer file attachment from the widget.
+    Customer file attachment from the widget.
 
-    Important: we deliberately DO NOT invoke agent.chat() here. Previously
-    this endpoint called the LLM with a synthetic notification message,
-    which:
-      • Returned 500 (no CORS headers from Railway proxy) whenever the AI
-        provider had a rate-limit / auth error → widget showed CORS error
-        and "فشل رفع الملف"
-      • Could exceed Railway's request timeout while waiting for Groq
-      • Wasted tokens on a message the user didn't actually send
+    Storage strategy: persist to PostgreSQL as bytea so files survive
+    Railway deploys (the local filesystem is wiped on every restart).
+    A local-disk copy is kept as a best-effort cache for the static
+    /uploads mount but is not relied on.
 
-    Instead we just save the file and record a "user" message documenting
-    the upload, so the admin sees it in the conversation transcript.
+    The endpoint deliberately does NOT call the LLM — see commit f6022f7
+    for the rationale (agent.chat failures used to bubble up as 500s
+    without CORS headers, breaking the widget upload UX).
     """
     # Sanitize literal Salla template placeholders
     if "{{" in store_id or "}}" in store_id:
@@ -1917,20 +1927,40 @@ async def upload_file(
     if len(contents) > MAX_FILE_MB * 1024 * 1024:
         raise HTTPException(413, f"حجم الملف يتجاوز الحد المسموح ({MAX_FILE_MB} MB)")
 
-    file_id   = str(uuid.uuid4())
-    save_path = UPLOAD_DIR / f"{file_id}{suffix}"
+    file_id      = str(uuid.uuid4())
+    content_type = _CONTENT_TYPES.get(suffix, "application/octet-stream")
+    filename     = file.filename or f"upload{suffix}"
+
+    # Primary storage: PostgreSQL (persistent across deploys)
+    db_saved = False
+    if db.available():
+        db_saved = await db.save_upload(
+            file_id=file_id, filename=filename, content_type=content_type,
+            data=contents, store_id=store_id, session_id=session_id,
+        )
+        if not db_saved:
+            print(f"[upload] ⚠️ DB save failed for {file_id!r} — falling back to disk only")
+
+    # Best-effort local cache (lost on Railway redeploys)
     try:
+        save_path = UPLOAD_DIR / f"{file_id}{suffix}"
         async with aiofiles.open(save_path, "wb") as f:
             await f.write(contents)
     except Exception as exc:
-        print(f"[upload] ❌ Failed to save file {file.filename!r}: {exc}")
-        raise HTTPException(500, f"تعذّر حفظ الملف على الخادم: {exc}")
+        print(f"[upload] ⚠️ Disk cache save failed for {file_id!r}: {exc}")
+        if not db_saved:
+            raise HTTPException(500, f"تعذّر حفظ الملف: {exc}")
 
-    # Record the upload in the conversation transcript (no LLM call).
-    # Failures here are non-fatal — the file is already saved.
+    # Build a public URL the admin dashboard / widget can render.
+    # Routes through /file/{id} which falls back to DB if disk copy is gone.
+    base_url = os.getenv("BASE_URL", "").rstrip("/")
+    file_url = f"{base_url}/file/{file_id}" if base_url else f"/file/{file_id}"
+
+    # Record the upload in the conversation transcript using a markdown link
+    # so the admin UI can render it as a thumbnail / clickable link.
     if session_id:
         try:
-            notification = f"📎 تم إرفاق ملف تصميم: {file.filename}"
+            notification = f"📎 تم إرفاق ملف تصميم: [{filename}]({file_url})"
             await cs.add_message(session_id, "user", notification, store_id)
         except Exception as exc:
             print(f"[upload] ⚠️ Failed to log upload in conversation: {exc}")
@@ -1938,5 +1968,34 @@ async def upload_file(
     return {
         "message":  "تم رفع الملف بنجاح! سيتم مراجعته من فريق التصميم وسنتواصل معك قريباً.",
         "file_id":  file_id,
-        "filename": file.filename,
+        "filename": filename,
+        "url":      file_url,
     }
+
+
+@app.get("/file/{file_id}")
+async def get_uploaded_file(file_id: str):
+    """
+    Serve an uploaded file. Tries PostgreSQL first (persistent across
+    deploys), then falls back to the local /uploads disk cache.
+    """
+    # 1) Try DB
+    if db.available():
+        record = await db.load_upload(file_id)
+        if record:
+            from fastapi.responses import Response
+            return Response(
+                content=record["data"],
+                media_type=record["content_type"],
+                headers={
+                    "Content-Disposition": f'inline; filename="{record["filename"]}"',
+                    "Cache-Control": "private, max-age=3600",
+                },
+            )
+
+    # 2) Disk fallback — scan UPLOAD_DIR for any file starting with file_id
+    for path in UPLOAD_DIR.iterdir():
+        if path.stem == file_id:
+            return FileResponse(path)
+
+    raise HTTPException(404, "الملف غير موجود أو تم حذفه")

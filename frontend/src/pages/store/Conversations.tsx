@@ -39,6 +39,76 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })
 }
 
+/**
+ * Parse a message body for markdown-style links `[text](url)` and render:
+ *  - image attachments inline as thumbnails (clickable to open full size)
+ *  - other files as clickable filename links
+ *  - plain text unchanged
+ *
+ * Used so the admin can actually preview uploaded designs in the chat.
+ */
+function renderMessageBody(content: string): React.ReactNode {
+  if (!content) return '(رسالة فارغة)'
+
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = linkRegex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index))
+    }
+    const [, text, url] = match
+    const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)(\?|$)/i.test(url) ||
+                    url.includes('/file/')   // backend serves all uploads via /file/{id}
+    if (isImage) {
+      parts.push(
+        <a
+          key={`l${parts.length}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block mt-2 group"
+        >
+          <img
+            src={url}
+            alt={text}
+            className="max-w-[240px] max-h-[200px] rounded-lg border border-white/20 object-cover group-hover:border-white/40 transition-colors"
+            onError={(e) => {
+              const img = e.currentTarget
+              img.style.display = 'none'
+              const fallback = img.nextElementSibling as HTMLElement | null
+              if (fallback) fallback.style.display = 'inline-flex'
+            }}
+          />
+          <span style={{ display: 'none' }} className="items-center gap-1.5 px-3 py-2 bg-white/10 rounded-lg text-xs">
+            🖼️ {text} (الصورة غير متاحة — اضغط للتحميل)
+          </span>
+          <span className="block text-[10px] opacity-70 mt-1 truncate max-w-[240px]">{text}</span>
+        </a>
+      )
+    } else {
+      parts.push(
+        <a
+          key={`l${parts.length}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/10 hover:bg-white/15 rounded-md mt-1 text-xs underline-offset-2 hover:underline"
+        >
+          📄 {text}
+        </a>
+      )
+    }
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex))
+  }
+  return parts.length > 0 ? parts : content
+}
+
 export default function Conversations({ storeId }: Props) {
   const [convs, setConvs] = useState<ConvSummary[]>([])
   const [total, setTotal] = useState(0)
@@ -224,7 +294,7 @@ export default function Conversations({ storeId }: Props) {
                       </div>
                       <p className="text-xs text-slate-400 truncate leading-relaxed">
                         {lastMsg?.content
-                          ? `${roleEmoji} ${lastMsg.content}`
+                          ? `${roleEmoji} ${lastMsg.content.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')}`
                           : 'لا توجد رسائل'}
                       </p>
                       <div className="flex items-center gap-1.5 mt-1.5">
@@ -364,9 +434,9 @@ export default function Conversations({ storeId }: Props) {
                         {isAdmin && (
                           <p className="text-[10px] text-amber-400 mb-1 font-bold">الإدارة</p>
                         )}
-                        <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          {msg.content || '(رسالة فارغة)'}
-                        </p>
+                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {renderMessageBody(msg.content)}
+                        </div>
                         <p className={`text-[10px] mt-1 ${
                           isUser ? 'text-blue-200' : 'text-slate-500'
                         }`}>
