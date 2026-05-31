@@ -169,13 +169,11 @@ async def _token_refresh_loop():
         await asyncio.sleep(3_600)    # re-check every hour
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware is registered LAST (below admin_auth_middleware) so it ends
+# up as the OUTERMOST layer — this guarantees that even error responses (500,
+# 502, auth rejections) include Access-Control-Allow-Origin so the browser
+# doesn't show a misleading "blocked by CORS" instead of the real error.
+# See the CORS block further down in this file.
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
@@ -231,6 +229,23 @@ async def admin_auth_middleware(request: Request, call_next):
             return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
 
     return await call_next(request)
+
+
+# CORS registered AFTER admin_auth_middleware so it becomes the outermost
+# layer of the middleware chain (Starlette wraps in reverse order). Putting
+# CORS outermost means every response — including 401s from auth and 500s
+# from route handlers — carries the right Access-Control-Allow-* headers,
+# so the browser shows the actual status code instead of a misleading
+# "blocked by CORS" message.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -1872,6 +1887,25 @@ async def upload_file(
     session_id: str  = Form(default=""),
     store_id: str    = Form(default="default"),
 ):
+    """
+    Handle a customer file attachment from the widget.
+
+    Important: we deliberately DO NOT invoke agent.chat() here. Previously
+    this endpoint called the LLM with a synthetic notification message,
+    which:
+      • Returned 500 (no CORS headers from Railway proxy) whenever the AI
+        provider had a rate-limit / auth error → widget showed CORS error
+        and "فشل رفع الملف"
+      • Could exceed Railway's request timeout while waiting for Groq
+      • Wasted tokens on a message the user didn't actually send
+
+    Instead we just save the file and record a "user" message documenting
+    the upload, so the admin sees it in the conversation transcript.
+    """
+    # Sanitize literal Salla template placeholders
+    if "{{" in store_id or "}}" in store_id:
+        store_id = "default"
+
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -1885,17 +1919,21 @@ async def upload_file(
 
     file_id   = str(uuid.uuid4())
     save_path = UPLOAD_DIR / f"{file_id}{suffix}"
-    async with aiofiles.open(save_path, "wb") as f:
-        await f.write(contents)
+    try:
+        async with aiofiles.open(save_path, "wb") as f:
+            await f.write(contents)
+    except Exception as exc:
+        print(f"[upload] ❌ Failed to save file {file.filename!r}: {exc}")
+        raise HTTPException(500, f"تعذّر حفظ الملف على الخادم: {exc}")
 
+    # Record the upload in the conversation transcript (no LLM call).
+    # Failures here are non-fatal — the file is already saved.
     if session_id:
-        notification = (
-            f"[العميل أرسل ملف تصميم: {file.filename} — "
-            f"تم حفظه بنجاح، سيتم مراجعته من فريق التصميم]"
-        )
-        agent = sm.get_agent(store_id)
-        if agent:
-            await agent.chat(message=notification, session_id=session_id)
+        try:
+            notification = f"📎 تم إرفاق ملف تصميم: {file.filename}"
+            await cs.add_message(session_id, "user", notification, store_id)
+        except Exception as exc:
+            print(f"[upload] ⚠️ Failed to log upload in conversation: {exc}")
 
     return {
         "message":  "تم رفع الملف بنجاح! سيتم مراجعته من فريق التصميم وسنتواصل معك قريباً.",
