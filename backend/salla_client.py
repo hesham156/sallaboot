@@ -93,7 +93,12 @@ class SallaClient:
         Create a draft order and return the customer-facing payment URL.
 
         items:  [{"product_id": ..., "quantity": ...}]
-        customer_info: {"name": "...", "phone": "...", "email": "..."}
+        customer_info: {
+            "name": "...", "phone": "...", "email": "...",
+            "salla_customer_id": int   # optional — if present, used directly
+        }
+        When salla_customer_id is provided the API resolves name/phone/email
+        automatically from the existing Salla customer record.
         """
         payload: dict = {
             "items": [
@@ -104,18 +109,137 @@ class SallaClient:
         if notes:
             payload["notes"] = notes
         if customer_info:
-            name_parts = (customer_info.get("name") or "").split()
-            payload["customer"] = {
-                "first_name": name_parts[0] if name_parts else "",
-                "last_name":  " ".join(name_parts[1:]) if len(name_parts) > 1 else "",
-                "mobile":     customer_info.get("phone", ""),
-                "email":      customer_info.get("email", ""),
-            }
+            salla_cid = customer_info.get("salla_customer_id")
+            if salla_cid:
+                # Use existing Salla customer — no need to send raw fields
+                payload["customer"] = {"id": int(salla_cid)}
+            else:
+                name_parts = (customer_info.get("name") or "").split()
+                cust: dict = {
+                    "first_name": name_parts[0] if name_parts else "",
+                    "last_name":  " ".join(name_parts[1:]) if len(name_parts) > 1 else "",
+                    "mobile":     customer_info.get("phone", ""),
+                }
+                email = (customer_info.get("email") or "").strip()
+                if email:
+                    cust["email"] = email
+                payload["customer"] = cust
         return await self._request("POST", "/orders", json=payload)
+
+    async def create_order_item(
+        self,
+        order_id: int,
+        identifier: int,
+        quantity: int = 1,
+        identifier_type: str = "id",
+        branch_id: Optional[int] = None,
+        options: Optional[list] = None,
+        name: Optional[str] = None,
+        price: Optional[float] = None,
+        cost_price: Optional[float] = None,
+        weight: Optional[float] = None,
+        weight_type: Optional[str] = None,
+    ) -> dict:
+        """
+        Add a product item to an existing order using:
+        POST /admin/v2/orders/items
+
+        Docs: https://docs.salla.dev — Order Items → Create Order Item
+        Scope required: orders.read_write
+
+        Args:
+            order_id        : The order ID to add the item to.
+            identifier      : Product ID (or SKU if identifier_type='sku').
+            quantity        : Number of units to add (default 1).
+            identifier_type : 'id' (default) or 'sku'.
+            branch_id       : Optional branch ID.
+            options         : List of option dicts [{id, value:[...]}].
+            name            : Optional custom product name override.
+            price           : Optional unit price override.
+            cost_price      : Optional cost price override.
+            weight          : Optional weight value.
+            weight_type     : Optional weight unit (e.g. 'g', 'kg').
+        Returns:
+            Full Salla API response dict with data[] list of created OrderItem objects.
+        """
+        payload: dict = {
+            "order_id":       order_id,
+            "identifier_type": identifier_type,
+            "identifier":     identifier,
+            "quantity":       quantity,
+        }
+        if branch_id is not None:
+            payload["branch_id"] = branch_id
+        if options:
+            payload["options"] = options
+        if name:
+            payload["name"] = name
+        if price is not None:
+            payload["price"] = price
+        if cost_price is not None:
+            payload["cost_price"] = cost_price
+        if weight is not None:
+            payload["weight"] = weight
+        if weight_type:
+            payload["weight_type"] = weight_type
+
+        return await self._request("POST", "/orders/items", json=payload)
+
+    # ── Invoice endpoints ─────────────────────────────────────────────────────
+
+    async def get_invoice(self, invoice_id: int) -> dict:
+        """
+        Fetch a specific invoice's full details.
+        GET /admin/v2/orders/invoices/{invoice_id}
+
+        Scope required: orders.read
+
+        Returns InvoiceDetails object containing:
+          id, invoice_number, uuid, order_id, type, date, qr_code,
+          payment_method, subtotal, shipping_cost, cod_cost,
+          discount, tax, total, items[]
+        """
+        return await self._request("GET", f"/orders/invoices/{invoice_id}")
+
+    async def list_order_invoices(self, order_id: int) -> dict:
+        """
+        List invoices attached to a specific order.
+        GET /admin/v2/orders/{order_id}/invoices
+
+        Scope required: orders.read
+        """
+        return await self._request("GET", f"/orders/{order_id}/invoices")
 
     # ── Customer endpoints ────────────────────────────────────────────────────
 
+    async def get_customer(self, customer_id: int, fields: list[str] = None) -> dict:
+        """
+        Fetch a specific customer's full details.
+        GET /admin/v2/customers/{customer_id}
+
+        Scope required: customers.read
+
+        Args:
+            customer_id : Salla customer ID.
+            fields      : Optional extra fields to include in the response.
+                          Allowed: is_blocked, is_whitelisted, block_reason,
+                          is_inactive, orders_count, orders_amount,
+                          orders_average, orders_complete_ratio,
+                          orders_cancel_ratio, orders_cancel, latest_purchase,
+                          abandoned_carts_items, wallet_balance, total_points,
+                          country_id, custom_fields, current_store_customer,
+                          is_orders_rated, is_notifications_enabled
+        Returns:
+            Full Salla API response with Customer object.
+        """
+        params: dict = {}
+        if fields:
+            # Salla expects: ?fields[]=is_blocked&fields[]=orders_count …
+            params["fields[]"] = fields
+        return await self._request("GET", f"/customers/{customer_id}", params=params)
+
     async def get_customer_by_phone(self, phone: str) -> dict:
+        """Search customers by phone number (keyword search)."""
         return await self._request("GET", "/customers", params={"keyword": phone})
 
     # ── Abandoned Carts endpoints ──────────────────────────────────────────────

@@ -128,6 +128,16 @@ export const api = {
   testPricing: (storeId: string, payload: Record<string, unknown>) =>
     post<Record<string, unknown>>(`/admin/${storeId}/settings/pricing/test`, payload),
 
+  // AI brain (store knowledge / memory)
+  getBrain: (storeId: string) =>
+    get<BrainData>(`/admin/${storeId}/settings/brain`),
+  setBrain: (storeId: string, custom_knowledge: string) =>
+    put(`/admin/${storeId}/settings/brain`, { custom_knowledge }),
+  retrainBrain: (storeId: string) =>
+    post<{ products_synced: number; categories: number; overview: BrainOverview; message: string }>(
+      `/admin/${storeId}/settings/brain/retrain`,
+    ),
+
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
@@ -284,6 +294,28 @@ export interface AIConfig {
   ai_model: string
   bot_name: string
   provider: 'groq' | 'anthropic' | 'openai' | 'env'
+}
+
+// ── AI Brain / store knowledge ─────────────────────────────────────────────
+
+export interface BrainOverview {
+  total_products: number
+  available_products: number
+  categories: number
+  currency: string
+  min_price: number | null
+  max_price: number | null
+  avg_price: number | null
+  top_categories: { name: string; count: number }[]
+  last_sync: string
+}
+
+export interface BrainData {
+  overview: BrainOverview
+  knowledge_chars: number
+  knowledge_budget: number
+  custom_knowledge: string
+  knowledge_preview: string
 }
 
 // ── Printing calculator config ─────────────────────────────────────────────

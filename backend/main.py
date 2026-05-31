@@ -28,6 +28,7 @@ from store_sync import sync_store
 from salla_oauth import get_auth_url, exchange_code, save_tokens
 import conversation_store as cs
 import pricing_calculator as pc
+import store_brain as brain
 
 # ── Simple in-memory rate limiter for login endpoints ─────────────────────────
 _login_attempts: dict = _collections.defaultdict(list)   # ip → [timestamp, …]
@@ -692,6 +693,67 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
     await db.save_ai_config(store_id, config)
 
     return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي ✅"}
+
+
+# ── Settings: AI Brain (custom knowledge + memory preview) ───────────────────
+
+class CustomKnowledgeRequest(BaseModel):
+    custom_knowledge: str = ""
+
+
+@app.get("/admin/{store_id}/settings/brain")
+async def get_ai_brain(store_id: str):
+    """
+    Return what the AI 'knows' about this store: overview stats, the
+    admin's custom knowledge text, and a preview of the full knowledge
+    block injected into the system prompt.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    return brain.preview_knowledge(store_id)
+
+
+@app.put("/admin/{store_id}/settings/brain")
+async def update_ai_brain(store_id: str, req: CustomKnowledgeRequest):
+    """
+    Save the admin's custom-knowledge text. The next chat turn will see
+    it in the system prompt (no agent restart needed since get_system_prompt
+    is called fresh each turn).
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    brain.set_custom_knowledge(store_id, req.custom_knowledge)
+    # Persist to DB so it survives deploys
+    tokens = sm.get_store_info(store_id)
+    await db.save_store(store_id, tokens)
+    await db.save_ai_config(store_id, sm.get_ai_config(store_id))
+    return {"status": "ok", "message": "تم حفظ ذاكرة المتجر ✅"}
+
+
+@app.post("/admin/{store_id}/settings/brain/retrain")
+async def retrain_ai_brain(store_id: str):
+    """
+    Force a fresh re-sync of the store's products from Salla so the AI
+    'memory' reflects the latest catalog. Returns the resulting overview.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    token = sm.get_access_token(store_id)
+    if not token:
+        raise HTTPException(400, "لا يوجد access token — لا يمكن المزامنة")
+    try:
+        data = await sync_store(token, store_id)
+        # Reset the agent so the new catalog is picked up next chat
+        sm.reset_agent(store_id)
+        return {
+            "status":          "ok",
+            "products_synced": data.get("products_count", 0),
+            "categories":      len(data.get("categories", [])),
+            "overview":        brain.get_overview(store_id),
+            "message":         "تم تحديث ذاكرة المتجر بأحدث المنتجات ✅",
+        }
+    except Exception as e:
+        raise HTTPException(500, f"فشل التحديث: {type(e).__name__}: {e}")
 
 
 # ── Settings: Pricing config (for the printing calculator) ───────────────────
