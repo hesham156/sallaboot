@@ -181,11 +181,13 @@ export interface StoreInfo {
 
 export interface ConvSummary {
   session_id: string
-  store_id: string
+  store_id?: string
   created_at: string
-  updated_at: string
-  message_count: number
-  last_message: string
+  last_activity: string
+  messages_count: number
+  user_messages_count?: number
+  // Backend returns the last message as a full object (kept for legacy admin.html compat)
+  last_message: Message | null
   bot_enabled: boolean
   unread: boolean
   rating?: number

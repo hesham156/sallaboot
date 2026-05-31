@@ -79,7 +79,7 @@ export default function Conversations({ storeId }: Props) {
   const filtered = search
     ? convs.filter(c =>
         c.session_id.includes(search) ||
-        c.last_message?.toLowerCase().includes(search.toLowerCase())
+        c.last_message?.content?.toLowerCase().includes(search.toLowerCase())
       )
     : convs
 
@@ -159,14 +159,18 @@ export default function Conversations({ storeId }: Props) {
                         </Chip>
                       )}
                     </div>
-                    <p className="text-sm text-default-300 truncate">{c.last_message || '—'}</p>
+                    <p className="text-sm text-default-300 truncate">
+                      {c.last_message?.content
+                        ? `${c.last_message.role === 'user' ? '👤' : c.last_message.role === 'admin' ? '👨‍💼' : '🤖'} ${c.last_message.content}`
+                        : '—'}
+                    </p>
                   </div>
                   <div className="text-left flex-shrink-0">
                     <p className="text-xs text-default-500">
-                      {new Date(c.updated_at).toLocaleDateString('ar-SA')}
+                      {new Date(c.last_activity).toLocaleDateString('ar-SA')}
                     </p>
                     <p className="text-xs text-default-500 mt-0.5">
-                      {c.message_count} رسالة
+                      {c.messages_count} رسالة
                     </p>
                   </div>
                 </div>
