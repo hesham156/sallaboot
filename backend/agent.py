@@ -848,7 +848,7 @@ class PrintingAgent:
 
     # ── Groq (Llama 3.3-70b) ──────────────────────────────────────────────────
     async def _chat_groq(self, message: str, session_id: str) -> str:
-        cs.add_message(session_id, "user", message, self.store_id)
+        await cs.add_message(session_id, "user", message, self.store_id)
         history = cs.get_groq_history(session_id)
 
         groq_tools = [
@@ -907,7 +907,7 @@ class PrintingAgent:
             reply = _clean_reply(msg.content or "")
             if not reply:
                 reply = "عذراً، لم أستطع معالجة طلبك."
-            cs.add_message(session_id, "assistant", reply, self.store_id)
+            await cs.add_message(session_id, "assistant", reply, self.store_id)
             return reply
 
     # ── OpenAI (GPT) ──────────────────────────────────────────────────────────
@@ -917,7 +917,7 @@ class PrintingAgent:
         Uses the same OpenAI function-calling format as Groq — the two APIs
         are fully wire-compatible so the implementation is nearly identical.
         """
-        cs.add_message(session_id, "user", message, self.store_id)
+        await cs.add_message(session_id, "user", message, self.store_id)
         history = cs.get_groq_history(session_id)
 
         # Convert tools to OpenAI function-calling format
@@ -980,12 +980,12 @@ class PrintingAgent:
             reply = _clean_reply(msg.content or "")
             if not reply:
                 reply = "عذراً، لم أستطع معالجة طلبك. حاول مرة أخرى."
-            cs.add_message(session_id, "assistant", reply, self.store_id)
+            await cs.add_message(session_id, "assistant", reply, self.store_id)
             return reply
 
     # ── Anthropic (Claude) ────────────────────────────────────────────────────
     async def _chat_anthropic(self, message: str, session_id: str) -> str:
-        cs.add_message(session_id, "user", message, self.store_id)
+        await cs.add_message(session_id, "user", message, self.store_id)
         # get_groq_history returns [{role, content: str}] — valid for Anthropic too
         # (Anthropic accepts plain string content; tool-call turns are ephemeral
         #  per request and are NOT persisted to the conversation store)
@@ -1023,7 +1023,7 @@ class PrintingAgent:
             if not reply:
                 reply = "عذراً، لم أستطع معالجة طلبك. حاول مرة أخرى."
 
-            cs.add_message(session_id, "assistant", reply, self.store_id)
+            await cs.add_message(session_id, "assistant", reply, self.store_id)
             return reply
 
 

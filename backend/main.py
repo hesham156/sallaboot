@@ -1030,7 +1030,7 @@ async def store_conversation_detail(store_id: str, session_id: str):
 async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyRequest):
     if not req.message.strip():
         raise HTTPException(400, "الرسالة فارغة")
-    msg = cs.add_message(session_id, "admin", req.message.strip(), store_id)
+    msg = await cs.add_message(session_id, "admin", req.message.strip(), store_id)
     cs.mark_admin_read(session_id)
     return {"status": "sent", "message": msg}
 
@@ -1039,13 +1039,15 @@ async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyReque
 async def store_takeover(store_id: str, session_id: str):
     cs.set_session_bot(session_id, False)
     cs.mark_admin_read(session_id)
+    # Persist the bot_enabled change so it survives restart
+    await cs.flush(session_id)
     return {"status": "ok", "bot_enabled": False, "session_id": session_id}
 
 
 @app.post("/admin/{store_id}/conversations/{session_id}/handback")
 async def store_handback(store_id: str, session_id: str):
     cs.set_session_bot(session_id, True)
-    cs.add_message(session_id, "admin",
+    await cs.add_message(session_id, "admin",
                    "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
                    store_id)
     return {"status": "ok", "bot_enabled": True, "session_id": session_id}
@@ -1672,7 +1674,7 @@ async def chat(req: ChatRequest):
     bot_on     = cs.is_bot_enabled(session_id)
 
     if not bot_on:
-        cs.add_message(session_id, "user", req.message, store_id)
+        await cs.add_message(session_id, "user", req.message, store_id)
         return ChatResponse(
             reply="شكراً لرسالتك، سيتواصل معك أحد أعضاء فريق الدعم قريباً. 👨‍💼",
             session_id=session_id,
@@ -1723,7 +1725,7 @@ async def chat(req: ChatRequest):
                 "عذراً، المتجر غير مُعدّ بعد. "
                 "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
             )
-            cs.add_message(session_id, "assistant", err_reply, store_id)
+            await cs.add_message(session_id, "assistant", err_reply, store_id)
             return ChatResponse(
                 reply=err_reply,
                 session_id=session_id,
@@ -1766,7 +1768,7 @@ async def chat(req: ChatRequest):
         else:
             friendly = "عذراً، حدث خطأ مؤقت في معالجة طلبك. يرجى المحاولة مرة أخرى. 🙏"
 
-        cs.add_message(session_id, "assistant", friendly, store_id)
+        await cs.add_message(session_id, "assistant", friendly, store_id)
         return ChatResponse(
             reply=friendly,
             session_id=session_id,
@@ -1791,7 +1793,7 @@ async def chat_rate(req: RateRequest):
     """Customer rates a conversation 1-5 stars."""
     if not 1 <= req.rating <= 5:
         raise HTTPException(400, "التقييم يجب أن يكون بين 1 و 5")
-    cs.set_rating(req.session_id, req.rating, req.comment)
+    await cs.set_rating(req.session_id, req.rating, req.comment)
     return {"status": "ok", "message": "شكراً لتقييمك! 😊"}
 
 

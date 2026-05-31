@@ -135,9 +135,10 @@ def pop_last_component(session_id: str):
     return comp
 
 
-def add_message(session_id: str, role: str, content: str, store_id: str = "default") -> dict:
+async def add_message(session_id: str, role: str, content: str, store_id: str = "default") -> dict:
     """
-    Append a message to the conversation.
+    Append a message to the conversation and AWAIT the DB persist.
+
     role: 'user' | 'assistant' | 'admin'
 
     store_id resolution: if a non-default store_id is passed and the existing
@@ -145,6 +146,11 @@ def add_message(session_id: str, role: str, content: str, store_id: str = "defau
     the conversation appears in the correct admin dashboard. Without this, a
     conversation that was first touched by a legacy caller (no store_id) would
     stay stuck under "default" forever — invisible to every real admin.
+
+    Persistence: this function awaits the DB write so messages reliably
+    survive deploys/restarts. Previously db.fire() (fire-and-forget) was
+    used, which silently lost data when the write failed or the server
+    restarted before the background task completed.
     """
     conv = get_or_create(session_id, store_id)
     # Upgrade stale "default" tag to the real store_id passed by an explicit caller
@@ -158,8 +164,12 @@ def add_message(session_id: str, role: str, content: str, store_id: str = "defau
         # Queue for widget polling
         conv["pending_for_widget"].append({"content": content, "ts": msg["ts"]})
 
-    # Persist to DB (fire-and-forget — safe inside FastAPI event loop)
-    db.fire(db.save_conversation(session_id, conv.get("store_id", store_id), conv))
+    # AWAIT the DB write — guarantees persistence before returning to caller
+    try:
+        await db.save_conversation(session_id, conv.get("store_id", store_id), conv)
+    except Exception as exc:
+        # Log loudly but don't break the chat flow if DB is temporarily down
+        print(f"[conversation_store] ❌ Failed to persist message for {session_id!r}: {exc}")
 
     return msg
 
@@ -256,13 +266,31 @@ def has_unread_user_messages(session_id: str) -> bool:
 # Query helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def set_rating(session_id: str, rating: int, comment: str = ""):
-    """Save a customer rating (1-5) for a conversation."""
+async def set_rating(session_id: str, rating: int, comment: str = ""):
+    """Save a customer rating (1-5) for a conversation. Awaits the DB write."""
     conv = _conversations.get(session_id)
     if conv:
         conv["rating"]         = max(1, min(5, int(rating)))
         conv["rating_comment"] = comment
-        db.fire(db.save_conversation(session_id, conv.get("store_id", "default"), conv))
+        try:
+            await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
+        except Exception as exc:
+            print(f"[conversation_store] ❌ Failed to persist rating for {session_id!r}: {exc}")
+
+
+async def flush(session_id: str):
+    """
+    Persist any pending mutations (cart changes, customer info, last_component,
+    bot_enabled toggles) to the DB. Call after a series of state changes that
+    don't go through add_message — e.g. after a cart-only tool call.
+    """
+    conv = _conversations.get(session_id)
+    if not conv:
+        return
+    try:
+        await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
+    except Exception as exc:
+        print(f"[conversation_store] ❌ Failed to flush {session_id!r}: {exc}")
 
 
 def all_conversations() -> dict:
