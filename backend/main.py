@@ -326,6 +326,13 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     store_id: Optional[str] = "default"
+    # Salla storefront SDK passes the logged-in customer's ID here. When
+    # present, the backend looks up the customer's profile from Salla
+    # (name, phone, email, city, gender) and links any future conversation
+    # to it — so the same customer's chat history follows them across
+    # devices and re-opens.
+    customer_id: Optional[str] = None
+    customer_name: Optional[str] = None   # widget hint when SDK has it
 
 
 class ChatResponse(BaseModel):
@@ -1215,6 +1222,7 @@ async def store_conversations(
     ?limit=100&offset=0 — paginated, newest-first.
     Response: {total: int, conversations: [...]}
     """
+    await cs.get_all_conversations_for_store(store_id)
     return cs.summary_list(store_id, limit=limit, offset=offset)
 
 
@@ -1955,6 +1963,58 @@ async def salla_callback(code: str = "", error: str = ""):
         )
 
 
+# ── Chat helpers ───────────────────────────────────────────────────────────────
+
+async def _fetch_salla_customer(store_id: str, customer_id: str,
+                                  fallback_name: str = "") -> dict:
+    """
+    Pull a customer's full profile from Salla's /customers/{id} and
+    normalise it to the fields conversation_store.customer_info expects.
+    Never raises — returns a minimal {name: fallback_name} on any error
+    so chat flow keeps working even if Salla is down or the scope is missing.
+    """
+    name = (fallback_name or "").strip()
+    base = {"name": name} if name else {}
+    if not customer_id:
+        return base
+
+    token = sm.get_access_token(store_id)
+    if not token:
+        return base
+
+    try:
+        from salla_client import SallaClient
+        client = SallaClient(token, store_id=store_id)
+        resp   = await client.get_customer(int(customer_id))
+        c      = resp.get("data") or {}
+    except Exception as exc:
+        print(f"[chat] customer lookup failed for {customer_id}: {exc}")
+        return base
+
+    if not c:
+        return base
+
+    first = (c.get("first_name") or "").strip()
+    last  = (c.get("last_name") or "").strip()
+    full_name = (first + " " + last).strip() or name or f"عميل #{customer_id}"
+
+    mobile_code = str(c.get("mobile_code", "") or "")
+    mobile      = str(c.get("mobile", "") or "")
+    phone       = (f"+{mobile_code}{mobile}" if mobile_code and mobile else mobile) or ""
+
+    return {
+        "name":     full_name,
+        "phone":    phone,
+        "email":    c.get("email", "") or "",
+        "city":     c.get("city", "") or "",
+        "country":  c.get("country", "") or "",
+        "avatar":   c.get("avatar", "") or "",
+        "gender":   c.get("gender", "") or "",
+        # IDs go in their own field — keep "name" clean for display
+        "salla_customer_id": str(c.get("id") or customer_id),
+    }
+
+
 # ── Chat ───────────────────────────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
@@ -1969,8 +2029,39 @@ async def chat(req: ChatRequest):
     if "{{" in store_id or "}}" in store_id:
         store_id = "default"
 
-    session_id = req.session_id or str(uuid.uuid4())
+    # ── Customer identity (when the widget runs on a Salla store and the
+    # visitor is logged in, the SDK gives us a stable customer_id). We use
+    # it to resume the customer's previous conversation and to look up their
+    # name / phone / email from Salla so the admin sees a real person, not
+    # an anonymous session id. ────────────────────────────────────────────
+    raw_cid = (req.customer_id or "").strip()
+    if raw_cid in ("0", "null", "undefined") or "{{" in raw_cid:
+        raw_cid = ""
+
+    # If the widget didn't send a session_id but we know the customer,
+    # try to resume their newest conversation in this store.
+    if raw_cid and not req.session_id:
+        resumed = await cs.find_session_by_customer_db(store_id, raw_cid)
+        if resumed:
+            session_id = resumed
+            print(f"[chat] 🔄 Resumed session {session_id} for customer {raw_cid}")
+        else:
+            session_id = str(uuid.uuid4())
+    else:
+        session_id = req.session_id or str(uuid.uuid4())
+
     await cs.restore_to_memory(session_id)
+
+    # Link customer (cheap if already linked — overwrites only when empty)
+    if raw_cid:
+        conv_now = cs.all_conversations().get(session_id) or cs.get_or_create(session_id, store_id)
+        if str(conv_now.get("salla_customer_id", "")) != raw_cid:
+            # First time seeing this customer in this session — fetch their
+            # full profile from Salla and persist
+            customer_data = await _fetch_salla_customer(store_id, raw_cid, req.customer_name)
+            cs.link_customer(session_id, raw_cid, customer_data)
+            await cs.flush(session_id)
+
     bot_on     = cs.is_bot_enabled(session_id)
 
     if not bot_on:

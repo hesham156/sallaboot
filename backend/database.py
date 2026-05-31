@@ -172,6 +172,35 @@ async def _create_tables():
         """)
 
 
+# ── Conversation lookups by customer ────────────────────────────────────────
+
+async def find_session_by_salla_customer(store_id: str, salla_customer_id: str) -> str | None:
+    """
+    Find the most-recently-active session for a given Salla customer in a
+    store. Uses a JSONB path query so it doesn't need a dedicated column —
+    cheap enough at small scale; add an expression index on
+    (store_id, data->>'salla_customer_id') if this gets slow.
+    """
+    if not _pool or not salla_customer_id:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT session_id FROM conversations
+                WHERE store_id = $1
+                  AND data->>'salla_customer_id' = $2
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                store_id, str(salla_customer_id),
+            )
+        return row["session_id"] if row else None
+    except Exception as e:
+        print(f"[db] find_session_by_salla_customer error: {e}")
+        return None
+
+
 # ── Webhook log (debugging + audit trail) ───────────────────────────────────
 
 async def log_webhook(*, store_id: str = "", event: str = "", status: str = "ok",

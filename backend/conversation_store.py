@@ -58,13 +58,90 @@ def get_or_create(session_id: str, store_id: str = "default") -> dict:
             "last_admin_read": "",
             # ── Shopping cart ──────────────────────────────────────────
             "cart": [],             # [{product_id, name, price, currency, image, url, quantity, notes}]
-            "customer_info": {},    # {name, phone, email}
+            "customer_info": {},    # {name, phone, email, city, country, avatar, gender}
+            "salla_customer_id": "", # links the conversation to a logged-in Salla customer
             "last_component": None, # last structured component for the widget
             # ── Rating ────────────────────────────────────────────────
             "rating": None,         # 1-5 or None
             "rating_comment": "",
         }
     return _conversations[session_id]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Customer ↔ session lookup
+# ─────────────────────────────────────────────────────────────────────────────
+
+def find_session_by_customer(store_id: str, salla_customer_id: str | int) -> str | None:
+    """
+    Return the most-recent session_id for the given Salla customer in this
+    store, or None. Used by the chat endpoint so a logged-in customer
+    re-opening the widget on a different device picks up their thread
+    instead of starting a new one.
+
+    In-memory scan — fine up to ~10K conversations. Move to a DB index
+    if/when we get past that.
+    """
+    cid = str(salla_customer_id or "").strip()
+    if not cid:
+        return None
+    matches = [
+        (sid, conv) for sid, conv in _conversations.items()
+        if str(conv.get("salla_customer_id", "")) == cid
+        and conv.get("store_id", "default") == store_id
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda kv: kv[1].get("last_activity", ""), reverse=True)
+    return matches[0][0]
+
+
+async def find_session_by_customer_db(store_id: str, salla_customer_id: str | int) -> str | None:
+    """
+    Same as find_session_by_customer but falls back to the DB when memory
+    misses (e.g. fresh process that hasn't loaded the conversation yet).
+    Returns the newest matching session_id.
+    """
+    in_mem = find_session_by_customer(store_id, salla_customer_id)
+    if in_mem:
+        return in_mem
+    if not db.available():
+        return None
+    cid = str(salla_customer_id or "").strip()
+    if not cid:
+        return None
+    try:
+        sid = await db.find_session_by_salla_customer(store_id, cid)
+    except Exception as exc:
+        print(f"[conversation_store] find_session_by_customer_db error: {exc}")
+        return None
+    if sid:
+        # Warm into memory for next call
+        await restore_to_memory(sid)
+    return sid
+
+
+def link_customer(session_id: str, salla_customer_id: str | int,
+                  customer_data: dict | None = None) -> None:
+    """
+    Attach a Salla customer to a conversation. customer_data should be the
+    /customers/{id} response normalised to:
+      {name, phone, email, city, country, avatar, gender, mobile_code}
+    Anything missing stays missing — never overwrites with empty strings.
+    """
+    conv = _conversations.get(session_id)
+    if not conv:
+        return
+    cid = str(salla_customer_id or "").strip()
+    if cid:
+        conv["salla_customer_id"] = cid
+    if customer_data:
+        info = conv.get("customer_info") or {}
+        for k, v in customer_data.items():
+            if v:  # non-empty wins
+                info[k] = v
+        conv["customer_info"] = info
+    mark_dirty(session_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -414,18 +491,18 @@ async def get_all_conversations_for_store(store_id: str) -> dict[str, dict]:
     Get all conversations for a specific store, combining database records
     and active in-memory sessions (in-memory takes priority for active sessions).
     """
-    db_convs = {}
     if db.available():
         rows = await db.load_store_conversations(store_id, limit=2000)
         for r in rows:
-            db_convs[r["session_id"]] = r["data"]
+            sid = r["session_id"]
+            if sid not in _conversations:
+                _conversations[sid] = r["data"]
 
-    # Merge with memory
-    for sid, conv in _conversations.items():
-        if conv.get("store_id", "default") == store_id:
-            db_convs[sid] = conv
-
-    return db_convs
+    return {
+        sid: conv
+        for sid, conv in _conversations.items()
+        if conv.get("store_id", "default") == store_id
+    }
 
 
 async def load_conversations_from_db():
@@ -473,6 +550,7 @@ def summary_list(
         last = msgs[-1] if msgs else None
         user_count = sum(1 for m in msgs if m["role"] == "user")
         unread = has_unread_user_messages(sid)
+        cust = conv.get("customer_info") or {}
         result.append({
             "session_id":         sid,
             "messages_count":     len(msgs),
@@ -483,6 +561,12 @@ def summary_list(
             "created_at":         conv["created_at"],
             "unread":             unread,
             "rating":             conv.get("rating"),
+            # ── Customer identity (for admin list view) ──
+            "salla_customer_id":  conv.get("salla_customer_id", ""),
+            "customer_name":      cust.get("name", ""),
+            "customer_phone":     cust.get("phone", ""),
+            "customer_email":     cust.get("email", ""),
+            "customer_avatar":    cust.get("avatar", ""),
         })
     result.sort(key=lambda x: x["last_activity"], reverse=True)
     total = len(result)
