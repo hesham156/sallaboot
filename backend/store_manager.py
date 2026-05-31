@@ -158,6 +158,7 @@ def _register_memory(store_id: str, access_token: str, refresh_token: str = "", 
         "store_avatar":  info.get("avatar", existing.get("store_avatar", "")),
         "store_url":     info.get("url",    existing.get("store_url",    "")),
         "connected_at":  existing.get("connected_at") or info.get("connected_at") or datetime.datetime.utcnow().isoformat(),
+        "bot_enabled":   info.get("bot_enabled", existing.get("bot_enabled", True)),
     }
     if store_id in _registry:
         _registry[store_id]["tokens"] = tokens
@@ -193,6 +194,7 @@ def register_store(
         # Preserve existing password hash and AI config
         "admin_password_hash": existing.get("admin_password_hash", ""),
         "ai_config":           existing.get("ai_config", {}),
+        "bot_enabled":         info.get("bot_enabled", existing.get("bot_enabled", True)),
     }
 
     # Auto-set initial password = store_id on first registration
@@ -200,6 +202,7 @@ def register_store(
         from auth import hash_password
         tokens["admin_password_hash"] = hash_password(str(store_id))
         print(f"[store_manager] Initial password for {store_id!r} set to store_id")
+
 
     if store_id in _registry:
         _registry[store_id]["tokens"] = tokens

@@ -1026,11 +1026,7 @@ async def store_analytics(store_id: str):
     now_utc = _dtt.datetime.utcnow()
 
     # ── Conversations ──────────────────────────────────────────────────────────
-    all_convs = {
-        sid: conv
-        for sid, conv in cs.all_conversations().items()
-        if conv.get("store_id", "default") == store_id
-    }
+    all_convs = await cs.get_all_conversations_for_store(store_id)
 
     total_convs   = len(all_convs)
     today_convs   = 0
@@ -1154,11 +1150,7 @@ async def store_insights(store_id: str):
     """
     import conversation_analyzer as ca
 
-    all_convs = {
-        sid: conv
-        for sid, conv in cs.all_conversations().items()
-        if conv.get("store_id", "default") == store_id
-    }
+    all_convs = await cs.get_all_conversations_for_store(store_id)
 
     return ca.analyze_insights(all_convs)
 
@@ -1223,6 +1215,7 @@ async def all_conversations_superadmin(
 
 @app.get("/admin/{store_id}/conversations/{session_id}")
 async def store_conversation_detail(store_id: str, session_id: str):
+    await cs.restore_to_memory(session_id)
     cs.mark_admin_read(session_id)
     conv = cs.all_conversations().get(session_id)
     if not conv:
@@ -1234,6 +1227,7 @@ async def store_conversation_detail(store_id: str, session_id: str):
 async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyRequest):
     if not req.message.strip():
         raise HTTPException(400, "الرسالة فارغة")
+    await cs.restore_to_memory(session_id)
     msg = await cs.add_message(session_id, "admin", req.message.strip(), store_id)
     cs.mark_admin_read(session_id)
     return {"status": "sent", "message": msg}
@@ -1241,6 +1235,7 @@ async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyReque
 
 @app.post("/admin/{store_id}/conversations/{session_id}/takeover")
 async def store_takeover(store_id: str, session_id: str):
+    await cs.restore_to_memory(session_id)
     cs.set_session_bot(session_id, False)
     cs.mark_admin_read(session_id)
     # Persist the bot_enabled change so it survives restart
@@ -1250,6 +1245,7 @@ async def store_takeover(store_id: str, session_id: str):
 
 @app.post("/admin/{store_id}/conversations/{session_id}/handback")
 async def store_handback(store_id: str, session_id: str):
+    await cs.restore_to_memory(session_id)
     cs.set_session_bot(session_id, True)
     await cs.add_message(session_id, "admin",
                    "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
@@ -1935,6 +1931,7 @@ async def chat(req: ChatRequest):
         store_id = "default"
 
     session_id = req.session_id or str(uuid.uuid4())
+    await cs.restore_to_memory(session_id)
     bot_on     = cs.is_bot_enabled(session_id)
 
     if not bot_on:
@@ -2057,6 +2054,7 @@ async def chat_rate(req: RateRequest):
     """Customer rates a conversation 1-5 stars."""
     if not 1 <= req.rating <= 5:
         raise HTTPException(400, "التقييم يجب أن يكون بين 1 و 5")
+    await cs.restore_to_memory(req.session_id)
     await cs.set_rating(req.session_id, req.rating, req.comment)
     return {"status": "ok", "message": "شكراً لتقييمك! 😊"}
 
@@ -2064,6 +2062,7 @@ async def chat_rate(req: RateRequest):
 @app.get("/chat/poll")
 async def chat_poll(session_id: str):
     """Widget polls this endpoint to receive admin messages in real time."""
+    await cs.restore_to_memory(session_id)
     pending = cs.pop_pending_for_widget(session_id)
     bot_on  = cs.is_bot_enabled(session_id)
     return {"messages": pending, "bot_enabled": bot_on}

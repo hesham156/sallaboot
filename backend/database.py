@@ -497,6 +497,59 @@ async def load_conversations(limit: int = 500) -> list:
         return []
 
 
+async def load_store_conversations(store_id: str, limit: int = 2000) -> list:
+    """
+    Load the most recent `limit` conversations for a specific store from the DB.
+    Returns list of {session_id, store_id, data}.
+    """
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT session_id, store_id, data
+                FROM conversations
+                WHERE store_id = $1
+                ORDER BY updated_at DESC
+                LIMIT $2
+                """,
+                store_id,
+                limit,
+            )
+        return [
+            {
+                "session_id": r["session_id"],
+                "store_id":   r["store_id"],
+                "data":       dict(r["data"]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] load_store_conversations({store_id!r}) error: {e}")
+        return []
+
+
+
+async def load_conversation(session_id: str) -> dict | None:
+    """Load a specific conversation from the DB. Returns None if missing."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT data FROM conversations WHERE session_id = $1",
+                session_id,
+            )
+        if not row:
+            return None
+        return dict(row["data"])
+    except Exception as e:
+        print(f"[db] load_conversation({session_id!r}) error: {e}")
+        return None
+
+
+
 async def save_conversation(session_id: str, store_id: str, data: dict):
     """Upsert a full conversation state dict."""
     if not _pool:

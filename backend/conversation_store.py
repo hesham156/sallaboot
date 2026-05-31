@@ -169,6 +169,7 @@ async def add_message(session_id: str, role: str, content: str, store_id: str = 
     used, which silently lost data when the write failed or the server
     restarted before the background task completed.
     """
+    await restore_to_memory(session_id)
     conv = get_or_create(session_id, store_id)
     # Upgrade stale "default" tag to the real store_id passed by an explicit caller
     if store_id and store_id != "default" and conv.get("store_id", "default") == "default":
@@ -252,12 +253,18 @@ def set_bot_globally(enabled: bool):
 
 def get_store_bot(store_id: str) -> bool:
     """Return per-store bot enabled state (defaults to True)."""
-    return _store_bot_enabled.get(store_id, True)
+    import store_manager as sm
+    info = sm.get_store_info(store_id)
+    return info.get("bot_enabled", True)
 
 
 def set_store_bot(store_id: str, enabled: bool):
     """Enable/disable bot for a specific store only."""
-    _store_bot_enabled[store_id] = enabled
+    import store_manager as sm
+    if sm.is_registered(store_id):
+        tokens = sm.get_store_info(store_id)
+        tokens["bot_enabled"] = enabled
+        sm.register_store(store_id, tokens.get("access_token", ""), tokens.get("refresh_token", ""), tokens)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +275,7 @@ def mark_admin_read(session_id: str):
     conv = _conversations.get(session_id)
     if conv:
         conv["last_admin_read"] = _now()
+        mark_dirty(session_id)
 
 
 def has_unread_user_messages(session_id: str) -> bool:
@@ -356,6 +364,37 @@ async def flush_dirty() -> int:
 
 def all_conversations() -> dict:
     return _conversations
+
+
+async def restore_to_memory(session_id: str) -> bool:
+    """Restore a conversation from PostgreSQL to memory if it exists and is not already loaded."""
+    if session_id in _conversations:
+        return True
+    if db.available():
+        data = await db.load_conversation(session_id)
+        if data:
+            _conversations[session_id] = data
+            return True
+    return False
+
+
+async def get_all_conversations_for_store(store_id: str) -> dict[str, dict]:
+    """
+    Get all conversations for a specific store, combining database records
+    and active in-memory sessions (in-memory takes priority for active sessions).
+    """
+    db_convs = {}
+    if db.available():
+        rows = await db.load_store_conversations(store_id, limit=2000)
+        for r in rows:
+            db_convs[r["session_id"]] = r["data"]
+
+    # Merge with memory
+    for sid, conv in _conversations.items():
+        if conv.get("store_id", "default") == store_id:
+            db_convs[sid] = conv
+
+    return db_convs
 
 
 async def load_conversations_from_db():
