@@ -54,16 +54,26 @@ BASE_SYSTEM_PROMPT = """أنت مساعد مبيعات ذكي لمتجر طبا�
 • لا تتكلم عن أي شيء خارج نطاق المتجر"""
 
 
+async def get_system_prompt_async(store_id: str = "default") -> str:
+    """
+    Async system-prompt builder. Includes the bot_training rows the admin
+    added through "تدريب البوت" (instructions, FAQs, uploaded reference
+    files). Falls back to the sync version if anything goes wrong.
+    """
+    try:
+        knowledge = await brain.get_knowledge_for_prompt_async(store_id)
+    except Exception as exc:
+        print(f"[agent] get_knowledge_for_prompt_async failed for {store_id!r}: {exc}")
+        knowledge = ""
+    if knowledge:
+        return BASE_SYSTEM_PROMPT + "\n\n" + knowledge
+    return get_system_prompt(store_id)
+
+
 def get_system_prompt(store_id: str = "default") -> str:
     """
-    Build the AI system prompt with the store's "brain":
-      - overview (#products, categories, price range)
-      - custom knowledge typed by the admin (FAQs, policies, hours...)
-      - category map with examples
-      - top products until budget runs out
-
-    Falls back to the legacy flat product list if the brain module is
-    unavailable or fails, so behaviour never regresses.
+    Sync system-prompt builder (no training material). Used as a fallback
+    when the async path can't be taken — kept for backward compat.
     """
     try:
         knowledge = brain.get_knowledge_for_prompt(store_id)
@@ -1642,7 +1652,7 @@ class PrintingAgent:
             for t in TOOLS
         ]
 
-        messages = [{"role": "system", "content": get_system_prompt(self.store_id)}] + history
+        messages = [{"role": "system", "content": await get_system_prompt_async(self.store_id)}] + history
 
         tool_rounds = 0
         while True:
@@ -1712,7 +1722,7 @@ class PrintingAgent:
             for t in TOOLS
         ]
 
-        messages = [{"role": "system", "content": get_system_prompt(self.store_id)}] + history
+        messages = [{"role": "system", "content": await get_system_prompt_async(self.store_id)}] + history
 
         tool_rounds = 0
         while True:
@@ -1775,7 +1785,7 @@ class PrintingAgent:
             response = await self.ai.messages.create(
                 model=self._anthropic_model,
                 max_tokens=1024,
-                system=get_system_prompt(self.store_id),
+                system=await get_system_prompt_async(self.store_id),
                 tools=TOOLS,
                 messages=history,
             )

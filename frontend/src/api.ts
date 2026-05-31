@@ -140,6 +140,36 @@ export const api = {
       `/admin/${storeId}/settings/brain/retrain`,
     ),
 
+  // Bot training (admin's instructions, FAQs, uploaded files)
+  listTraining: (storeId: string) =>
+    get<{ count: number; items: TrainingEntry[] }>(
+      `/admin/${storeId}/settings/training`,
+    ),
+  addTextTraining: (storeId: string, payload: { kind: 'instruction' | 'faq'; title: string; content: string }) =>
+    post<{ id: number; message: string }>(
+      `/admin/${storeId}/settings/training/text`, payload,
+    ),
+  uploadTrainingFile: async (storeId: string, file: File, title = ''): Promise<{ id: number; filename: string; size_chars: number; warning?: string; message: string }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('title', title)
+    const token = getToken()
+    const res = await fetch(`/admin/${storeId}/settings/training/file`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+      throw new Error(err.detail || `HTTP ${res.status}`)
+    }
+    return res.json()
+  },
+  toggleTraining: (storeId: string, id: number, enabled: boolean) =>
+    req<{ status: string }>('PATCH', `/admin/${storeId}/settings/training/${id}`, { enabled }),
+  deleteTraining: (storeId: string, id: number) =>
+    req<{ status: string }>('DELETE', `/admin/${storeId}/settings/training/${id}`),
+
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
@@ -374,6 +404,18 @@ export interface StoreInfoSnapshot {
     youtube?: string; snapchat?: string; whatsapp?: string; instagram?: string
     appstore_link?: string; googleplay_link?: string
   }
+}
+
+export interface TrainingEntry {
+  id: number
+  kind: 'instruction' | 'faq' | 'file'
+  title: string
+  content: string
+  file_id: string
+  file_name: string
+  size_chars: number
+  enabled: boolean
+  created_at: string
 }
 
 export interface ShippingCompany {

@@ -11,6 +11,7 @@ import Orders        from './store/Orders'
 import AbandonedCarts from './store/AbandonedCarts'
 import Pricing       from './store/Pricing'
 import Brain         from './store/Brain'
+import Training      from './store/Training'
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -92,6 +93,14 @@ const NAV_ITEMS = [
     activeColor: 'text-purple-400',
     activeBg: 'bg-purple-500/10',
     activeBorder: 'border-r-purple-500',
+  },
+  {
+    key: 'training',
+    label: 'تدريب البوت',
+    icon: ['M12 14l9-5-9-5-9 5 9 5z', 'M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z'],
+    activeColor: 'text-fuchsia-400',
+    activeBg: 'bg-fuchsia-500/10',
+    activeBorder: 'border-r-fuchsia-500',
   },
   {
     key: 'settings',
@@ -273,6 +282,7 @@ export default function StoreDashboard() {
           <Route path="analytics"       element={<Analytics storeId={storeId} />} />
           <Route path="pricing"         element={<Pricing storeId={storeId} />} />
           <Route path="brain"           element={<Brain storeId={storeId} />} />
+          <Route path="training"        element={<Training storeId={storeId} />} />
           <Route path="settings"        element={<Settings storeId={storeId} />} />
         </Routes>
       </main>

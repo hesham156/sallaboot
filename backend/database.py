@@ -169,7 +169,117 @@ async def _create_tables():
                 value  JSONB NOT NULL DEFAULT '{}'::jsonb,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Bot training material — the admin's own instructions, FAQs,
+            -- and uploaded reference files. Injected into the AI system
+            -- prompt so the bot uses this content when answering customers.
+            CREATE TABLE IF NOT EXISTS bot_training (
+                id           BIGSERIAL PRIMARY KEY,
+                store_id     TEXT NOT NULL,
+                kind         TEXT NOT NULL,        -- 'instruction' | 'faq' | 'file'
+                title        TEXT NOT NULL,
+                content      TEXT NOT NULL DEFAULT '',
+                file_id      TEXT,                 -- FK-ish into uploads.file_id
+                file_name    TEXT,
+                size_chars   INTEGER NOT NULL DEFAULT 0,
+                enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_train_store_ts
+                ON bot_training (store_id, created_at DESC);
         """)
+
+
+# ── Bot training material ────────────────────────────────────────────────────
+
+async def list_training(store_id: str) -> list[dict]:
+    """Return all training entries for a store, newest first."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, kind, title, content, file_id, file_name,
+                       size_chars, enabled, created_at
+                FROM bot_training
+                WHERE store_id = $1
+                ORDER BY created_at DESC
+                """,
+                store_id,
+            )
+        return [
+            {
+                "id":         r["id"],
+                "kind":       r["kind"],
+                "title":      r["title"],
+                "content":    r["content"] or "",
+                "file_id":    r["file_id"] or "",
+                "file_name":  r["file_name"] or "",
+                "size_chars": int(r["size_chars"] or 0),
+                "enabled":    bool(r["enabled"]),
+                "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else "",
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] list_training error: {e}")
+        return []
+
+
+async def add_training(store_id: str, kind: str, title: str, content: str,
+                        file_id: str = "", file_name: str = "") -> int | None:
+    """Insert one training row. Returns the new id, or None on failure."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO bot_training
+                  (store_id, kind, title, content, file_id, file_name, size_chars)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
+                """,
+                store_id, kind, title, content or "",
+                file_id or None, file_name or None, len(content or ""),
+            )
+        return int(row["id"]) if row else None
+    except Exception as e:
+        print(f"[db] add_training error: {e}")
+        return None
+
+
+async def update_training_enabled(training_id: int, enabled: bool) -> bool:
+    """Toggle whether a training entry is included in the prompt."""
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE bot_training SET enabled = $1 WHERE id = $2",
+                enabled, int(training_id),
+            )
+        return True
+    except Exception as e:
+        print(f"[db] update_training_enabled error: {e}")
+        return False
+
+
+async def delete_training(training_id: int) -> tuple[bool, str | None]:
+    """Delete a training row. Returns (ok, deleted_file_id)."""
+    if not _pool:
+        return False, None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM bot_training WHERE id = $1 RETURNING file_id",
+                int(training_id),
+            )
+        return True, (row["file_id"] if row else None)
+    except Exception as e:
+        print(f"[db] delete_training error: {e}")
+        return False, None
 
 
 # ── Conversation lookups by customer ────────────────────────────────────────

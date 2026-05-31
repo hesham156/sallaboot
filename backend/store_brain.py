@@ -338,6 +338,25 @@ def search_by_category(store_id: str, category_name: str, limit: int = 20) -> li
 
 # ── Main public API: prompt builder ─────────────────────────────────────────
 
+async def get_knowledge_for_prompt_async(store_id: str) -> str:
+    """
+    Same as get_knowledge_for_prompt but additionally pulls bot_training
+    rows from the DB. Async because DB lookups need awaiting.
+    """
+    import bot_training as bt
+    base = get_knowledge_for_prompt(store_id)
+    try:
+        training = await bt.build_training_block(store_id)
+    except Exception as exc:
+        print(f"[store_brain] training block failed for {store_id!r}: {exc}")
+        training = ""
+    if training:
+        # Training comes RIGHT AFTER store profile + custom knowledge so the
+        # bot sees it before the bulkier product catalogue.
+        return base + "\n\n" + training if base else training
+    return base
+
+
 def get_knowledge_for_prompt(store_id: str) -> str:
     """
     Build the full knowledge block the AI agent injects into its system

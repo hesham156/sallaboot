@@ -834,6 +834,132 @@ async def retrain_ai_brain(store_id: str):
         raise HTTPException(500, f"فشل التحديث: {type(e).__name__}: {e}")
 
 
+# ── Bot training (admin teaches the AI: instructions, FAQs, files) ──────────
+
+class TrainingTextRequest(BaseModel):
+    kind:    str       # 'instruction' | 'faq'
+    title:   str       # short label / question
+    content: str       # body / answer
+    enabled: bool = True
+
+
+@app.get("/admin/{store_id}/settings/training")
+async def list_bot_training(store_id: str):
+    """List all training entries the admin has added for this store."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    items = await db.list_training(store_id)
+    return {"count": len(items), "items": items}
+
+
+@app.post("/admin/{store_id}/settings/training/text")
+async def add_text_training(store_id: str, req: TrainingTextRequest):
+    """Add a text training entry (instruction or FAQ)."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    if req.kind not in ("instruction", "faq"):
+        raise HTTPException(400, "kind must be 'instruction' or 'faq'")
+    title   = (req.title or "").strip()
+    content = (req.content or "").strip()
+    if not (title or content):
+        raise HTTPException(400, "العنوان أو المحتوى مطلوب")
+    new_id = await db.add_training(store_id, req.kind, title, content)
+    if new_id is None:
+        raise HTTPException(503, "تعذّر الحفظ — قاعدة البيانات غير متاحة")
+    sm.reset_agent(store_id)
+    return {"status": "ok", "id": new_id, "message": "تمت إضافة التدريب ✅"}
+
+
+@app.post("/admin/{store_id}/settings/training/file")
+async def upload_training_file(
+    store_id: str,
+    file:  UploadFile = File(...),
+    title: str        = Form(default=""),
+):
+    """
+    Upload a reference file (PDF / TXT / MD / CSV). The text is extracted
+    and stored alongside the binary so the AI can read it without parsing
+    PDF on every request.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    filename = file.filename or "training.bin"
+    suffix   = Path(filename).suffix.lower()
+    if suffix not in (".pdf", ".txt", ".md", ".csv", ".log"):
+        raise HTTPException(
+            400,
+            "نوع الملف غير مدعوم. الأنواع المتاحة: PDF, TXT, MD, CSV"
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_FILE_MB * 1024 * 1024:
+        raise HTTPException(413, f"حجم الملف يتجاوز الحد ({MAX_FILE_MB} MB)")
+
+    # Save raw file in the persistent uploads table so the admin can re-download
+    file_id      = str(uuid.uuid4())
+    content_type = _CONTENT_TYPES.get(suffix, "application/octet-stream")
+    db_saved = False
+    if db.available():
+        db_saved = await db.save_upload(
+            file_id=file_id, filename=filename, content_type=content_type,
+            data=contents, store_id=store_id, session_id="",
+        )
+
+    # Extract text — non-fatal if it fails
+    import bot_training as bt
+    text, parse_err = bt.extract_text(filename, contents)
+    if parse_err:
+        print(f"[training] file {filename!r} parsed with warning: {parse_err}")
+
+    if not text and not db_saved:
+        raise HTTPException(500, "تعذّر حفظ الملف ولم يمكن استخراج النص")
+
+    display_title = (title or filename).strip() or filename
+    new_id = await db.add_training(
+        store_id, "file", display_title, text,
+        file_id=file_id if db_saved else "",
+        file_name=filename,
+    )
+    if new_id is None:
+        raise HTTPException(503, "تعذّر حفظ سجل التدريب — قاعدة البيانات غير متاحة")
+
+    sm.reset_agent(store_id)
+    return {
+        "status":     "ok",
+        "id":         new_id,
+        "file_id":    file_id if db_saved else "",
+        "filename":   filename,
+        "size_chars": len(text),
+        "warning":    parse_err,
+        "message":    "تم رفع الملف وقراءته بنجاح ✅" if text else "تم رفع الملف (لم يُستخرج نص)",
+    }
+
+
+@app.patch("/admin/{store_id}/settings/training/{training_id}")
+async def toggle_training(store_id: str, training_id: int, payload: dict):
+    """Enable/disable a single training entry without deleting it."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    ok = await db.update_training_enabled(training_id, bool(payload.get("enabled", True)))
+    if not ok:
+        raise HTTPException(500, "تعذّر التحديث")
+    sm.reset_agent(store_id)
+    return {"status": "ok"}
+
+
+@app.delete("/admin/{store_id}/settings/training/{training_id}")
+async def delete_training_entry(store_id: str, training_id: int):
+    """Delete a training entry (and its underlying upload, if any)."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    ok, deleted_file_id = await db.delete_training(training_id)
+    if not ok:
+        raise HTTPException(500, "تعذّر الحذف")
+    sm.reset_agent(store_id)
+    return {"status": "ok", "deleted_file_id": deleted_file_id}
+
+
 # ── Settings: Pricing config (for the printing calculator) ───────────────────
 
 @app.get("/admin/{store_id}/settings/pricing")
