@@ -26,6 +26,15 @@ _store_bot_enabled:    dict[str, bool] = {} # per-store override {store_id: bool
 # ── Conversations dict: session_id → conv dict ─────────────────────────────────
 _conversations: dict[str, dict] = {}
 
+# Sessions that have been mutated since the last periodic flush
+# mark_dirty() must be at module level so mutation functions below can call it
+_dirty_sessions: set[str] = set()
+
+
+def mark_dirty(session_id: str):
+    """Mark a session as needing a DB sync on the next periodic flush."""
+    _dirty_sessions.add(session_id)
+
 
 def _now() -> str:
     return datetime.datetime.utcnow().isoformat()
@@ -74,8 +83,10 @@ def cart_add(session_id: str, item: dict):
             existing["quantity"] = existing.get("quantity", 1) + item.get("quantity", 1)
             if item.get("notes"):
                 existing["notes"] = item["notes"]
+            mark_dirty(session_id)
             return
     conv["cart"].append(item)
+    mark_dirty(session_id)
 
 
 def cart_remove(session_id: str, product_id) -> bool:
@@ -84,13 +95,17 @@ def cart_remove(session_id: str, product_id) -> bool:
         return False
     before = len(conv["cart"])
     conv["cart"] = [i for i in conv["cart"] if str(i.get("product_id", "")) != str(product_id)]
-    return len(conv["cart"]) < before
+    changed = len(conv["cart"]) < before
+    if changed:
+        mark_dirty(session_id)
+    return changed
 
 
 def cart_clear(session_id: str):
     conv = _conversations.get(session_id)
     if conv:
         conv["cart"] = []
+        mark_dirty(session_id)
 
 
 def cart_total(session_id: str) -> float:
@@ -114,6 +129,7 @@ def get_customer_info(session_id: str) -> dict:
 def set_customer_info(session_id: str, info: dict):
     conv = get_or_create(session_id)
     conv["customer_info"].update({k: v for k, v in info.items() if v})
+    mark_dirty(session_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,6 +139,7 @@ def set_customer_info(session_id: str, info: dict):
 def set_last_component(session_id: str, component):
     conv = get_or_create(session_id)
     conv["last_component"] = component
+    mark_dirty(session_id)
 
 
 def pop_last_component(session_id: str):
@@ -219,6 +236,7 @@ def is_bot_enabled(session_id: str) -> bool:
 
 def set_session_bot(session_id: str, enabled: bool):
     get_or_create(session_id)["bot_enabled"] = enabled
+    mark_dirty(session_id)
 
 
 def get_bot_globally() -> bool:
@@ -293,6 +311,49 @@ async def flush(session_id: str):
         print(f"[conversation_store] ❌ Failed to flush {session_id!r}: {exc}")
 
 
+
+async def flush_all() -> int:
+    """
+    Persist EVERY conversation in memory to the DB.
+    Used on graceful shutdown to guarantee nothing is lost.
+    Returns number of conversations saved.
+    """
+    saved = 0
+    for sid, conv in list(_conversations.items()):
+        try:
+            await db.save_conversation(sid, conv.get("store_id", "default"), conv)
+            saved += 1
+        except Exception as exc:
+            print(f"[conversation_store] ❌ flush_all failed for {sid!r}: {exc}")
+    return saved
+
+
+
+async def flush_dirty() -> int:
+    """
+    Persist only sessions that were mutated since the last flush_dirty() call.
+    Called by the periodic background loop every 5 minutes as a safety net.
+    Returns number of sessions flushed.
+    """
+    if not _dirty_sessions:
+        return 0
+    to_flush = list(_dirty_sessions)
+    _dirty_sessions.clear()
+    saved = 0
+    for sid in to_flush:
+        conv = _conversations.get(sid)
+        if not conv:
+            continue
+        try:
+            await db.save_conversation(sid, conv.get("store_id", "default"), conv)
+            saved += 1
+        except Exception as exc:
+            # Re-mark dirty so next cycle retries it
+            _dirty_sessions.add(sid)
+            print(f"[conversation_store] ❌ flush_dirty failed for {sid!r}: {exc}")
+    return saved
+
+
 def all_conversations() -> dict:
     return _conversations
 
@@ -303,7 +364,7 @@ async def load_conversations_from_db():
     Only called when DB is available; in-memory state takes precedence if
     the session already exists (shouldn't happen on a cold start).
     """
-    rows = await db.load_conversations(limit=500)
+    rows = await db.load_conversations(limit=2000)
     if not rows:
         return
     loaded = 0

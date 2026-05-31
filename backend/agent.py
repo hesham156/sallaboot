@@ -693,6 +693,8 @@ class PrintingAgent:
                     "total": f"{total:.2f}",
                     "currency": currency,
                 })
+                # ── Persist cart immediately so it survives server restarts ──
+                await cs.flush(session_id)
                 return f"✅ أُضيف '{pname}' (الكمية: {qty:,}) للسلة. السلة تحتوي الآن على {len(cart)} منتج، الإجمالي: {total:.2f} {currency}"
 
             # ── view_cart ───────────────────────────────────────────────────
@@ -736,6 +738,8 @@ class PrintingAgent:
                         "total": f"{total:.2f}",
                         "currency": "SAR",
                     })
+                    # Persist updated cart immediately
+                    await cs.flush(session_id)
                     return f"✅ تم حذف المنتج من السلة. الإجمالي الجديد: {total:.2f} ريال"
                 return "⚠️ المنتج غير موجود في السلة."
 
@@ -780,6 +784,11 @@ class PrintingAgent:
                                   f"for session {session_id}")
                     except Exception as _e:
                         print(f"[set_customer_info] auto-lookup skipped: {_e}")
+
+                # ── Persist customer data immediately ─────────────────────────────────
+                # Without this a restart between info collection and the next
+                # add_message() call would silently lose the customer fields.
+                await cs.flush(session_id)
 
                 return f"✅ تم حفظ بيانات العميل: {info['name']} / {info['phone']}"
 
@@ -875,6 +884,9 @@ class PrintingAgent:
                             }
                             cs.set_last_component(session_id, component)
                             cs.cart_clear(session_id)
+                            # Persist cleared cart + checkout component before returning
+                            # (protects against a crash between here and add_message)
+                            await cs.flush(session_id)
 
                             reply = (
                                 f"✅ تم إنشاء الطلب رقم #{order_ref} بنجاح!\n"
@@ -889,6 +901,7 @@ class PrintingAgent:
                             return reply
                         else:
                             cs.cart_clear(session_id)
+                            await cs.flush(session_id)
                             reply = f"✅ تم إنشاء الطلب رقم #{order_ref}. الإجمالي: {total:.2f} ريال"
                             if item_errors:
                                 reply += "\n\n⚠️ تعذّر إضافة بعض المنتجات:\n" + "\n".join(item_errors)
@@ -1005,6 +1018,9 @@ class PrintingAgent:
                         "salla_customer_id":  salla_id,
                     }
                     cs.set_customer_info(session_id, merged)
+                    # Persist salla_customer_id immediately so checkout can use it
+                    # even if the server restarts before the next message
+                    await cs.flush(session_id)
 
                 # ── Format response ──────────────────────────────────
                 lines = [

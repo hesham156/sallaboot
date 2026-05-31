@@ -94,6 +94,10 @@ async def startup_event():
     asyncio.create_task(_token_refresh_loop())
     print("[startup] 🔄 Token auto-refresh loop started")
 
+    # Start periodic flush loop (safety net: saves dirty sessions every 5 min)
+    asyncio.create_task(_periodic_flush_loop())
+    print("[startup] 💾 Periodic conversation flush loop started (every 5 min)")
+
     # ── Critical warning if DB is not connected ────────────────────────────────
     db_st = db.get_status()
     if not db_st["connected"]:
@@ -111,6 +115,37 @@ async def startup_event():
             print("=" * 60)
     else:
         print(f"[startup] 💾 DB connected — {len(sm.list_stores())} stores persisted")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Flush ALL in-memory conversation state to PostgreSQL before the server stops.
+    Railway sends SIGTERM and waits ~10 s for graceful shutdown — this makes
+    sure no cart items, customer info, or messages are lost on every deploy.
+    """
+    if not db.available():
+        return
+    print("[shutdown] 💾 Flushing all conversations to DB …")
+    saved = await cs.flush_all()
+    print(f"[shutdown] ✅ Flushed {saved} conversation(s) to PostgreSQL")
+
+
+async def _periodic_flush_loop():
+    """
+    Background safety-net: persist any sessions marked dirty every 5 minutes.
+    This catches state that was mutated but not yet explicitly flushed —
+    e.g. if a tool call crashed between the mutation and the explicit flush().
+    """
+    await asyncio.sleep(60)   # let startup finish first
+    while True:
+        try:
+            saved = await cs.flush_dirty()
+            if saved:
+                print(f"[periodic_flush] 💾 Flushed {saved} dirty session(s)")
+        except Exception as exc:
+            print(f"[periodic_flush] ❌ Error: {exc}")
+        await asyncio.sleep(300)  # every 5 minutes
 
 
 async def _sync_task(store_id: str, token: str):
