@@ -210,6 +210,46 @@ class SallaClient:
         """
         return await self._request("GET", f"/orders/{order_id}/invoices")
 
+    # ── Brands ─────────────────────────────────────────────────────────────────
+
+    async def get_brands(self, per_page: int = 50, page: int = 1) -> dict:
+        """GET /admin/v2/brands — list brands with logo & banner."""
+        return await self._request("GET", "/brands", params={"per_page": per_page, "page": page})
+
+    # ── Special Offers ─────────────────────────────────────────────────────────
+
+    async def get_special_offers(self, per_page: int = 50) -> dict:
+        """
+        GET /admin/v2/specialoffers — promotional offers and discounts.
+        The bot uses this to answer "ايش العروض الحالية؟".
+        Scope required: offers.read
+        """
+        return await self._request("GET", "/specialoffers", params={"per_page": per_page})
+
+    # ── Branches (physical stores / warehouses) ────────────────────────────────
+
+    async def get_branches(self, per_page: int = 50) -> dict:
+        """
+        GET /admin/v2/branches — physical branches and pickup locations.
+        Scope required: branches.read
+        """
+        return await self._request("GET", "/branches", params={"per_page": per_page})
+
+    # ── Payment methods ────────────────────────────────────────────────────────
+
+    async def get_payment_methods(self) -> dict:
+        """
+        GET /admin/v2/payment/methods — available payment methods.
+        Scope required: payments.read
+        """
+        return await self._request("GET", "/payment/methods")
+
+    # ── Shipping zones ─────────────────────────────────────────────────────────
+
+    async def get_shipping_zones(self, per_page: int = 50) -> dict:
+        """GET /admin/v2/shipping/zones — list of zones the store ships to."""
+        return await self._request("GET", "/shipping/zones", params={"per_page": per_page})
+
     # ── Shipping companies ─────────────────────────────────────────────────────
 
     async def get_shipping_companies(self) -> dict:

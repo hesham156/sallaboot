@@ -42,12 +42,69 @@
   var humanBannerShown = false;   // prevent duplicate "human took over" banners
   var _botReplyCount = 0;         // how many bot replies this session
   var _ratingShown = false;       // rating bar shown at least once this session
+  var sallaCustomerId   = "";     // Salla customer id when the visitor is logged in
+  var sallaCustomerName = "";
 
   // ── Salla Storefront SDK detection ───────────────────────────────────────────
   // When the widget runs inside a Salla store page, window.salla is available.
   // We use salla.cart.addItem() for real cart operations instead of our backend.
   function sallaReady() {
     return typeof window.salla !== "undefined" && window.salla && window.salla.cart;
+  }
+
+  // ── Customer identity ────────────────────────────────────────────────────────
+  // Detect the logged-in Salla customer (when the storefront SDK is present)
+  // OR fall back to the widget config (e.g. embedded inside the merchant's
+  // own portal). We persist the session_id per-customer so the same person
+  // re-opening the widget — even on a different device, after clearing
+  // cookies, or weeks later — picks up exactly where they left off instead
+  // of starting an empty thread.
+  function detectSallaCustomer() {
+    try {
+      var s = window.salla;
+      if (s && s.config && typeof s.config.get === "function") {
+        var c = s.config.get("user.id") || s.config.get("customer.id");
+        if (c) sallaCustomerId = String(c);
+        var n = s.config.get("user.name") || s.config.get("customer.name");
+        if (n) sallaCustomerName = String(n);
+      }
+      if (s && s.customer) {
+        if (!sallaCustomerId && s.customer.id) {
+          sallaCustomerId = String(s.customer.id);
+        }
+        if (!sallaCustomerName) {
+          if (s.customer.name) sallaCustomerName = String(s.customer.name);
+          else if (s.customer.first_name) {
+            sallaCustomerName = String(s.customer.first_name)
+              + (s.customer.last_name ? " " + s.customer.last_name : "");
+          }
+        }
+      }
+    } catch (e) { /* SDK not ready yet — try again on next chat */ }
+
+    // Widget config override (when the merchant embeds outside Salla but has
+    // their own auth and wants the same threading behaviour).
+    if (!sallaCustomerId && CONFIG.customerId)    sallaCustomerId   = String(CONFIG.customerId);
+    if (!sallaCustomerName && CONFIG.customerName) sallaCustomerName = String(CONFIG.customerName);
+  }
+
+  function sessionStorageKey() {
+    // One key per (store, customer). Anonymous visitors get their own
+    // single per-store thread keyed by storeId only.
+    var who = sallaCustomerId ? ("c" + sallaCustomerId) : "anon";
+    return "salla-chat-session::" + CONFIG.storeId + "::" + who;
+  }
+
+  function loadPersistedSession() {
+    try {
+      var s = localStorage.getItem(sessionStorageKey());
+      if (s) sessionId = s;
+    } catch (e) {}
+  }
+  function savePersistedSession() {
+    try {
+      if (sessionId) localStorage.setItem(sessionStorageKey(), sessionId);
+    } catch (e) {}
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────────

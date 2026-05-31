@@ -128,6 +128,91 @@ def _strip_html(text: str) -> str:
 
 # ── Main sync ──────────────────────────────────────────────────────────────────
 
+async def _fetch_simple_list(
+    client: httpx.AsyncClient, headers: dict, path: str, store_id: str,
+    label: str, params: dict | None = None,
+) -> tuple:
+    """
+    Generic GET → data[] helper used for the small auxiliary endpoints
+    (brands, special offers, branches, payment methods, shipping zones).
+    Returns (items, error). 403 is non-fatal so missing scopes degrade
+    gracefully without breaking the rest of the sync.
+    """
+    try:
+        r = await client.get(
+            f"https://api.salla.dev/admin/v2{path}",
+            headers=headers, params=params or {}, timeout=15,
+        )
+        if r.status_code == 200:
+            return (r.json().get("data") or []), None
+        if r.status_code == 403:
+            return [], f"{label} scope missing (403) — skipped"
+        return [], f"HTTP {r.status_code} from {path}: {r.text[:200]}"
+    except Exception as e:
+        return [], f"Exception fetching {path}: {type(e).__name__}: {e}"
+
+
+def _format_brand(b: dict) -> dict:
+    return {
+        "id":          b.get("id"),
+        "name":        b.get("name", ""),
+        "description": _strip_html(b.get("description", ""))[:200],
+        "logo":        (b.get("logo") or {}).get("url") if isinstance(b.get("logo"), dict) else (b.get("logo") or ""),
+        "banner":      (b.get("banner") or {}).get("url") if isinstance(b.get("banner"), dict) else (b.get("banner") or ""),
+        "url":         b.get("url", ""),
+    }
+
+
+def _format_offer(o: dict) -> dict:
+    return {
+        "id":            o.get("id"),
+        "name":          o.get("name", ""),
+        "type":          o.get("type", ""),
+        "message":       o.get("message", ""),
+        "applied_to":    o.get("applied_to", ""),
+        "start_date":    (o.get("start_date") or {}).get("date") if isinstance(o.get("start_date"), dict) else (o.get("start_date") or ""),
+        "end_date":      (o.get("end_date") or {}).get("date") if isinstance(o.get("end_date"), dict) else (o.get("end_date") or ""),
+        "status":        o.get("status", ""),
+    }
+
+
+def _format_branch(b: dict) -> dict:
+    loc = b.get("location") or {}
+    return {
+        "id":         b.get("id"),
+        "name":       b.get("name", ""),
+        "city":       b.get("city", ""),
+        "country":    b.get("country", ""),
+        "address":    b.get("address_description", "") or b.get("address", ""),
+        "phone":      b.get("contacts", {}).get("phone", "") if isinstance(b.get("contacts"), dict) else "",
+        "lat":        loc.get("latitude") if isinstance(loc, dict) else None,
+        "lng":        loc.get("longitude") if isinstance(loc, dict) else None,
+        "is_default": bool(b.get("is_default", False)),
+        "type":       b.get("type", ""),
+        "status":     b.get("status", ""),
+    }
+
+
+def _format_payment_method(p: dict) -> dict:
+    return {
+        "id":        p.get("id"),
+        "name":      p.get("name", ""),
+        "name_en":   p.get("name_en", ""),
+        "slug":      p.get("slug", ""),
+        "logo":      p.get("logo", ""),
+    }
+
+
+def _format_shipping_zone(z: dict) -> dict:
+    return {
+        "id":        z.get("id"),
+        "name":      z.get("name", ""),
+        "country":   z.get("country", ""),
+        "cities":    z.get("cities") or [],
+        "status":    z.get("status", ""),
+    }
+
+
 async def _fetch_shipping_companies(client: httpx.AsyncClient, headers: dict, store_id: str) -> tuple:
     """Fetch /shipping/companies (active carriers + activation type)."""
     try:
@@ -196,30 +281,38 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
     errors = []
 
     async with httpx.AsyncClient(timeout=30) as client:
-        # Run products, categories, store info, and shipping companies concurrently
+        # Run all sync requests concurrently — total latency = slowest single fetch
         (
             (products_raw, prod_err),
             (categories_raw, cats_err),
             (store_info, info_err),
             (shipping_companies, ship_err),
+            (brands_raw, brand_err),
+            (offers_raw, offer_err),
+            (branches_raw, branch_err),
+            (payment_methods_raw, pay_err),
+            (shipping_zones_raw, zone_err),
         ) = await asyncio.gather(
             _fetch_all_pages(client, f"{base}/products",   headers),
             _fetch_all_pages(client, f"{base}/categories", headers),
             _fetch_store_info(client, headers, store_id),
             _fetch_shipping_companies(client, headers, store_id),
+            _fetch_simple_list(client, headers, "/brands",            store_id, "brands.read",   {"per_page": 50}),
+            _fetch_simple_list(client, headers, "/specialoffers",     store_id, "offers.read",   {"per_page": 50}),
+            _fetch_simple_list(client, headers, "/branches",          store_id, "branches.read", {"per_page": 50}),
+            _fetch_simple_list(client, headers, "/payment/methods",   store_id, "payments.read"),
+            _fetch_simple_list(client, headers, "/shipping/zones",    store_id, "shipping.read", {"per_page": 50}),
         )
-        if prod_err:
-            print(f"[store_sync:{store_id}] products error: {prod_err}")
-            errors.append(prod_err)
-        if cats_err:
-            print(f"[store_sync:{store_id}] categories error: {cats_err}")
-            errors.append(cats_err)
-        if info_err:
-            print(f"[store_sync:{store_id}] store_info error: {info_err}")
-            errors.append(info_err)
-        if ship_err:
-            print(f"[store_sync:{store_id}] shipping error: {ship_err}")
-            errors.append(ship_err)
+        if prod_err:   errors.append(prod_err);   print(f"[store_sync:{store_id}] products: {prod_err}")
+        if cats_err:   errors.append(cats_err);   print(f"[store_sync:{store_id}] categories: {cats_err}")
+        if info_err:   errors.append(info_err);   print(f"[store_sync:{store_id}] store_info: {info_err}")
+        if ship_err:   errors.append(ship_err);   print(f"[store_sync:{store_id}] shipping: {ship_err}")
+        # Auxiliary endpoints — log but don't pollute the user-facing errors list
+        for label, err in [("brands", brand_err), ("offers", offer_err),
+                            ("branches", branch_err), ("payment_methods", pay_err),
+                            ("shipping_zones", zone_err)]:
+            if err:
+                print(f"[store_sync:{store_id}] {label}: {err}")
 
         articles_raw = []
         for endpoint in [f"{base}/blogs/posts", f"{base}/blog/posts", f"{base}/blogs"]:
@@ -247,6 +340,11 @@ async def _do_sync(access_token: str, store_id: str) -> dict:
         "articles":           articles,
         "store_info":         store_info,
         "shipping_companies": shipping_companies or [],
+        "brands":             [_format_brand(b)          for b in (brands_raw or [])],
+        "special_offers":     [_format_offer(o)          for o in (offers_raw or [])],
+        "branches":           [_format_branch(b)         for b in (branches_raw or [])],
+        "payment_methods":    [_format_payment_method(p) for p in (payment_methods_raw or [])],
+        "shipping_zones":     [_format_shipping_zone(z)  for z in (shipping_zones_raw or [])],
         "products_count":     len(products),
         "last_sync":          datetime.datetime.utcnow().isoformat(),
         "last_sync_errors":   errors,
