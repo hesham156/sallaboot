@@ -120,6 +120,14 @@ export const api = {
   setAI: (storeId: string, cfg: Partial<AIConfig>) =>
     put(`/admin/${storeId}/settings/ai`, cfg),
 
+  // Pricing calculator settings
+  getPricing: (storeId: string) =>
+    get<PricingConfig>(`/admin/${storeId}/settings/pricing`),
+  setPricing: (storeId: string, cfg: PricingConfig) =>
+    put(`/admin/${storeId}/settings/pricing`, cfg),
+  testPricing: (storeId: string, payload: Record<string, unknown>) =>
+    post<Record<string, unknown>>(`/admin/${storeId}/settings/pricing/test`, payload),
+
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
@@ -276,6 +284,53 @@ export interface AIConfig {
   ai_model: string
   bot_name: string
   provider: 'groq' | 'anthropic' | 'openai' | 'env'
+}
+
+// ── Printing calculator config ─────────────────────────────────────────────
+
+export interface PaperType { name: string; price: number; active: boolean }
+export interface SheetSize { name: string; width: number; height: number }
+export interface AddonItem { name: string; price: number }
+export interface DiscountRule { min: number; percent: number }
+export interface TierRule { min: number; price: number }
+
+export interface PricingConfig {
+  // General
+  tax_rate: number
+  profit_margin: number
+
+  // Roll
+  roll_enabled: boolean
+  roll_unit_price: number
+  default_roll_width: number
+  roll_discounts: DiscountRule[]
+
+  // Digital
+  digital_enabled: boolean
+  digital_paper_types: PaperType[]
+  digital_sheet_sizes: SheetSize[]
+  digital_addons: AddonItem[]
+  digital_discounts: DiscountRule[]
+  foil_mold_price_per_cm2: number
+  foil_min_mold_price: number
+  foil_stamping_unit_price: number
+
+  // Offset
+  offset_enabled: boolean
+  offset_fixed_width: number
+  offset_fixed_height: number
+  offset_paper_types: PaperType[]
+  offset_discounts: DiscountRule[]
+  offset_cutting_normal: number
+  offset_cutting_diecut: number
+  offset_folding_per_1000: number
+  offset_punching_per_1000: number
+
+  // UV DTF
+  uvdtf_enabled: boolean
+  uvdtf_unit_price: number
+  uvdtf_roll_width: number
+  uvdtf_tiers: TierRule[]
 }
 
 export interface TokenStatus {

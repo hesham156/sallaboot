@@ -9,6 +9,7 @@ import Analytics     from './store/Analytics'
 import Settings      from './store/Settings'
 import Orders        from './store/Orders'
 import AbandonedCarts from './store/AbandonedCarts'
+import Pricing       from './store/Pricing'
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -74,6 +75,14 @@ const NAV_ITEMS = [
     activeColor: 'text-pink-400',
     activeBg: 'bg-pink-500/10',
     activeBorder: 'border-r-pink-500',
+  },
+  {
+    key: 'pricing',
+    label: 'حاسبة الأسعار',
+    icon: ['M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'],
+    activeColor: 'text-cyan-400',
+    activeBg: 'bg-cyan-500/10',
+    activeBorder: 'border-r-cyan-500',
   },
   {
     key: 'settings',
@@ -253,6 +262,7 @@ export default function StoreDashboard() {
           <Route path="orders"          element={<Orders storeId={storeId} />} />
           <Route path="carts"           element={<AbandonedCarts storeId={storeId} />} />
           <Route path="analytics"       element={<Analytics storeId={storeId} />} />
+          <Route path="pricing"         element={<Pricing storeId={storeId} />} />
           <Route path="settings"        element={<Settings storeId={storeId} />} />
         </Routes>
       </main>

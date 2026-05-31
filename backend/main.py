@@ -27,6 +27,7 @@ import database as db
 from store_sync import sync_store
 from salla_oauth import get_auth_url, exchange_code, save_tokens
 import conversation_store as cs
+import pricing_calculator as pc
 
 # ── Simple in-memory rate limiter for login endpoints ─────────────────────────
 _login_attempts: dict = _collections.defaultdict(list)   # ip → [timestamp, …]
@@ -691,6 +692,77 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
     await db.save_ai_config(store_id, config)
 
     return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي ✅"}
+
+
+# ── Settings: Pricing config (for the printing calculator) ───────────────────
+
+@app.get("/admin/{store_id}/settings/pricing")
+async def get_pricing_settings(store_id: str):
+    """
+    Return the store's pricing config merged with defaults so the UI always
+    sees every field. The frontend can rely on every key being present.
+    """
+    cfg = sm.get_ai_config(store_id) or {}
+    pricing = cfg.get("pricing_config") or {}
+    merged = {**pc.DEFAULT_PRICING_CONFIG, **{k: v for k, v in pricing.items() if v is not None}}
+    return merged
+
+
+@app.put("/admin/{store_id}/settings/pricing")
+async def update_pricing_settings(store_id: str, pricing: dict):
+    """
+    Save the printing-calculator config for a store. Stored inside the
+    existing ai_config blob so it travels alongside the AI provider/model
+    settings and survives deploys via the same DB pipeline.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    existing = sm.get_ai_config(store_id) or {}
+    existing["pricing_config"] = pricing or {}
+    sm.set_ai_config(store_id, existing)
+
+    # Await the DB write so the change survives a restart immediately
+    tokens = sm.get_store_info(store_id)
+    await db.save_store(store_id, tokens)
+    await db.save_ai_config(store_id, existing)
+
+    return {"status": "ok", "message": "تم حفظ إعدادات حاسبة الأسعار ✅"}
+
+
+@app.post("/admin/{store_id}/settings/pricing/test")
+async def test_pricing_calculation(store_id: str, payload: dict):
+    """
+    Run the calculator against the store's saved config with the given
+    inputs — used by the admin UI's "Test Calculator" preview so the
+    admin can verify settings before exposing them to customers via the bot.
+    """
+    cfg = sm.get_ai_config(store_id) or {}
+    pricing_cfg = cfg.get("pricing_config") or {}
+
+    printing_type = payload.get("printing_type", "digital")
+    width    = float(payload.get("width", 0))
+    height   = float(payload.get("height", 0))
+    quantity = int(payload.get("quantity", 0))
+
+    result = pc.calculate_quote(
+        printing_type = printing_type,
+        config        = pricing_cfg,
+        width         = width,
+        height        = height,
+        quantity      = quantity,
+        roll_width    = payload.get("roll_width"),
+        paper_type    = payload.get("paper_type"),
+        sheet_size    = payload.get("sheet_size"),
+        addons        = payload.get("addons") or [],
+        foil_width    = float(payload.get("foil_width",  0) or 0),
+        foil_height   = float(payload.get("foil_height", 0) or 0),
+        spot_uv       = bool(payload.get("spot_uv", False)),
+        cutting       = payload.get("cutting", "normal"),
+        folding       = bool(payload.get("folding", False)),
+        punching      = bool(payload.get("punching", False)),
+    )
+    return result
 
 
 # ── Settings: Change password ──────────────────────────────────────────────────
