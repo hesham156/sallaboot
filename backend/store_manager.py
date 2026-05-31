@@ -94,16 +94,33 @@ async def load_from_db():
     """
     Async — load stores from PostgreSQL (called from FastAPI startup event).
     DB rows take precedence over JSON file data loaded earlier.
+
+    Verbose logging: prints why each row was skipped (no access_token,
+    reserved id, etc.) so silent data loss becomes impossible to miss.
     """
     rows = await db.load_all_stores()
     if not rows:
+        print("[store_manager] load_from_db: 0 rows returned (DB empty or query failed)")
         return
 
+    loaded  = 0
+    skipped = 0
     for row in rows:
         sid    = row["store_id"]
         tokens = row["tokens"]
-        if not tokens.get("access_token"):
+
+        # Skip the diagnostic test row (created by db.test_round_trip)
+        if sid == "_diagnostic_test_row":
             continue
+
+        if not tokens.get("access_token"):
+            print(
+                f"[store_manager] ⚠️ Skipped {sid!r} — no access_token in DB. "
+                f"Re-register the store or reinstall the app on Salla."
+            )
+            skipped += 1
+            continue
+
         ai_cfg = row.get("ai_config", {})
         cache  = row.get("cache",     {})
 
@@ -118,9 +135,13 @@ async def load_from_db():
         else:
             _registry[sid] = {"tokens": tokens, "cache": cache, "agent": None}
 
-        print(f"[store_manager] Loaded (DB) store {sid!r}: {tokens.get('store_name', '?')}")
+        loaded += 1
+        print(f"[store_manager] ✅ Loaded (DB) store {sid!r}: {tokens.get('store_name', '?')}")
 
-    print(f"[store_manager] {len(_registry)} total store(s) after DB merge")
+    print(
+        f"[store_manager] load_from_db done — loaded={loaded}, skipped={skipped}, "
+        f"total_in_registry={len(_registry)}"
+    )
 
 
 # ── Registration ───────────────────────────────────────────────────────────────

@@ -25,6 +25,22 @@ _pool: Optional[asyncpg.Pool] = None
 
 # ── Init & schema ──────────────────────────────────────────────────────────────
 
+async def _setup_jsonb_codec(conn):
+    """
+    Register a JSON↔dict codec for JSONB columns. WITHOUT this, asyncpg
+    returns JSONB as raw strings — and the rest of the code calls dict()
+    on those strings, which raises TypeError that gets silently swallowed.
+    Result: stores load from DB as 0 rows even though the table has data.
+    This is the #1 cause of "stores deleted after every deploy".
+    """
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=lambda v: json.dumps(v, ensure_ascii=False, default=str),
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+
+
 async def init() -> bool:
     """
     Connect to PostgreSQL and create tables if they don't exist.
@@ -40,9 +56,15 @@ async def init() -> bool:
     dsn = dsn.replace("postgres://", "postgresql://", 1)
 
     try:
-        _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5, command_timeout=15)
+        _pool = await asyncpg.create_pool(
+            dsn,
+            min_size=1,
+            max_size=5,
+            command_timeout=15,
+            init=_setup_jsonb_codec,   # ← critical: auto-decode JSONB → dict
+        )
         await _create_tables()
-        print("[db] ✅ PostgreSQL connected and schema ready")
+        print("[db] ✅ PostgreSQL connected, JSONB codec registered, schema ready")
         return True
     except Exception as e:
         print(f"[db] ❌ PostgreSQL connection failed: {e}")
@@ -229,6 +251,27 @@ async def test_round_trip() -> dict:
 
 # ── Stores ─────────────────────────────────────────────────────────────────────
 
+def _coerce_jsonb(value) -> dict:
+    """
+    Defensive: handle both dict (codec registered) and str (codec missing)
+    so an old pool without the JSONB codec doesn't lose data either.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (str, bytes)):
+        try:
+            return json.loads(value)
+        except Exception:
+            return {}
+    # Some other type — best effort
+    try:
+        return dict(value)
+    except Exception:
+        return {}
+
+
 async def load_all_stores() -> list:
     """
     Return all store rows from the DB.
@@ -241,17 +284,61 @@ async def load_all_stores() -> list:
             rows = await conn.fetch(
                 "SELECT store_id, tokens, ai_config, cache_data FROM stores"
             )
-        return [
+        result = [
             {
                 "store_id":  r["store_id"],
-                "tokens":    dict(r["tokens"]),
-                "ai_config": dict(r["ai_config"]),
-                "cache":     dict(r["cache_data"]),
+                "tokens":    _coerce_jsonb(r["tokens"]),
+                "ai_config": _coerce_jsonb(r["ai_config"]),
+                "cache":     _coerce_jsonb(r["cache_data"]),
             }
             for r in rows
         ]
+        print(f"[db] load_all_stores: fetched {len(result)} row(s) from PostgreSQL")
+        return result
     except Exception as e:
-        print(f"[db] load_all_stores error: {e}")
+        # Print the FULL exception (not just message) so silent failures
+        # like dict(str) TypeErrors are visible in Railway logs
+        import traceback
+        print(f"[db] ❌ load_all_stores error: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return []
+
+
+async def list_raw_stores() -> list:
+    """
+    Diagnostic: return every store_id in the DB with a quick health flag
+    (has_token / has_ai_config). Used by /admin/registry-vs-db so the
+    admin can see exactly which DB rows would be skipped on load.
+    """
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT store_id, tokens, ai_config, updated_at FROM stores ORDER BY updated_at DESC"
+            )
+        out = []
+        for r in rows:
+            tokens = _coerce_jsonb(r["tokens"])
+            ai_cfg = _coerce_jsonb(r["ai_config"])
+            out.append({
+                "store_id":     r["store_id"],
+                "store_name":   tokens.get("store_name", ""),
+                "has_token":    bool(tokens.get("access_token")),
+                "has_refresh":  bool(tokens.get("refresh_token")),
+                "has_ai_config": bool(
+                    ai_cfg.get("groq_api_key") or
+                    ai_cfg.get("anthropic_api_key") or
+                    ai_cfg.get("openai_api_key") or
+                    tokens.get("ai_config", {}).get("groq_api_key") or
+                    tokens.get("ai_config", {}).get("anthropic_api_key") or
+                    tokens.get("ai_config", {}).get("openai_api_key")
+                ),
+                "updated_at":   r["updated_at"].isoformat() if r["updated_at"] else None,
+            })
+        return out
+    except Exception as e:
+        print(f"[db] list_raw_stores error: {e}")
         return []
 
 

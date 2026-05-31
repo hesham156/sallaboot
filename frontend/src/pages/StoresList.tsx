@@ -123,10 +123,13 @@ export default function StoresList() {
     try {
       const r = await api.dbTest()
       if (r.ok) {
-        setDbTestResult(
-          `✅ قاعدة البيانات تعمل بشكل سليم — write/read/delete نجحوا. ` +
-          `عدد المتاجر المحفوظة فعلياً: ${r.store_count} (${r.in_memory_stores} في الذاكرة)`
-        )
+        let line = `✅ قاعدة البيانات تعمل — write/read/delete نجحوا. ` +
+                   `محفوظ فعلياً: ${r.store_count} متجر | في الذاكرة: ${r.in_memory_stores}`
+        // Hint when DB has more stores than memory — likely silent skip on load
+        if (r.store_count > r.in_memory_stores) {
+          line += `  ⚠️ ${r.store_count - r.in_memory_stores} متجر موجود في DB لكن مش محمّل! اضغط "إعادة تحميل من DB"`
+        }
+        setDbTestResult(line)
       } else {
         setDbTestResult(
           `❌ فشل التشخيص — connected:${r.connected} write:${r.write_ok} ` +
@@ -134,6 +137,19 @@ export default function StoresList() {
           (r.error ? ` — ${r.error}` : '')
         )
       }
+    } catch (e: unknown) {
+      setDbTestResult(`❌ خطأ: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally { setDbTesting(false) }
+  }
+
+  async function handleReloadFromDb() {
+    setDbTesting(true); setDbTestResult('')
+    try {
+      const r = await api.reloadFromDb()
+      setDbTestResult(
+        `✅ ${r.message}` + (r.loaded > 0 ? ` — تم استرجاع ${r.loaded} متجر! 🎉` : '')
+      )
+      await loadData()
     } catch (e: unknown) {
       setDbTestResult(`❌ خطأ: ${e instanceof Error ? e.message : 'unknown'}`)
     } finally { setDbTesting(false) }
@@ -232,6 +248,19 @@ export default function StoresList() {
               : <Icon paths={['M9 12l2 2 4-4', 'M21 12a9 9 0 11-18 0 9 9 0 0118 0z']} size={13} />
             }
             تشخيص DB
+          </button>
+
+          <button
+            onClick={handleReloadFromDb}
+            disabled={dbTesting}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-cyan-500/10 border-cyan-500/25 text-cyan-400 hover:bg-cyan-500/15 disabled:opacity-60"
+            title="إعادة تحميل المتاجر من قاعدة البيانات للذاكرة"
+          >
+            {dbTesting
+              ? <Spinner size="sm" color="primary" className="scale-75" />
+              : <Icon paths={['M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3']} size={13} />
+            }
+            تحميل من DB
           </button>
 
           <button

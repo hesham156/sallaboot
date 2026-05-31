@@ -1598,6 +1598,66 @@ async def manual_register_store(req: ManualRegisterRequest, request: Request):
     }
 
 
+# ── DB diagnostic — registry vs DB comparison ────────────────────────────────
+@app.get("/admin/registry-vs-db")
+async def registry_vs_db(request: Request):
+    """
+    Super-admin diagnostic: compare what's in the in-memory registry vs
+    what's actually persisted in PostgreSQL. Highlights any store that's
+    in the DB but not in the registry (= would disappear on next restart
+    even though it's "saved") and vice versa (= in memory only, will be
+    lost on restart).
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    db_rows = await db.list_raw_stores() if db.available() else []
+    memory  = sm.list_stores()
+
+    db_ids     = {r["store_id"] for r in db_rows}
+    memory_ids = {s["store_id"] for s in memory}
+
+    return {
+        "db_connected":      db.available(),
+        "in_db":             len(db_rows),
+        "in_memory":         len(memory),
+        "only_in_db":        sorted(db_ids - memory_ids),       # persisted but not loaded
+        "only_in_memory":    sorted(memory_ids - db_ids),       # at-risk: not saved
+        "in_both":           sorted(db_ids & memory_ids),       # healthy
+        "db_rows":           db_rows,
+        "memory_rows":       memory,
+    }
+
+
+# ── DB diagnostic — force reload registry from DB ────────────────────────────
+@app.post("/admin/reload-from-db")
+async def reload_from_db(request: Request):
+    """
+    Super-admin: re-run load_from_db() to pull the latest store data from
+    PostgreSQL into the in-memory registry. Useful when a store appears in
+    /admin/registry-vs-db as "only_in_db" — usually because asyncpg's JSONB
+    codec wasn't registered on a previous deploy and rows were silently
+    skipped on startup.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    before = len(sm.list_stores())
+    await sm.load_from_db()
+    after = len(sm.list_stores())
+    return {
+        "status":  "ok",
+        "before":  before,
+        "after":   after,
+        "loaded":  after - before,
+        "message": f"تم إعادة التحميل من DB — {before} → {after} متجر",
+    }
+
+
 # ── DB diagnostic — round-trip test ───────────────────────────────────────────
 @app.get("/admin/db-test")
 async def db_diagnostic(request: Request):

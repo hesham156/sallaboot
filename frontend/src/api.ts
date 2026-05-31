@@ -174,6 +174,23 @@ export const api = {
       in_memory_stores: number
     }>('/admin/db-test'),
 
+  // Registry vs DB — find stores that exist in DB but not loaded into memory
+  registryVsDb: () =>
+    get<{
+      db_connected: boolean
+      in_db: number
+      in_memory: number
+      only_in_db: string[]
+      only_in_memory: string[]
+      in_both: string[]
+      db_rows: Array<{ store_id: string; store_name: string; has_token: boolean; has_refresh: boolean; has_ai_config: boolean; updated_at: string }>
+      memory_rows: StoreInfo[]
+    }>('/admin/registry-vs-db'),
+
+  // Force reload registry from DB (recovers stores skipped at startup)
+  reloadFromDb: () =>
+    post<{ before: number; after: number; loaded: number; message: string }>('/admin/reload-from-db'),
+
   // Super-admin: reset store password
   resetPassword: (storeId: string) =>
     put(`/admin/stores/${storeId}/reset-password`),
