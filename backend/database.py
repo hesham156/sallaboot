@@ -136,16 +136,95 @@ async def force_save_all_stores(stores: list[dict]) -> int:
     return saved
 
 
+def _log_task_error(task: asyncio.Task):
+    """Print exceptions raised by fire-and-forget DB tasks so they don't vanish."""
+    try:
+        exc = task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        return
+    if exc:
+        print(f"[db] ❌ Fire-and-forget DB task FAILED: {type(exc).__name__}: {exc}")
+
+
 def fire(coro):
     """
     Schedule an async DB coroutine from synchronous code that is already
     running inside an asyncio event loop (e.g. FastAPI route handlers).
     Silently ignored when no event loop is running (unit tests / CLI scripts).
+
+    Attaches an error logger so silent write failures become visible in
+    Railway logs — previously a failing fire-and-forget write would just
+    disappear and the data would be lost without any trace.
     """
     try:
-        asyncio.get_running_loop().create_task(coro)
+        task = asyncio.get_running_loop().create_task(coro)
+        task.add_done_callback(_log_task_error)
     except RuntimeError:
         pass  # No running loop — skip the write gracefully
+
+
+async def test_round_trip() -> dict:
+    """
+    Diagnostic: write a test row, read it back, delete it.
+    Returns {ok, write_ok, read_ok, delete_ok, store_count, error}.
+    Used by /admin/db-test to verify the DB is actually usable end-to-end.
+    """
+    result = {
+        "ok":           False,
+        "connected":    _pool is not None,
+        "write_ok":     False,
+        "read_ok":      False,
+        "delete_ok":    False,
+        "store_count":  0,
+        "error":        "",
+    }
+    if not _pool:
+        result["error"] = "DATABASE_URL not set or connection failed at startup"
+        return result
+
+    test_id = "_diagnostic_test_row"
+    test_payload = {"diagnostic": True, "ts": "round_trip"}
+    try:
+        # WRITE
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO stores (store_id, tokens, updated_at)
+                VALUES ($1, $2::jsonb, NOW())
+                ON CONFLICT (store_id) DO UPDATE
+                  SET tokens = EXCLUDED.tokens, updated_at = NOW()
+                """,
+                test_id,
+                json.dumps(test_payload),
+            )
+        result["write_ok"] = True
+
+        # READ
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT tokens FROM stores WHERE store_id = $1", test_id
+            )
+        if row and dict(row["tokens"]).get("diagnostic") is True:
+            result["read_ok"] = True
+
+        # COUNT real stores (excluding the test row)
+        async with _pool.acquire() as conn:
+            cnt = await conn.fetchval(
+                "SELECT COUNT(*) FROM stores WHERE store_id != $1", test_id
+            )
+        result["store_count"] = int(cnt or 0)
+
+        # DELETE
+        async with _pool.acquire() as conn:
+            await conn.execute("DELETE FROM stores WHERE store_id = $1", test_id)
+        result["delete_ok"] = True
+
+        result["ok"] = result["write_ok"] and result["read_ok"] and result["delete_ok"]
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+        print(f"[db] ❌ test_round_trip failed: {result['error']}")
+
+    return result
 
 
 # ── Stores ─────────────────────────────────────────────────────────────────────

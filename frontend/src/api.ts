@@ -160,6 +160,20 @@ export const api = {
   forceDbSync: () =>
     post<{ saved: number; total: number; message: string }>('/admin/force-db-sync'),
 
+  // DB round-trip diagnostic (super-admin)
+  dbTest: () =>
+    get<{
+      ok: boolean
+      connected: boolean
+      write_ok: boolean
+      read_ok: boolean
+      delete_ok: boolean
+      store_count: number
+      error: string
+      env_database_url_set: boolean
+      in_memory_stores: number
+    }>('/admin/db-test'),
+
   // Super-admin: reset store password
   resetPassword: (storeId: string) =>
     put(`/admin/stores/${storeId}/reset-password`),

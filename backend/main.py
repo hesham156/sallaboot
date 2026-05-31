@@ -1539,6 +1539,10 @@ async def manual_register_store(req: ManualRegisterRequest, request: Request):
     Manually register / re-register a store when the webhook wasn't received
     (e.g. Railway filesystem wipe, Salla Partners URL misconfiguration, etc.)
     Requires super-admin token.
+
+    The DB write is AWAITED (not fire-and-forget) so that if persistence
+    fails the admin gets a clear error instead of the row silently
+    disappearing on the next deploy.
     """
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     claims = _auth.verify_token(token)
@@ -1555,13 +1559,61 @@ async def manual_register_store(req: ManualRegisterRequest, request: Request):
         refresh_token=req.refresh_token.strip(),
         store_info={"name": req.store_name.strip() or f"متجر {store_id}"},
     )
-    # Kick off a background sync
+
+    # CRITICAL: await the DB write so it survives the next deploy. Without
+    # this, register_store only fires a background task that may never run
+    # if the server restarts moments later (common cause of "stores
+    # disappear on every deploy").
+    persisted = False
+    if db.available():
+        try:
+            tokens = sm.get_store_info(store_id)
+            await db.save_store(store_id, tokens)
+            persisted = True
+            print(f"[admin] 💾 Store {store_id!r} persisted to DB synchronously")
+        except Exception as exc:
+            print(f"[admin] ❌ DB persist failed for {store_id!r}: {exc}")
+            raise HTTPException(
+                500,
+                f"تم تسجيل المتجر في الذاكرة لكن فشل الحفظ في قاعدة البيانات: {exc}. "
+                "المتجر سيُحذف عند أول إعادة تشغيل. راجع DATABASE_URL في Railway."
+            )
+    else:
+        # No DB at all — warn the user loudly
+        raise HTTPException(
+            503,
+            "قاعدة البيانات غير متصلة. المتاجر ستُحذف عند أول deploy. "
+            "افتح Railway → أضف Postgres service → اربط DATABASE_URL."
+        )
+
+    # Kick off a background sync only after persistence is guaranteed
     asyncio.create_task(_sync_task(store_id, req.access_token.strip()))
     return {
         "status":    "ok",
         "store_id":  store_id,
-        "message":   f"تم تسجيل المتجر {store_id!r} وبدأت المزامنة في الخلفية",
+        "persisted": persisted,
+        "message":   f"تم تسجيل المتجر {store_id!r} وحفظه في قاعدة البيانات ✅",
     }
+
+
+# ── DB diagnostic — round-trip test ───────────────────────────────────────────
+@app.get("/admin/db-test")
+async def db_diagnostic(request: Request):
+    """
+    Super-admin only: run a write→read→delete round-trip against the stores
+    table to verify the DB is actually usable. Also returns the real row
+    count (excluding the test row) so admin can see if persistence works
+    but data is being wiped externally.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    result = await db.test_round_trip()
+    result["env_database_url_set"] = bool(os.getenv("DATABASE_URL", "").strip())
+    result["in_memory_stores"]     = len(sm.list_stores())
+    return result
 
 
 # ── Salla OAuth ────────────────────────────────────────────────────────────────

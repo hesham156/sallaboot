@@ -98,6 +98,9 @@ export default function StoresList() {
 
   useEffect(() => { loadData() }, [])
 
+  const [dbTesting, setDbTesting] = useState(false)
+  const [dbTestResult, setDbTestResult] = useState<string>('')
+
   async function loadData() {
     setLoading(true)
     try {
@@ -113,6 +116,27 @@ export default function StoresList() {
     try { setMsg((await api.forceDbSync()).message) }
     catch (e: unknown) { setMsg(e instanceof Error ? e.message : 'خطأ') }
     finally { setSyncing(false) }
+  }
+
+  async function handleDbTest() {
+    setDbTesting(true); setDbTestResult('')
+    try {
+      const r = await api.dbTest()
+      if (r.ok) {
+        setDbTestResult(
+          `✅ قاعدة البيانات تعمل بشكل سليم — write/read/delete نجحوا. ` +
+          `عدد المتاجر المحفوظة فعلياً: ${r.store_count} (${r.in_memory_stores} في الذاكرة)`
+        )
+      } else {
+        setDbTestResult(
+          `❌ فشل التشخيص — connected:${r.connected} write:${r.write_ok} ` +
+          `read:${r.read_ok} delete:${r.delete_ok}` +
+          (r.error ? ` — ${r.error}` : '')
+        )
+      }
+    } catch (e: unknown) {
+      setDbTestResult(`❌ خطأ: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally { setDbTesting(false) }
   }
 
   async function handleReset(storeId: string) {
@@ -198,6 +222,19 @@ export default function StoresList() {
           </button>
 
           <button
+            onClick={handleDbTest}
+            disabled={dbTesting}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-violet-500/10 border-violet-500/25 text-violet-400 hover:bg-violet-500/15 disabled:opacity-60"
+            title="اختبار write/read/delete على قاعدة البيانات"
+          >
+            {dbTesting
+              ? <Spinner size="sm" color="secondary" className="scale-75" />
+              : <Icon paths={['M9 12l2 2 4-4', 'M21 12a9 9 0 11-18 0 9 9 0 0118 0z']} size={13} />
+            }
+            تشخيص DB
+          </button>
+
+          <button
             onClick={logout}
             className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/15"
           >
@@ -206,6 +243,57 @@ export default function StoresList() {
           </button>
         </div>
       </div>
+
+      {/* ════════════════ CRITICAL: DB DISCONNECTED BANNER ════════════════ */}
+      {!loading && !dbConnected && (
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-5 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-red-500/20 flex items-center justify-center flex-shrink-0">
+              <Icon paths="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" size={18} className="text-red-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-red-300 text-sm mb-1">⚠️ قاعدة البيانات غير متصلة</h3>
+              <p className="text-xs text-red-300/80 leading-relaxed">
+                كل المتاجر اللي بتسجّلها هتختفي عند أول إعادة تشغيل أو deploy.
+                {' '}افتح Railway → تأكد إن خدمة Postgres شغّالة وإن{' '}
+                <code className="bg-red-500/15 px-1.5 py-0.5 rounded text-red-200">DATABASE_URL</code>
+                {' '}موجود في environment variables بتاع الـ backend service.
+              </p>
+            </div>
+            <button
+              onClick={handleDbTest}
+              disabled={dbTesting}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-red-500/15 border border-red-500/30 text-red-200 hover:bg-red-500/25 disabled:opacity-60 flex-shrink-0"
+            >
+              {dbTesting ? <Spinner size="sm" color="danger" className="scale-75" /> : '🔍'}
+              تشخيص DB
+            </button>
+          </div>
+          {dbTestResult && (
+            <div className={`text-xs px-3 py-2 rounded-lg border font-mono ${
+              dbTestResult.startsWith('✅')
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-red-500/15 border-red-500/30 text-red-200'
+            }`}>
+              {dbTestResult}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ════════════════ INFO BANNER (when DB connected but test result shown) ════════════════ */}
+      {!loading && dbConnected && dbTestResult && (
+        <div className={`rounded-xl border px-4 py-3 text-sm flex items-start gap-3 ${
+          dbTestResult.startsWith('✅')
+            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+            : 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+        }`}>
+          <span className="font-mono text-xs flex-1">{dbTestResult}</span>
+          <button onClick={() => setDbTestResult('')} className="opacity-60 hover:opacity-100">
+            <Icon paths="M6 18L18 6M6 6l12 12" size={14} />
+          </button>
+        </div>
+      )}
 
       {/* ════════════════ TOAST ════════════════ */}
       {msg && (
