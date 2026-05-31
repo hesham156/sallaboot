@@ -247,10 +247,11 @@ export interface AIConfig {
 }
 
 export interface TokenStatus {
-  connected: boolean
+  // Backend fields (salla_oauth.get_token_status + endpoint enrichment)
+  status: 'ok' | 'warning' | 'critical' | 'expired' | 'unknown'
+  days_remaining: number | null
   expires_at: string
-  days_left: number
-  health: string
+  message: string
   store_name?: string
   connected_at?: string
   has_refresh?: boolean
