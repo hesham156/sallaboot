@@ -986,6 +986,37 @@ async def store_conversations(
     return cs.summary_list(store_id, limit=limit, offset=offset)
 
 
+# ── Super-admin: ALL conversations across every store (debug / orphan hunt) ──
+@app.get("/admin/conversations-all")
+async def all_conversations_superadmin(
+    request: Request,
+    limit:   int = 200,
+    offset:  int = 0,
+):
+    """
+    Super-admin only: return ALL conversations regardless of store_id.
+    Each entry includes its store_id so orphan conversations (tagged with
+    'default' or an unregistered store) can be located and re-assigned.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    # summary_list(store_id=None) returns conversations from every store
+    base = cs.summary_list(store_id=None, limit=limit, offset=offset)
+
+    # Enrich each summary with the actual store_id stored in the conversation
+    all_convs = cs.all_conversations()
+    registered_ids = {s["store_id"] for s in sm.list_stores()}
+    for s in base.get("conversations", []):
+        conv = all_convs.get(s["session_id"], {})
+        sid  = conv.get("store_id", "default")
+        s["store_id"]   = sid
+        s["is_orphan"]  = (sid == "default") or (sid not in registered_ids)
+    return base
+
+
 @app.get("/admin/{store_id}/conversations/{session_id}")
 async def store_conversation_detail(store_id: str, session_id: str):
     cs.mark_admin_read(session_id)
@@ -1597,6 +1628,7 @@ async def chat(req: ChatRequest):
         )
 
     agent = sm.get_agent(store_id)
+    requested_store_id = store_id   # remember what the widget asked for
     if agent is None:
         env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
 
@@ -1619,6 +1651,18 @@ async def chat(req: ChatRequest):
                 fallback_id = stores[0]["store_id"]
                 agent    = sm.get_agent(fallback_id)
                 store_id = fallback_id
+
+        # Loud warning so super-admin can see in Railway logs that a real
+        # merchant's widget is hitting our backend but the store was never
+        # registered — usually a missing/lost app.store.authorize webhook.
+        if agent is not None and requested_store_id != store_id:
+            print(
+                f"[chat] ⚠️ ORPHAN STORE: widget requested {requested_store_id!r} "
+                f"(not registered) — falling back to {store_id!r}. "
+                f"Conversation will appear in {store_id!r}'s dashboard. "
+                f"Fix: register {requested_store_id!r} via /admin/stores/register "
+                f"or reinstall the app on that store."
+            )
 
         # 3) Nothing works → friendly message (NOT bot_enabled=False — that triggers
         #    the widget's "admin takeover" UI which loops endlessly)

@@ -139,8 +139,18 @@ def add_message(session_id: str, role: str, content: str, store_id: str = "defau
     """
     Append a message to the conversation.
     role: 'user' | 'assistant' | 'admin'
+
+    store_id resolution: if a non-default store_id is passed and the existing
+    conversation is still tagged with the placeholder "default", upgrade it so
+    the conversation appears in the correct admin dashboard. Without this, a
+    conversation that was first touched by a legacy caller (no store_id) would
+    stay stuck under "default" forever — invisible to every real admin.
     """
     conv = get_or_create(session_id, store_id)
+    # Upgrade stale "default" tag to the real store_id passed by an explicit caller
+    if store_id and store_id != "default" and conv.get("store_id", "default") == "default":
+        conv["store_id"] = store_id
+
     msg = {"role": role, "content": content, "ts": _now()}
     conv["messages"].append(msg)
     conv["last_activity"] = _now()
