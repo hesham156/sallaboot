@@ -128,6 +128,7 @@ class SallaClient:
         items: list,
         customer_info: dict = None,
         notes: str = "",
+        accepted_methods: Optional[list] = None,
     ) -> dict:
         """
         Create an order and return the customer-facing payment URL.
@@ -138,11 +139,15 @@ class SallaClient:
             "salla_customer_id": int   # optional — if present, used directly
         }
 
-        IMPORTANT: Salla's POST /orders expects a `products` array where each
-        item is {identifier_type, identifier, quantity} — NOT an `items`
-        array with {id, quantity}. Using the wrong key silently produced
-        orders with no line items / failed checkouts. (Verified against the
-        Salla Platform Docs OAS example.)
+        IMPORTANT (verified against the Salla Platform Docs OAS):
+        - POST /orders expects a `products` array of
+          {identifier_type, identifier, quantity} — NOT `items`.
+        - `payment` is REQUIRED with `payment.status` ∈ {paid, pending_payment}.
+          We use "pending_payment" + accepted_methods so the customer gets a
+          payment link (urls.customer) and pays themselves.
+        - customer.mobile must be E.164 (+966…).
+        - delivery_method is only required for products that need shipping;
+          custom-quote products are `service` type so we omit it.
         """
         products = []
         for i in items:
@@ -156,6 +161,13 @@ class SallaClient:
             products.append(entry)
 
         payload: dict = {"products": products}
+
+        # Required payment block — pending_payment yields a payable order
+        payload["payment"] = {
+            "status":           "pending_payment",
+            "accepted_methods": accepted_methods or ["mada", "credit_card", "bank", "cod"],
+        }
+
         if notes:
             payload["notes"] = notes
         if customer_info:
@@ -227,11 +239,13 @@ class SallaClient:
         # Force multipart/form-data even though all fields are text: httpx
         # encodes (None, value) tuples in `files=` as form fields, producing a
         # proper multipart body (which the endpoint requires).
+        # NOTE: do NOT send `main` here — over multipart it arrives as the
+        # string "true", which Salla rejects ("main must be true or false").
+        # The first image attached becomes the main image automatically.
         return await self._request(
             "POST", f"/products/{product_id}/images",
             files={
                 "original": (None, image_url),
-                "main":     (None, "true"),
                 "alt":      (None, alt or "custom"),
             },
         )
