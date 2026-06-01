@@ -633,17 +633,23 @@ function TestCalculator({ storeId, cfg }: { storeId: string; cfg: PricingConfig 
   async function runOrderTest() {
     setOrderTesting(true); setOrderTest('')
     try {
-      const r = await api.testOrder(storeId)
-      if (r.ok) {
-        setOrderTest(`✅ ${r.message || 'إنشاء الطلب يعمل'} — order #${r.order_id}`)
-      } else {
-        setOrderTest(
-          `❌ فشل عند مرحلة "${r.stage}":\n${r.error || 'خطأ غير معروف'}` +
-          (r.error && /scope/i.test(r.error)
-            ? '\n\n⚠️ المتجر يحتاج صلاحيات products.read_write و orders.read_write — أعد تثبيت التطبيق من سلة بعد إضافتها.'
-            : '')
-        )
+      const r = await api.testOrder(storeId) as Record<string, unknown>
+      const lines: string[] = []
+      lines.push(`المنتج: ${r.product_created ? '✅ تم (#' + r.product_id + ')' : '❌ فشل'}`)
+      lines.push(`الصورة: ${r.image_attached ? '✅ تم' : '❌ ' + (r.image_error || 'فشل')}`)
+      lines.push(`الطلب: ${r.order_created ? '✅ تم (#' + r.order_id + ')' : '❌ فشل'}`)
+      if (r.payment_url) lines.push(`رابط الدفع: ${r.payment_url}`)
+      if (!r.ok && r.error) {
+        lines.push('')
+        lines.push(`❌ فشل عند "${r.stage}":`)
+        lines.push(String(r.error))
+        if (/scope/i.test(String(r.error))) {
+          lines.push('')
+          lines.push('⚠️ المتجر يحتاج صلاحيات products.read_write و orders.read_write — أضفها في Salla Partners ثم أعد تثبيت التطبيق.')
+        }
       }
+      if (r.ok) lines.unshift('✅ كل الخطوات نجحت!\n')
+      setOrderTest(lines.join('\n'))
     } catch (e) {
       setOrderTest(`❌ ${e instanceof Error ? e.message : 'خطأ'}`)
     } finally { setOrderTesting(false) }
