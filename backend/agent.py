@@ -553,6 +553,37 @@ def _clean_reply(text: str) -> str:
     return text.strip()
 
 
+def _split_name_phone(full_name: str, phone: str) -> tuple[str, str, str, str]:
+    """
+    Split a display name into first/last and a phone into (dial_code, local).
+
+    Salla's create_customer wants `mobile` WITHOUT the country code and a
+    separate `mobile_code_country` like "+966". This normalises common
+    Saudi input formats: 05XXXXXXXX, 5XXXXXXXX, 9665XXXXXXXX, +9665XXXXXXXX.
+
+    Returns (first_name, last_name, dial_code, local_number).
+    """
+    parts = (full_name or "").strip().split()
+    first = parts[0] if parts else "عميل"
+    last  = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+    # Keep digits only
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    dial = "+966"
+    local = digits
+
+    if digits.startswith("00966"):
+        dial, local = "+966", digits[5:]
+    elif digits.startswith("966"):
+        dial, local = "+966", digits[3:]
+    elif digits.startswith("0") and len(digits) >= 10:
+        # 05XXXXXXXX → drop leading 0
+        local = digits[1:]
+    # else: assume already local (5XXXXXXXX) — keep as-is
+
+    return first, last, dial, local
+
+
 # ── Agent ──────────────────────────────────────────────────────────────────────
 
 class PrintingAgent:
@@ -989,9 +1020,12 @@ class PrintingAgent:
                 }
                 cs.set_customer_info(session_id, info)
 
-                # ── Auto-enrich: try to find this customer in Salla ──────────────
-                # Silently look up by phone so checkout can use salla_customer_id
-                # and skip re-sending raw name/phone/email to the order API.
+                # ── Find-or-create the customer in Salla ─────────────────────────
+                # 1) Look up by phone. If found → store salla_customer_id.
+                # 2) If NOT found → create a new customer record in the store's
+                #    customer base, then store the new id. This means every
+                #    chatbot lead becomes a real Salla customer the merchant
+                #    can see, segment, and remarket to.
                 if self.salla and info.get("phone"):
                     try:
                         resp  = await self.salla.get_customer_by_phone(info["phone"])
@@ -1002,21 +1036,41 @@ class PrintingAgent:
                             c = found
                         else:
                             c = {}
+
                         if c.get("id"):
-                            # Enrich silently — don't override values the bot explicitly set
+                            # Existing customer — enrich silently
                             enriched = dict(info)
                             enriched["salla_customer_id"] = c["id"]
                             if not enriched.get("email") and c.get("email"):
                                 enriched["email"] = c["email"]
                             if not enriched.get("name"):
-                                fn = c.get("first_name", "")
-                                ln = c.get("last_name", "")
-                                full = f"{fn} {ln}".strip()
+                                full = f"{c.get('first_name','')} {c.get('last_name','')}".strip()
                                 if full:
                                     enriched["name"] = full
                             cs.set_customer_info(session_id, enriched)
-                            print(f"[set_customer_info] ✅ enriched with salla_id={c['id']} "
-                                  f"for session {session_id}")
+                            print(f"[set_customer_info] ✅ matched existing salla_id={c['id']}")
+                        else:
+                            # New lead — create the customer in Salla
+                            first, last, dial, local = _split_name_phone(
+                                info.get("name", ""), info.get("phone", "")
+                            )
+                            try:
+                                cresp = await self.salla.create_customer(
+                                    first_name=first, last_name=last,
+                                    mobile=local, mobile_code_country=dial,
+                                    email=info.get("email", ""),
+                                )
+                                newc = cresp.get("data", {})
+                                if newc.get("id"):
+                                    enriched = dict(info)
+                                    enriched["salla_customer_id"] = newc["id"]
+                                    cs.set_customer_info(session_id, enriched)
+                                    print(f"[set_customer_info] 🆕 created salla customer "
+                                          f"id={newc['id']} for session {session_id}")
+                            except Exception as ce:
+                                # 422 = duplicate email/mobile race, or missing scope —
+                                # non-fatal, checkout still works with raw fields.
+                                print(f"[set_customer_info] create_customer skipped: {ce}")
                     except Exception as _e:
                         print(f"[set_customer_info] auto-lookup skipped: {_e}")
 

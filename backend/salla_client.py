@@ -361,6 +361,42 @@ class SallaClient:
         """Search customers by phone number (keyword search)."""
         return await self._request("GET", "/customers", params={"keyword": phone})
 
+    async def create_customer(
+        self,
+        first_name: str,
+        last_name: str = "",
+        mobile: str = "",
+        mobile_code_country: str = "+966",
+        email: str = "",
+        gender: str = "",
+        birthday: str = "",
+    ) -> dict:
+        """
+        Create a new customer in the store's customer base.
+        POST /admin/v2/customers  (scope: customers.read_write)
+
+        Per the Salla docs: email and mobile are UNIQUE — creating a
+        duplicate returns 422. Callers should look up by phone first and
+        only create when not found.
+
+        Args:
+            mobile              : phone WITHOUT the country code (e.g. 555123456)
+            mobile_code_country : dial code with '+' (e.g. "+966")
+        """
+        payload: dict = {"first_name": first_name[:25] or "عميل"}
+        if last_name:
+            payload["last_name"] = last_name[:25]
+        if mobile:
+            payload["mobile"] = mobile
+            payload["mobile_code_country"] = mobile_code_country
+        if email:
+            payload["email"] = email
+        if gender in ("male", "female"):
+            payload["gender"] = gender
+        if birthday:
+            payload["birthday"] = birthday
+        return await self._request("POST", "/customers", json=payload)
+
     # ── Abandoned Carts endpoints ──────────────────────────────────────────────
 
     async def get_abandoned_carts(
