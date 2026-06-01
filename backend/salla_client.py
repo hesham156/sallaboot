@@ -123,6 +123,17 @@ class SallaClient:
     async def search_orders_by_reference(self, reference: str) -> dict:
         return await self._request("GET", "/orders", params={"reference_id": reference})
 
+    async def add_order_note(self, order_id, note: str) -> dict:
+        """
+        Append a note to an order's history.
+        POST /admin/v2/orders/{order_id}/histories  (scope: orders.read_write)
+        Used to record custom-quote specs on the order (since POST /orders
+        itself has no `notes` field).
+        """
+        return await self._request(
+            "POST", f"/orders/{order_id}/histories", json={"note": note[:1000]},
+        )
+
     async def create_order(
         self,
         items: list,
@@ -168,8 +179,12 @@ class SallaClient:
             "accepted_methods": accepted_methods or ["mada", "credit_card", "bank", "cod"],
         }
 
-        if notes:
-            payload["notes"] = notes
+        # NOTE: POST /orders has NO `notes` field in Salla's schema — sending it
+        # 422s ("notes" validation). Order specs live in the product
+        # name/description instead; a note can be added post-creation via
+        # POST /orders/{id}/histories if needed. `notes` kept in the signature
+        # for backward compat but intentionally NOT sent.
+        _ = notes  # unused on purpose
         if customer_info:
             salla_cid = customer_info.get("salla_customer_id")
             if salla_cid:
@@ -239,15 +254,13 @@ class SallaClient:
         # Force multipart/form-data even though all fields are text: httpx
         # encodes (None, value) tuples in `files=` as form fields, producing a
         # proper multipart body (which the endpoint requires).
-        # NOTE: do NOT send `main` here — over multipart it arrives as the
-        # string "true", which Salla rejects ("main must be true or false").
-        # The first image attached becomes the main image automatically.
+        # Send ONLY `original` (the URL):
+        #   • `main` over multipart arrives as "true" → rejected.
+        #   • `alt` with long/Arabic values triggers a 422 on some stores.
+        # The first attached image becomes main automatically.
         return await self._request(
             "POST", f"/products/{product_id}/images",
-            files={
-                "original": (None, image_url),
-                "alt":      (None, alt or "custom"),
-            },
+            files={"original": (None, image_url)},
         )
 
     async def create_order_item(

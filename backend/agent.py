@@ -1381,11 +1381,18 @@ class PrintingAgent:
                     order_resp = await self.salla.create_order(
                         [{"product_id": new_pid, "quantity": 1}],
                         customer,
-                        order_notes,
                     )
                     order     = order_resp.get("data", {})
                     order_id  = order.get("id")
                     order_ref = order.get("reference_id", str(order_id))
+
+                    # Record the specs on the order timeline (POST /orders has
+                    # no `notes` field, so we add them as an order history note).
+                    if order_id:
+                        try:
+                            await self.salla.add_order_note(order_id, order_notes)
+                        except Exception as ne:
+                            print(f"[create_quote_order] add_order_note failed (non-fatal): {ne}")
                     pay_url   = (order.get("urls") or {}).get("customer", "")
                     amounts   = order.get("amounts", {})
                     total_str = (amounts.get("total") or {}).get("amount", f"{total_price:.2f}")
