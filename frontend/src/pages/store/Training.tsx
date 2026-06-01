@@ -108,10 +108,16 @@ export default function Training({ storeId }: Props) {
     } catch (e) { console.error(e) }
   }
 
+  // Field styles — taller, clearer, no built-in label (we render labels
+  // explicitly above each field via <Field> to avoid HeroUI's outside-label
+  // overlapping the placeholder in RTL).
   const inputCls = {
-    inputWrapper: 'border-divider bg-content2',
-    label:        'text-default-400 text-xs font-medium',
-    input:        'text-foreground text-sm',
+    inputWrapper: 'border-divider bg-content2 h-12 min-h-12 hover:border-slate-500 group-data-[focus=true]:border-primary',
+    input:        'text-foreground text-sm placeholder:text-default-500',
+  }
+  const taCls = {
+    inputWrapper: 'border-divider bg-content2 hover:border-slate-500 group-data-[focus=true]:border-primary py-2',
+    input:        'text-foreground text-sm leading-relaxed placeholder:text-default-500',
   }
 
   const counts = {
@@ -162,45 +168,51 @@ export default function Training({ storeId }: Props) {
             <Tab key="add-file"        title="📄 ملف مرجعي" />
           </Tabs>
 
-          <div className="mt-4 space-y-4">
+          <div className="mt-5 space-y-5">
             {tab === 'add-instruction' && (
               <>
-                <Input
-                  label="عنوان التوجيه (اختياري)" placeholder="مثال: نبرة المحادثة"
-                  value={title} onValueChange={setTitle}
-                  variant="bordered" labelPlacement="outside" classNames={inputCls}
-                />
-                <Textarea
-                  label="التوجيه" placeholder="مثال: استخدم لغة عربية فصيحة وبسيطة. لا تخصم أكثر من ١٠٪. اعرض المنتجات بالأسعار قبل الضريبة."
-                  value={content} onValueChange={setContent}
-                  variant="bordered" labelPlacement="outside"
-                  minRows={3} maxRows={8}
-                  classNames={{ inputWrapper: inputCls.inputWrapper, input: 'text-sm leading-relaxed' }}
-                />
+                <Field label="عنوان التوجيه" hint="اختياري">
+                  <Input
+                    placeholder="مثال: نبرة المحادثة"
+                    value={title} onValueChange={setTitle}
+                    variant="bordered" classNames={inputCls}
+                  />
+                </Field>
+                <Field label="نص التوجيه">
+                  <Textarea
+                    placeholder="مثال: استخدم لغة عربية فصيحة وبسيطة. لا تخصم أكثر من ١٠٪. اعرض المنتجات بالأسعار قبل الضريبة."
+                    value={content} onValueChange={setContent}
+                    variant="bordered" minRows={4} maxRows={10}
+                    classNames={taCls}
+                  />
+                </Field>
                 <Button color="warning" isLoading={saving} onPress={() => addText('instruction')}
-                        className="w-full font-bold">
-                  {saving ? '' : '🎯 ضيف التوجيه'}
+                        className="w-full font-bold h-11">
+                  {saving ? '' : '🎯 إضافة التوجيه'}
                 </Button>
               </>
             )}
 
             {tab === 'add-faq' && (
               <>
-                <Input
-                  label="السؤال" placeholder="مثال: كم مدة التسليم؟"
-                  value={title} onValueChange={setTitle}
-                  variant="bordered" labelPlacement="outside" classNames={inputCls}
-                />
-                <Textarea
-                  label="الإجابة" placeholder="مثال: مدة التسليم من ٣ إلى ٥ أيام عمل داخل الرياض، و٥ إلى ٧ أيام لباقي المدن. الشحن مجاني فوق ٢٠٠ ريال."
-                  value={content} onValueChange={setContent}
-                  variant="bordered" labelPlacement="outside"
-                  minRows={4} maxRows={10}
-                  classNames={{ inputWrapper: inputCls.inputWrapper, input: 'text-sm leading-relaxed' }}
-                />
+                <Field label="السؤال">
+                  <Input
+                    placeholder="مثال: كم مدة التسليم؟"
+                    value={title} onValueChange={setTitle}
+                    variant="bordered" classNames={inputCls}
+                  />
+                </Field>
+                <Field label="الإجابة">
+                  <Textarea
+                    placeholder="مثال: مدة التسليم من ٣ إلى ٥ أيام عمل داخل الرياض، و٥ إلى ٧ أيام لباقي المدن. الشحن مجاني فوق ٢٠٠ ريال."
+                    value={content} onValueChange={setContent}
+                    variant="bordered" minRows={5} maxRows={12}
+                    classNames={taCls}
+                  />
+                </Field>
                 <Button color="success" isLoading={saving} onPress={() => addText('faq')}
-                        className="w-full font-bold">
-                  {saving ? '' : '💬 ضيف السؤال والإجابة'}
+                        className="w-full font-bold h-11">
+                  {saving ? '' : '💬 إضافة السؤال والإجابة'}
                 </Button>
               </>
             )}
@@ -215,26 +227,25 @@ export default function Training({ storeId }: Props) {
                   </p>
                 </div>
 
-                <Input
-                  label="عنوان المرجع (اختياري)" placeholder="مثال: كتالوج صيف 2025"
-                  value={fileTitle} onValueChange={setFileTitle}
-                  variant="bordered" labelPlacement="outside" classNames={inputCls}
-                />
+                <Field label="عنوان المرجع" hint="اختياري">
+                  <Input
+                    placeholder="مثال: كتالوج صيف 2025"
+                    value={fileTitle} onValueChange={setFileTitle}
+                    variant="bordered" classNames={inputCls}
+                  />
+                </Field>
 
-                <div>
-                  <label className="text-xs text-default-400 font-medium mb-2 block">
-                    الملف
-                  </label>
+                <Field label="الملف">
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept=".pdf,.txt,.md,.csv,.log"
-                    className="block w-full text-xs text-default-300 file:ml-3 file:py-2 file:px-4 file:rounded-lg file:border file:border-divider file:bg-content2 file:text-foreground file:cursor-pointer file:font-semibold hover:file:bg-content3"
+                    className="block w-full text-xs text-default-300 rounded-xl border border-divider bg-content2 p-2.5 file:ml-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary/15 file:text-primary file:cursor-pointer file:font-semibold hover:file:bg-primary/25 cursor-pointer"
                   />
-                </div>
+                </Field>
 
                 <Button color="primary" isLoading={uploading} onPress={uploadFile}
-                        className="w-full font-bold bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/20">
+                        className="w-full font-bold h-11 bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/20">
                   {uploading ? '' : '📤 رفع وقراءة الملف'}
                 </Button>
               </>
@@ -338,6 +349,21 @@ export default function Training({ storeId }: Props) {
           )}
         </CardBody>
       </Card>
+    </div>
+  )
+}
+
+// ── Field: explicit label above the control (reliable in RTL) ───────────────
+function Field({ label, hint, children }: {
+  label: string; hint?: string; children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-default-500 px-0.5">
+        {label}
+        {hint && <span className="text-[10px] font-normal text-default-400">({hint})</span>}
+      </label>
+      {children}
     </div>
   )
 }
