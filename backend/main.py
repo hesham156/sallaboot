@@ -1198,11 +1198,12 @@ async def debug_test_order(store_id: str, request: Request):
         result["image_attached"] = False
         result["image_error"] = str(e)
 
-    # 2) Create order with that product
+    # 2) Create order with that product (valid Saudi mobile so it passes
+    #    Salla's E.164 validation — create_order normalises it to +966…)
     try:
         oresp = await client.create_order(
             [{"product_id": pid, "quantity": 1}],
-            {"name": "عميل اختبار", "phone": "500000000"},
+            {"name": "عميل اختبار", "phone": "0500000000"},
             "طلب اختبار تشخيصي",
         )
         order = oresp.get("data") or {}

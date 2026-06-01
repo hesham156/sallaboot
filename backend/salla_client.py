@@ -3,6 +3,39 @@ import httpx
 from typing import Optional
 
 
+def normalize_mobile_e164(phone: str, default_dial: str = "966") -> str:
+    """
+    Normalise a phone number to E.164 ("+<country><number>") which Salla's
+    order API requires (mobile must be >= 10 chars and start with '+').
+
+    Handles common Saudi formats:
+      0531549560        → +966531549560
+      531549560         → +966531549560
+      966531549560      → +966531549560
+      00966531549560    → +966531549560
+      +966531549560     → +966531549560 (unchanged)
+    Non-Saudi numbers already carrying a country code are preserved.
+    """
+    raw = (phone or "").strip()
+    if not raw:
+        return ""
+    had_plus = raw.startswith("+")
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return ""
+
+    if had_plus:
+        return "+" + digits
+    if digits.startswith("00"):
+        return "+" + digits[2:]
+    if digits.startswith(default_dial):
+        return "+" + digits
+    if digits.startswith("0"):
+        return "+" + default_dial + digits[1:]
+    # Bare local number (e.g. 5XXXXXXXX)
+    return "+" + default_dial + digits
+
+
 class SallaClient:
     BASE_URL = "https://api.salla.dev/admin/v2"
 
@@ -131,11 +164,11 @@ class SallaClient:
                 # Use existing Salla customer — API resolves name/phone/email
                 payload["customer"] = {"id": int(salla_cid)}
             else:
-                name_parts = (customer_info.get("name") or "").split()
+                # Salla requires customer.mobile in E.164 (+966…). Sending a
+                # raw local number ("0531549560") fails 422 validation.
                 cust: dict = {
-                    "name":   (customer_info.get("name") or "").strip()
-                              or (name_parts[0] if name_parts else "عميل"),
-                    "mobile": customer_info.get("phone", ""),
+                    "name":   (customer_info.get("name") or "").strip() or "عميل",
+                    "mobile": normalize_mobile_e164(customer_info.get("phone", "")),
                 }
                 email = (customer_info.get("email") or "").strip()
                 if email:
