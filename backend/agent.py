@@ -666,24 +666,43 @@ class PrintingAgent:
         if not phone:
             return customer
 
+        first, last, dial, local = _split_name_phone(customer.get("name", ""), phone)
+
+        async def _find_id() -> int | None:
+            """Search by several phone forms — Salla keyword matching is picky."""
+            for term in {local, phone, dial + local, local.lstrip("0")}:
+                if not term:
+                    continue
+                try:
+                    resp  = await self.salla.get_customer_by_phone(term)
+                    found = resp.get("data", [])
+                    c = (found[0] if isinstance(found, list) and found
+                         else found if isinstance(found, dict) else {})
+                    if isinstance(c, dict) and c.get("id"):
+                        return c["id"]
+                except Exception:
+                    continue
+            return None
+
+        cid = None
         try:
-            # 1) Try to find an existing customer by phone
-            resp  = await self.salla.get_customer_by_phone(phone)
-            found = resp.get("data", [])
-            c = found[0] if isinstance(found, list) and found else (found if isinstance(found, dict) else {})
-            cid = c.get("id") if isinstance(c, dict) else None
+            # 1) Find existing customer first
+            cid = await _find_id()
 
             # 2) Not found → create them
             if not cid:
-                first, last, dial, local = _split_name_phone(
-                    customer.get("name", ""), phone
-                )
-                cresp = await self.salla.create_customer(
-                    first_name=first, last_name=last,
-                    mobile=local, mobile_code_country=dial,
-                    email=customer.get("email", ""),
-                )
-                cid = (cresp.get("data") or {}).get("id")
+                try:
+                    cresp = await self.salla.create_customer(
+                        first_name=first, last_name=last,
+                        mobile=local, mobile_code_country=dial,
+                        email=customer.get("email", ""),
+                    )
+                    cid = (cresp.get("data") or {}).get("id")
+                except Exception as ce:
+                    # Most common: mobile/email already exists (duplicate) →
+                    # the customer DOES exist, so re-search to grab their id.
+                    print(f"[_ensure_salla_customer] create failed ({ce}); re-searching")
+                    cid = await _find_id()
 
             if cid:
                 customer = dict(customer)
@@ -691,6 +710,8 @@ class PrintingAgent:
                 cs.set_customer_info(session_id, customer)
                 await cs.flush(session_id)
                 print(f"[_ensure_salla_customer] using salla_customer_id={cid}")
+            else:
+                print("[_ensure_salla_customer] could not resolve a customer id")
         except Exception as e:
             print(f"[_ensure_salla_customer] failed (will fall back to raw fields): {e}")
 
@@ -1300,6 +1321,12 @@ class PrintingAgent:
                 # an existing customer.id avoids the email requirement. So if we
                 # don't yet have an id, create/find the customer now.
                 customer = await self._ensure_salla_customer(session_id, customer)
+
+                # If we still couldn't get an id AND have no email, the raw-fields
+                # order would fail Salla validation — ask for the email instead.
+                if not customer.get("salla_customer_id") and not customer.get("email"):
+                    return ("ممتاز! بس محتاج بريدك الإلكتروني عشان أكمّل الطلب وأرسل "
+                            "لك رابط الدفع. ممكن تزوّدني به؟ 📧")
 
                 try:
                     total_price = float(total_price)
