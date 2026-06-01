@@ -1198,12 +1198,37 @@ async def debug_test_order(store_id: str, request: Request):
         result["image_attached"] = False
         result["image_error"] = str(e)
 
-    # 2) Create order with that product (valid Saudi mobile so it passes
-    #    Salla's E.164 validation — create_order normalises it to +966…)
+    # 1c) Create (or find) a test customer so the order uses customer.id —
+    #     Salla requires name+mobile+email when ordering with raw fields.
+    test_customer = {"name": "عميل اختبار", "phone": "0500000000"}
+    try:
+        cresp = await client.create_customer(
+            first_name="عميل", last_name="اختبار",
+            mobile="500000000", mobile_code_country="+966",
+        )
+        tcid = (cresp.get("data") or {}).get("id")
+        if tcid:
+            test_customer = {"salla_customer_id": tcid}
+            result["test_customer_id"] = tcid
+    except Exception as e:
+        # Customer may already exist (unique mobile) — try to find them
+        try:
+            fr = await client.get_customer_by_phone("500000000")
+            fl = fr.get("data", [])
+            fc = fl[0] if isinstance(fl, list) and fl else {}
+            if fc.get("id"):
+                test_customer = {"salla_customer_id": fc["id"]}
+                result["test_customer_id"] = fc["id"]
+            else:
+                result["customer_note"] = str(e)
+        except Exception as e2:
+            result["customer_note"] = f"{e} | {e2}"
+
+    # 2) Create order with that product + customer
     try:
         oresp = await client.create_order(
             [{"product_id": pid, "quantity": 1}],
-            {"name": "عميل اختبار", "phone": "0500000000"},
+            test_customer,
             "طلب اختبار تشخيصي",
         )
         order = oresp.get("data") or {}

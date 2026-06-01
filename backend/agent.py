@@ -646,6 +646,56 @@ class PrintingAgent:
         token      = access_token or os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token, store_id=store_id) if token else None
 
+    # ── Customer helper ──────────────────────────────────────────────────────────
+    async def _ensure_salla_customer(self, session_id: str, customer: dict) -> dict:
+        """
+        Guarantee the conversation has a Salla customer_id before placing an
+        order. Salla's order API requires name+mobile+EMAIL when no id is
+        given; using an existing customer.id sidesteps that. So if we don't
+        have an id yet, find the customer by phone (or create them) and store
+        the resulting id back on the session.
+
+        Returns the (possibly updated) customer_info dict. Never raises.
+        """
+        if not self.salla or not customer:
+            return customer
+        if customer.get("salla_customer_id"):
+            return customer
+
+        phone = (customer.get("phone") or "").strip()
+        if not phone:
+            return customer
+
+        try:
+            # 1) Try to find an existing customer by phone
+            resp  = await self.salla.get_customer_by_phone(phone)
+            found = resp.get("data", [])
+            c = found[0] if isinstance(found, list) and found else (found if isinstance(found, dict) else {})
+            cid = c.get("id") if isinstance(c, dict) else None
+
+            # 2) Not found → create them
+            if not cid:
+                first, last, dial, local = _split_name_phone(
+                    customer.get("name", ""), phone
+                )
+                cresp = await self.salla.create_customer(
+                    first_name=first, last_name=last,
+                    mobile=local, mobile_code_country=dial,
+                    email=customer.get("email", ""),
+                )
+                cid = (cresp.get("data") or {}).get("id")
+
+            if cid:
+                customer = dict(customer)
+                customer["salla_customer_id"] = cid
+                cs.set_customer_info(session_id, customer)
+                await cs.flush(session_id)
+                print(f"[_ensure_salla_customer] using salla_customer_id={cid}")
+        except Exception as e:
+            print(f"[_ensure_salla_customer] failed (will fall back to raw fields): {e}")
+
+        return customer
+
     # ── Tool runner ────────────────────────────────────────────────────────────
     async def _run_tool(self, name: str, inputs: dict, session_id: str = "") -> str:
         try:
@@ -1244,6 +1294,12 @@ class PrintingAgent:
                 customer = cs.get_customer_info(session_id)
                 if not customer.get("phone") and not customer.get("salla_customer_id"):
                     return "⚠️ يرجى تزويدي باسمك ورقم جوالك أولاً لإتمام الطلب."
+
+                # Ensure we have a Salla customer_id. Creating an order with raw
+                # customer fields requires name+mobile+EMAIL (all three). Using
+                # an existing customer.id avoids the email requirement. So if we
+                # don't yet have an id, create/find the customer now.
+                customer = await self._ensure_salla_customer(session_id, customer)
 
                 try:
                     total_price = float(total_price)
