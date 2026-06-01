@@ -241,6 +241,40 @@ export default function Brain({ storeId }: Props) {
         </Card>
       )}
 
+      {/* ════════════ CHIP CARDS: offers / payments / branches / brands ════════════ */}
+      {data.special_offers && data.special_offers.length > 0 && (
+        <ChipCard
+          dot="bg-rose-400" title="🎁 العروض الحالية"
+          count={data.special_offers.length}
+          chips={data.special_offers.slice(0, 12).map(o => o.message ? `${o.name} — ${o.message}` : o.name)}
+          color="danger"
+        />
+      )}
+      {data.payment_methods && data.payment_methods.length > 0 && (
+        <ChipCard
+          dot="bg-emerald-400" title="💳 طرق الدفع"
+          count={data.payment_methods.length}
+          chips={data.payment_methods.map(p => p.name)}
+          color="success"
+        />
+      )}
+      {data.branches && data.branches.length > 0 && (
+        <ChipCard
+          dot="bg-sky-400" title="🏬 الفروع"
+          count={data.branches.length}
+          chips={data.branches.map(b => b.city ? `${b.name} (${b.city})` : b.name)}
+          color="primary"
+        />
+      )}
+      {data.brands && data.brands.length > 0 && (
+        <ChipCard
+          dot="bg-violet-400" title="🏷️ الماركات"
+          count={data.brands.length}
+          chips={data.brands.slice(0, 30).map(b => b.name)}
+          color="secondary"
+        />
+      )}
+
       {/* ════════════ STATS GRID ════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
@@ -397,5 +431,34 @@ function StatCard({ icon, label, value, sub, color }: {
       <div className={`text-xl md:text-2xl font-black ${valueColors[color]} leading-tight`}>{value}</div>
       {sub && <div className="text-[10px] text-default-500 mt-1">{sub}</div>}
     </div>
+  )
+}
+
+function ChipCard({ dot, title, count, chips, color }: {
+  dot: string; title: string; count: number; chips: string[]
+  color: 'danger' | 'success' | 'primary' | 'secondary' | 'warning'
+}) {
+  const visible = chips.filter(Boolean)
+  if (visible.length === 0) return null
+  return (
+    <Card className="bg-content1 border border-divider">
+      <CardHeader className="px-5 py-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${dot}`} />
+          <h2 className="font-bold text-sm">{title}</h2>
+        </div>
+        <Chip size="sm" variant="flat" color="default">{count}</Chip>
+      </CardHeader>
+      <Divider />
+      <CardBody className="px-5 py-4">
+        <div className="flex flex-wrap gap-2">
+          {visible.map((c, i) => (
+            <Chip key={i} size="sm" variant="flat" color={color} className="font-medium">
+              {c}
+            </Chip>
+          ))}
+        </div>
+      </CardBody>
+    </Card>
   )
 }

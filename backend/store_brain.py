@@ -78,6 +78,26 @@ def get_shipping_companies(store_id: str) -> list[dict]:
     return (sm.get_cache(store_id) or {}).get("shipping_companies") or []
 
 
+def get_brands(store_id: str) -> list[dict]:
+    return (sm.get_cache(store_id) or {}).get("brands") or []
+
+
+def get_special_offers(store_id: str) -> list[dict]:
+    return (sm.get_cache(store_id) or {}).get("special_offers") or []
+
+
+def get_branches(store_id: str) -> list[dict]:
+    return (sm.get_cache(store_id) or {}).get("branches") or []
+
+
+def get_payment_methods(store_id: str) -> list[dict]:
+    return (sm.get_cache(store_id) or {}).get("payment_methods") or []
+
+
+def get_shipping_zones(store_id: str) -> list[dict]:
+    return (sm.get_cache(store_id) or {}).get("shipping_zones") or []
+
+
 def get_overview(store_id: str) -> dict:
     """
     Compute a quick numeric overview of the store's catalog.
@@ -215,6 +235,43 @@ def _build_store_profile_block(store_id: str) -> str:
         names = [c.get("name", "") for c in carriers if c.get("name")]
         if names:
             lines.append(f"شركات الشحن المتاحة ({len(names)}): " + "، ".join(names))
+
+    # Payment methods — high-signal for "كيف أدفع؟"
+    payments = get_payment_methods(store_id)
+    if payments:
+        pnames = [p.get("name", "") for p in payments if p.get("name")]
+        if pnames:
+            lines.append(f"طرق الدفع المتاحة: " + "، ".join(pnames))
+
+    # Active special offers — let the bot proactively mention them
+    offers = [o for o in get_special_offers(store_id) if o.get("status") == "active" or not o.get("status")]
+    if offers:
+        offer_lines = []
+        for o in offers[:6]:
+            nm  = o.get("name", "")
+            msg = o.get("message", "")
+            label = nm or msg
+            if label:
+                offer_lines.append(label if not (nm and msg) else f"{nm} — {msg}")
+        if offer_lines:
+            lines.append("العروض الحالية: " + " | ".join(offer_lines))
+
+    # Branches / pickup locations
+    branches = get_branches(store_id)
+    if branches:
+        bnames = [
+            (f"{b.get('name','')} ({b.get('city','')})" if b.get("city") else b.get("name", ""))
+            for b in branches[:8] if b.get("name")
+        ]
+        if bnames:
+            lines.append(f"الفروع ({len(branches)}): " + "، ".join(bnames))
+
+    # Brands carried by the store
+    brands = get_brands(store_id)
+    if brands:
+        bnames = [b.get("name", "") for b in brands[:15] if b.get("name")]
+        if bnames:
+            lines.append(f"الماركات المتوفرة: " + "، ".join(bnames))
 
     return "\n".join(lines)
 
@@ -430,6 +487,10 @@ def preview_knowledge(store_id: str) -> dict:
         "overview":           overview,
         "store_info":         store_info,
         "shipping_companies": carriers,
+        "brands":             get_brands(store_id),
+        "special_offers":     get_special_offers(store_id),
+        "branches":           get_branches(store_id),
+        "payment_methods":    get_payment_methods(store_id),
         "knowledge_chars":    len(knowledge),
         "knowledge_budget":   PROMPT_BUDGET_CHARS,
         "custom_knowledge":   _get_custom_knowledge(store_id),

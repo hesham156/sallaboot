@@ -384,10 +384,13 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
     n_a = len(data.get("articles",   []))
     si  = data.get("store_info") or {}
     info_str = f"store='{si.get('name','?')}' ({si.get('plan','?')})" if si else "no store_info"
-    n_s = len(data.get("shipping_companies") or [])
     print(
         f"[store_sync:{store_id}] ✅ Sync done — {n_p} products, {n_c} cats, "
-        f"{n_a} articles, {n_s} shipping carriers, {info_str}"
+        f"{n_a} articles, {len(data.get('shipping_companies') or [])} carriers, "
+        f"{len(data.get('brands') or [])} brands, "
+        f"{len(data.get('special_offers') or [])} offers, "
+        f"{len(data.get('branches') or [])} branches, "
+        f"{len(data.get('payment_methods') or [])} payment methods, {info_str}"
     )
     return data
 

@@ -425,10 +425,19 @@ export interface ShippingCompany {
   activation_type?: 'manual' | 'api' | string
 }
 
+export interface SallaBrand   { id?: number; name: string; logo?: string; url?: string }
+export interface SallaOffer   { id?: number; name: string; message?: string; status?: string; end_date?: string }
+export interface SallaBranch  { id?: number; name: string; city?: string; address?: string; phone?: string }
+export interface SallaPayment { id?: number; name: string; slug?: string; logo?: string }
+
 export interface BrainData {
   overview: BrainOverview
   store_info?: StoreInfoSnapshot
   shipping_companies?: ShippingCompany[]
+  brands?: SallaBrand[]
+  special_offers?: SallaOffer[]
+  branches?: SallaBranch[]
+  payment_methods?: SallaPayment[]
   knowledge_chars: number
   knowledge_budget: number
   custom_knowledge: string
