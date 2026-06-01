@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
   Card, CardBody, CardHeader,
-  Button, Input,
+  Button,
   Divider, Chip, Spinner,
 } from '@heroui/react'
 import { api, AIConfig, TokenStatus } from '../../api'
+import { TextField } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -145,13 +146,6 @@ export default function Settings({ storeId }: Props) {
     return map[tokenStatus.status] || map.unknown
   })()
 
-  // Common Input styles — labels above the field for clean RTL
-  const inputClassNames = {
-    inputWrapper: 'border-divider bg-content2 hover:border-slate-500 group-data-[focus=true]:border-primary',
-    label:        'text-default-400 text-xs font-medium',
-    input:        'text-foreground text-sm',
-  }
-
   return (
     <div className="p-6 space-y-5 max-w-2xl mx-auto" dir="rtl">
       <header>
@@ -183,7 +177,7 @@ export default function Settings({ storeId }: Props) {
 
             {/* Provider grid */}
             <div className="space-y-2">
-              <label className="text-xs text-default-400 font-medium">المزود</label>
+              <label className="text-xs font-semibold text-default-500 px-0.5">المزوّد</label>
               <div className="grid grid-cols-3 gap-2">
                 {PROVIDERS.map(p => {
                   const isActive = provider === p.key
@@ -213,30 +207,26 @@ export default function Settings({ storeId }: Props) {
             </div>
 
             {/* API Key */}
-            <Input
+            <TextField
               label="مفتاح API"
-              placeholder={isKeySaved ? '••••••••• (محفوظ — اتركه فارغاً للإبقاء)' : currentProvider.placeholder}
               type="password"
               value={apiKey}
-              onValueChange={setApiKey}
-              variant="bordered"
-              labelPlacement="outside"
+              onChange={setApiKey}
+              placeholder={isKeySaved ? '••••••••• (محفوظ — اتركه فارغاً للإبقاء)' : currentProvider.placeholder}
               description={isKeySaved
                 ? `مفتاح ${currentProvider.label} محفوظ بالفعل`
-                : `صيغة المفتاح: ${currentProvider.placeholder}`}
-              classNames={inputClassNames}
+                : `الصيغة: ${currentProvider.placeholder}`}
+              dir="ltr"
             />
 
             {/* Model */}
             <div className="space-y-2">
-              <Input
+              <TextField
                 label="الموديل"
-                placeholder={modelSuggestions[0] || 'اسم الموديل'}
                 value={model}
-                onValueChange={setModel}
-                variant="bordered"
-                labelPlacement="outside"
-                classNames={inputClassNames}
+                onChange={setModel}
+                placeholder={modelSuggestions[0] || 'اسم الموديل'}
+                dir="ltr"
               />
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {modelSuggestions.map(m => (
@@ -259,14 +249,11 @@ export default function Settings({ storeId }: Props) {
             </div>
 
             {/* Bot name */}
-            <Input
+            <TextField
               label="اسم البوت"
-              placeholder="مساعد المتجر"
               value={botName}
-              onValueChange={setBotName}
-              variant="bordered"
-              labelPlacement="outside"
-              classNames={inputClassNames}
+              onChange={setBotName}
+              placeholder="مساعد المتجر"
             />
 
             {aiMsg && (
@@ -380,35 +367,20 @@ export default function Settings({ storeId }: Props) {
         </CardHeader>
         <Divider />
         <CardBody className="px-5 py-6 space-y-5">
-          <Input
-            label="كلمة المرور الحالية"
+          <TextField
+            label="كلمة المرور الحالية" type="password"
+            value={curPass} onChange={setCurPass}
             placeholder="أدخل كلمة المرور الحالية"
-            type="password"
-            value={curPass}
-            onValueChange={setCurPass}
-            variant="bordered"
-            labelPlacement="outside"
-            classNames={inputClassNames}
           />
-          <Input
-            label="كلمة المرور الجديدة"
+          <TextField
+            label="كلمة المرور الجديدة" type="password"
+            value={newPass} onChange={setNewPass}
             placeholder="٦ أحرف على الأقل"
-            type="password"
-            value={newPass}
-            onValueChange={setNewPass}
-            variant="bordered"
-            labelPlacement="outside"
-            classNames={inputClassNames}
           />
-          <Input
-            label="تأكيد كلمة المرور الجديدة"
+          <TextField
+            label="تأكيد كلمة المرور الجديدة" type="password"
+            value={confirmPass} onChange={setConfirmPass}
             placeholder="أعد إدخال كلمة المرور الجديدة"
-            type="password"
-            value={confirmPass}
-            onValueChange={setConfirmPass}
-            variant="bordered"
-            labelPlacement="outside"
-            classNames={inputClassNames}
           />
 
           {passMsg && (
