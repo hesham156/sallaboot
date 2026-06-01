@@ -181,6 +181,28 @@ class SallaClient:
             payload["description"] = description[:1000]
         return await self._request("POST", "/products", json=payload)
 
+    async def attach_product_image_url(self, product_id, image_url: str, alt: str = "") -> dict:
+        """
+        Attach an image to a product BY URL (multipart form, `original` field).
+        POST /admin/v2/products/{product}/images  (scope: products.read_write)
+
+        Salla keeps a product `hidden` until it has at least one image, and a
+        hidden product can't be ordered. So a custom-quote product needs an
+        image attached before checkout. We pass a URL (the store logo or a
+        placeholder) so no binary upload is needed.
+        """
+        # Force multipart/form-data even though all fields are text: httpx
+        # encodes (None, value) tuples in `files=` as form fields, producing a
+        # proper multipart body (which the endpoint requires).
+        return await self._request(
+            "POST", f"/products/{product_id}/images",
+            files={
+                "original": (None, image_url),
+                "main":     (None, "true"),
+                "alt":      (None, alt or "custom"),
+            },
+        )
+
     async def create_order_item(
         self,
         order_id: int,

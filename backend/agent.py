@@ -1235,7 +1235,7 @@ class PrintingAgent:
 
                 product_name = (inputs.get("product_name") or "").strip()
                 total_price  = inputs.get("total_price")
-                qty          = max(1, int(inputs.get("quantity", 1) or 1))
+                print_qty    = max(1, int(inputs.get("quantity", 1) or 1))  # the PRINT quantity (a spec)
                 specs        = (inputs.get("specs") or "").strip()
 
                 if not product_name or total_price is None:
@@ -1250,16 +1250,25 @@ class PrintingAgent:
                 except (ValueError, TypeError):
                     return "⚠️ السعر غير صالح."
 
-                # Unit price: spread total across quantity so Salla's order
-                # total matches the quote (price × qty = total_price).
-                unit_price = round(total_price / qty, 2) if qty else total_price
+                # IMPORTANT pricing model for custom print jobs:
+                # The quote total (e.g. 103.50) is the price of the WHOLE job
+                # (the full 1000 pieces), NOT a per-unit price. So we create
+                # the product priced at the full total and order ONE unit of
+                # it. The print quantity (1000) is a spec captured in the name
+                # / description / notes — not the order line quantity.
+                # (Previously we did total ÷ qty, which created a 0.10 product
+                #  and a wrong order total.)
+                job_price = round(total_price, 2)
+                # Make sure the piece count is visible in the product name
+                if str(print_qty) not in product_name:
+                    product_name = f"{product_name} — {print_qty:,} قطعة"
 
                 try:
                     # ── 1. Create a custom product carrying the quote ────────
                     prod_resp = await self.salla.create_product(
                         name=product_name,
-                        price=unit_price,
-                        product_type="service",      # printing = service, no shipping weight needed
+                        price=job_price,
+                        product_type="service",      # printing = service, no shipping weight
                         unlimited_quantity=True,
                         description=specs or product_name,
                         status="sale",
@@ -1269,10 +1278,25 @@ class PrintingAgent:
                     if not new_pid:
                         raise RuntimeError("لم يُرجع سلة معرف المنتج الجديد")
 
-                    # ── 2. Create the order with that product ────────────────
-                    order_notes = f"طلب عرض سعر مخصص.\n{specs}" if specs else "طلب عرض سعر مخصص."
+                    # ── 1b. Attach an image so the product isn't `hidden` ────
+                    # Salla keeps image-less products hidden, and hidden
+                    # products can't be ordered. Use the store logo (or a
+                    # neutral placeholder) so the product becomes orderable.
+                    try:
+                        store_info = brain.get_store_info(self.store_id)
+                        img_url = (store_info.get("avatar") or "").strip() or \
+                                  "https://cdn.assets.salla.network/prod/admin/cp/assets/images/placeholder.png"
+                        await self.salla.attach_product_image_url(new_pid, img_url, alt=product_name)
+                    except Exception as img_e:
+                        print(f"[create_quote_order] image attach failed (non-fatal): {img_e}")
+
+                    # ── 2. Create the order with that product (qty = 1 job) ──
+                    order_notes = (
+                        f"طلب عرض سعر مخصص — {print_qty:,} قطعة.\n{specs}"
+                        if specs else f"طلب عرض سعر مخصص — {print_qty:,} قطعة."
+                    )
                     order_resp = await self.salla.create_order(
-                        [{"product_id": new_pid, "quantity": qty}],
+                        [{"product_id": new_pid, "quantity": 1}],
                         customer,
                         order_notes,
                     )
@@ -1296,7 +1320,7 @@ class PrintingAgent:
                         return (
                             f"✅ تم إنشاء طلبك المخصص رقم #{order_ref} بنجاح!\n"
                             f"📦 {product_name}\n"
-                            f"الكمية: {qty:,}  |  الإجمالي: {total_str} {currency}\n"
+                            f"الإجمالي: {total_str} {currency}\n"
                             f"💳 رابط الدفع: {pay_url}"
                         )
                     return (

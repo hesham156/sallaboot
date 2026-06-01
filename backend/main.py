@@ -1187,6 +1187,17 @@ async def debug_test_order(store_id: str, request: Request):
         result["error"] = "no product id returned"
         return result
 
+    # 1b) Attach an image so the product is sellable (not hidden)
+    try:
+        info = brain.get_store_info(store_id)
+        img = (info.get("avatar") or "").strip() or \
+              "https://cdn.assets.salla.network/prod/admin/cp/assets/images/placeholder.png"
+        await client.attach_product_image_url(pid, img, alt="diagnostic")
+        result["image_attached"] = True
+    except Exception as e:
+        result["image_attached"] = False
+        result["image_error"] = str(e)
+
     # 2) Create order with that product
     try:
         oresp = await client.create_order(
