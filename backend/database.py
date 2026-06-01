@@ -897,7 +897,7 @@ async def load_conversations(limit: int = 500) -> list:
             {
                 "session_id": r["session_id"],
                 "store_id":   r["store_id"],
-                "data":       dict(r["data"]),
+                "data":       _coerce_jsonb(r["data"]),
             }
             for r in rows
         ]
@@ -930,7 +930,7 @@ async def load_store_conversations(store_id: str, limit: int = 2000) -> list:
             {
                 "session_id": r["session_id"],
                 "store_id":   r["store_id"],
-                "data":       dict(r["data"]),
+                "data":       _coerce_jsonb(r["data"]),
             }
             for r in rows
         ]
@@ -952,7 +952,7 @@ async def load_conversation(session_id: str) -> dict | None:
             )
         if not row:
             return None
-        return dict(row["data"])
+        return _coerce_jsonb(row["data"])
     except Exception as e:
         print(f"[db] load_conversation({session_id!r}) error: {e}")
         return None
@@ -1021,7 +1021,7 @@ async def load_abandoned_carts(store_id: str) -> list:
             )
         result = []
         for r in rows:
-            entry = dict(r["cart_data"])
+            entry = _coerce_jsonb(r["cart_data"])
             entry["recovered"] = r["recovered"]
             result.append(entry)
         return result
