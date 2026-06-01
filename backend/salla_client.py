@@ -90,41 +90,89 @@ class SallaClient:
         notes: str = "",
     ) -> dict:
         """
-        Create a draft order and return the customer-facing payment URL.
+        Create an order and return the customer-facing payment URL.
 
-        items:  [{"product_id": ..., "quantity": ...}]
+        items:  [{"product_id": ..., "quantity": ..., "options": [...]?}]
         customer_info: {
             "name": "...", "phone": "...", "email": "...",
             "salla_customer_id": int   # optional — if present, used directly
         }
-        When salla_customer_id is provided the API resolves name/phone/email
-        automatically from the existing Salla customer record.
+
+        IMPORTANT: Salla's POST /orders expects a `products` array where each
+        item is {identifier_type, identifier, quantity} — NOT an `items`
+        array with {id, quantity}. Using the wrong key silently produced
+        orders with no line items / failed checkouts. (Verified against the
+        Salla Platform Docs OAS example.)
         """
-        payload: dict = {
-            "items": [
-                {"id": str(i["product_id"]), "quantity": i["quantity"]}
-                for i in items
-            ]
-        }
+        products = []
+        for i in items:
+            entry = {
+                "identifier_type": i.get("identifier_type", "id"),
+                "identifier":      int(i["product_id"]) if str(i["product_id"]).isdigit() else i["product_id"],
+                "quantity":        i.get("quantity", 1),
+            }
+            if i.get("options"):
+                entry["options"] = i["options"]
+            products.append(entry)
+
+        payload: dict = {"products": products}
         if notes:
             payload["notes"] = notes
         if customer_info:
             salla_cid = customer_info.get("salla_customer_id")
             if salla_cid:
-                # Use existing Salla customer — no need to send raw fields
+                # Use existing Salla customer — API resolves name/phone/email
                 payload["customer"] = {"id": int(salla_cid)}
             else:
                 name_parts = (customer_info.get("name") or "").split()
                 cust: dict = {
-                    "first_name": name_parts[0] if name_parts else "",
-                    "last_name":  " ".join(name_parts[1:]) if len(name_parts) > 1 else "",
-                    "mobile":     customer_info.get("phone", ""),
+                    "name":   (customer_info.get("name") or "").strip()
+                              or (name_parts[0] if name_parts else "عميل"),
+                    "mobile": customer_info.get("phone", ""),
                 }
                 email = (customer_info.get("email") or "").strip()
                 if email:
                     cust["email"] = email
                 payload["customer"] = cust
         return await self._request("POST", "/orders", json=payload)
+
+    # ── Product creation (custom quotes) ───────────────────────────────────────
+
+    async def create_product(
+        self,
+        name: str,
+        price: float,
+        *,
+        product_type: str = "service",
+        quantity: int = 0,
+        unlimited_quantity: bool = True,
+        description: str = "",
+        status: str = "sale",
+    ) -> dict:
+        """
+        Create a product in the store. Used to turn a custom printing quote
+        into a real, orderable Salla product.
+
+        POST /admin/v2/products  (scope: products.read_write)
+
+        Defaults to a `service` type with unlimited quantity so a custom
+        quote is immediately orderable — Salla normally forces status to
+        'out' until a quantity is set and 'hidden' until an image is
+        attached, so we pass quantity + unlimited_quantity to keep it
+        sellable for checkout.
+        """
+        payload: dict = {
+            "name":               name[:200],
+            "price":              round(float(price), 2),
+            "product_type":       product_type,
+            "status":             status,
+            "unlimited_quantity": unlimited_quantity,
+        }
+        if not unlimited_quantity:
+            payload["quantity"] = max(1, int(quantity))
+        if description:
+            payload["description"] = description[:1000]
+        return await self._request("POST", "/products", json=payload)
 
     async def create_order_item(
         self,
