@@ -1142,6 +1142,72 @@ async def store_products(
 
 
 # ── Per-store debug ────────────────────────────────────────────────────────────
+@app.post("/admin/{store_id}/debug/test-order")
+async def debug_test_order(store_id: str, request: Request):
+    """
+    Super-admin diagnostic: attempt to create a custom product + order
+    exactly like the bot's create_quote_order does, and return the FULL
+    Salla error if it fails. Use this to pinpoint why quote→order fails
+    (almost always a missing products.read_write / orders.read_write scope).
+
+    Cleans up the test product is NOT possible via API delete here, so it
+    creates a clearly-labelled test product. Safe to run; just leaves one
+    hidden test product behind.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    access = sm.get_access_token(store_id)
+    if not access:
+        return {"ok": False, "stage": "token", "error": "no access token for store"}
+
+    from salla_client import SallaClient
+    client = SallaClient(access, store_id=store_id)
+    result: dict = {"ok": False, "store_id": store_id}
+
+    # 1) Create product
+    try:
+        presp = await client.create_product(
+            name="🔧 منتج اختبار (تشخيص) — احذفه",
+            price=1.0, product_type="service", unlimited_quantity=True,
+            description="منتج تشخيص من لوحة التحكم", status="sale",
+        )
+        pid = (presp.get("data") or {}).get("id")
+        result["product_created"] = bool(pid)
+        result["product_id"] = pid
+    except Exception as e:
+        result["stage"] = "create_product"
+        result["error"] = str(e)
+        return result
+
+    if not pid:
+        result["stage"] = "create_product"
+        result["error"] = "no product id returned"
+        return result
+
+    # 2) Create order with that product
+    try:
+        oresp = await client.create_order(
+            [{"product_id": pid, "quantity": 1}],
+            {"name": "عميل اختبار", "phone": "500000000"},
+            "طلب اختبار تشخيصي",
+        )
+        order = oresp.get("data") or {}
+        result["order_created"] = bool(order.get("id"))
+        result["order_id"]      = order.get("id")
+        result["payment_url"]   = (order.get("urls") or {}).get("customer", "")
+        result["ok"] = bool(order.get("id"))
+    except Exception as e:
+        result["stage"] = "create_order"
+        result["error"] = str(e)
+        return result
+
+    result["message"] = "✅ كل الخطوات نجحت — ميزة عرض السعر → طلب تعمل بشكل صحيح"
+    return result
+
+
 @app.get("/admin/{store_id}/debug")
 async def store_debug(store_id: str):
     import httpx as _httpx

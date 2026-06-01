@@ -201,6 +201,13 @@ export const api = {
   // Debug
   debug: (storeId: string) =>
     get<DebugInfo>(`/admin/${storeId}/debug`),
+  testOrder: (storeId: string) =>
+    post<{
+      ok: boolean; stage?: string; error?: string
+      product_created?: boolean; product_id?: number
+      order_created?: boolean; order_id?: number; payment_url?: string
+      message?: string
+    }>(`/admin/${storeId}/debug/test-order`),
 
   // Env check
   envCheck: () =>

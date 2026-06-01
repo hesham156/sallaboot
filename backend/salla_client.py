@@ -40,7 +40,14 @@ class SallaClient:
                         f"Token refresh failed for store {self.store_id!r}: {exc}"
                     ) from exc
 
-            r.raise_for_status()
+            # Raise with Salla's actual error body so callers can log the real
+            # reason (missing scope, validation fields, etc.) instead of a bare
+            # "HTTP 422". raise_for_status() alone hides the response body.
+            if r.status_code >= 400:
+                body_preview = r.text[:600]
+                raise RuntimeError(
+                    f"Salla {method} {path} → HTTP {r.status_code}: {body_preview}"
+                )
             return r.json()
 
     # ── Product endpoints ─────────────────────────────────────────────────────

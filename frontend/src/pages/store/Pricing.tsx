@@ -610,6 +610,10 @@ function TestCalculator({ storeId, cfg }: { storeId: string; cfg: PricingConfig 
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [running, setRunning] = useState(false)
 
+  // Order-creation diagnostic (verifies products.read_write + orders.read_write)
+  const [orderTest, setOrderTest] = useState<string>('')
+  const [orderTesting, setOrderTesting] = useState(false)
+
   async function run() {
     setRunning(true)
     try {
@@ -624,6 +628,25 @@ function TestCalculator({ storeId, cfg }: { storeId: string; cfg: PricingConfig 
     } catch (e) {
       setResult({ error: e instanceof Error ? e.message : 'خطأ' })
     } finally { setRunning(false) }
+  }
+
+  async function runOrderTest() {
+    setOrderTesting(true); setOrderTest('')
+    try {
+      const r = await api.testOrder(storeId)
+      if (r.ok) {
+        setOrderTest(`✅ ${r.message || 'إنشاء الطلب يعمل'} — order #${r.order_id}`)
+      } else {
+        setOrderTest(
+          `❌ فشل عند مرحلة "${r.stage}":\n${r.error || 'خطأ غير معروف'}` +
+          (r.error && /scope/i.test(r.error)
+            ? '\n\n⚠️ المتجر يحتاج صلاحيات products.read_write و orders.read_write — أعد تثبيت التطبيق من سلة بعد إضافتها.'
+            : '')
+        )
+      }
+    } catch (e) {
+      setOrderTest(`❌ ${e instanceof Error ? e.message : 'خطأ'}`)
+    } finally { setOrderTesting(false) }
   }
 
   const papers = printingType === 'digital'
@@ -700,6 +723,34 @@ function TestCalculator({ storeId, cfg }: { storeId: string; cfg: PricingConfig 
             )}
           </div>
         )}
+
+        {/* ── Order-creation diagnostic ── */}
+        <div className="border-t border-divider pt-4 mt-2">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">اختبار إنشاء الطلب من عرض السعر</h3>
+              <p className="text-[11px] text-default-500 mt-0.5">
+                يتأكد أن البوت يقدر ينشئ منتج + طلب + رابط دفع (يحتاج صلاحيات products.read_write و orders.read_write)
+              </p>
+            </div>
+            <Button
+              size="sm" color="secondary" variant="flat"
+              isLoading={orderTesting} onPress={runOrderTest}
+              className="font-bold flex-shrink-0"
+            >
+              {orderTesting ? '' : '🧾 اختبار الطلب'}
+            </Button>
+          </div>
+          {orderTest && (
+            <div className={`rounded-lg p-3 text-xs whitespace-pre-wrap font-mono border ${
+              orderTest.startsWith('✅')
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                : 'bg-danger/10 border-danger/20 text-danger'
+            }`}>
+              {orderTest}
+            </div>
+          )}
+        </div>
       </CardBody>
     </Card>
   )
