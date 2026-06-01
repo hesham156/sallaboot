@@ -1693,6 +1693,43 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     print(f"[webhook] ✅ Store {store_id!r} authorized, sync triggered")
 
 
+async def _handle_app_uninstalled(merchant_id: str, data: dict):
+    """
+    app.uninstalled — the merchant removed the app. Salla's app review
+    REQUIRES that uninstalling deletes the merchant's data. We purge the
+    store from the DB and drop it from memory/files so we never use the
+    revoked token again.
+    """
+    store_id = merchant_id or "default"
+    if store_id == "default":
+        print("[webhook] app.uninstalled for 'default' — skipping purge (env store)")
+        return
+    try:
+        if db.available():
+            await db.purge_store(store_id)
+        sm.unregister_store(store_id)
+        _log_event(store_id, "app.uninstalled", "ok", "store data purged")
+        print(f"[webhook] 🗑️ Store {store_id!r} uninstalled — data purged")
+    except Exception as e:
+        _log_event(store_id, "app.uninstalled", "error", str(e))
+        print(f"[webhook] ❌ app.uninstalled purge failed for {store_id!r}: {e}")
+
+
+async def _handle_app_lifecycle(event: str, merchant_id: str, data: dict):
+    """
+    Acknowledge the remaining app lifecycle events Salla sends and checks
+    for during app review:
+      app.installed, app.trial.started, app.trial.expired,
+      app.subscription.started, app.subscription.renewed,
+      app.subscription.expired, app.subscription.canceled,
+      app.feedback.created, app.settings.updated
+    We log them (and could gate features on subscription status later).
+    """
+    store_id = merchant_id or "default"
+    _log_event(store_id, event, "ok", "acknowledged")
+    print(f"[webhook] {event!r} acknowledged for store {store_id!r}")
+
+
 async def _handle_product_event(event: str, merchant_id: str, data: dict):
     """
     product.created / product.updated / product.deleted /
@@ -1869,6 +1906,14 @@ async def salla_webhook(request: Request):
 
     elif event == "abandoned.cart":
         asyncio.create_task(_handle_abandoned_cart(merchant_id, data))
+
+    elif event == "app.uninstalled":
+        # Handle synchronously — delete merchant data (Salla privacy rule)
+        await _handle_app_uninstalled(merchant_id, data)
+
+    elif event.startswith("app."):
+        # app.installed / app.trial.* / app.subscription.* / app.feedback.* …
+        asyncio.create_task(_handle_app_lifecycle(event, merchant_id, data))
 
     else:
         # Unknown / unhandled event — log and acknowledge

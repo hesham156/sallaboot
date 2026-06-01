@@ -303,6 +303,25 @@ def reset_agent(store_id: str):
         _registry[store_id]["agent"] = None
 
 
+def unregister_store(store_id: str):
+    """
+    Remove a store from memory + delete its JSON files. Called on
+    app.uninstalled so we stop using a revoked token and comply with
+    Salla's "uninstall removes merchant data" requirement. (DB rows are
+    purged separately via database.purge_store.)
+    """
+    import shutil
+    store_id = str(store_id)
+    _registry.pop(store_id, None)
+    try:
+        d = DATA_DIR / store_id
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+        print(f"[store_manager] 🗑️ unregistered store {store_id!r} (memory + files)")
+    except Exception as e:
+        print(f"[store_manager] Warning: could not remove store dir {store_id!r}: {e}")
+
+
 # ── Query helpers ──────────────────────────────────────────────────────────────
 
 def is_registered(store_id: str) -> bool:

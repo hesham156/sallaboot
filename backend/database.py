@@ -831,6 +831,38 @@ async def save_store(store_id: str, tokens: dict):
         print(f"[db] save_store({store_id!r}) error: {e}")
 
 
+async def purge_store(store_id: str) -> dict:
+    """
+    Delete ALL data for a store — called on app.uninstalled to comply with
+    Salla's data-privacy requirement that uninstalling removes merchant data.
+    Removes the store row plus its conversations, abandoned carts, uploads,
+    bot training, and webhook log. Returns a per-table deleted count.
+    """
+    if not _pool:
+        return {}
+    counts: dict = {}
+    tables = [
+        ("stores",          "store_id"),
+        ("conversations",   "store_id"),
+        ("abandoned_carts", "store_id"),
+        ("uploads",         "store_id"),
+        ("bot_training",    "store_id"),
+        ("webhook_log",     "store_id"),
+    ]
+    try:
+        async with _pool.acquire() as conn:
+            for table, col in tables:
+                try:
+                    r = await conn.execute(f"DELETE FROM {table} WHERE {col} = $1", store_id)
+                    counts[table] = int(r.split()[-1]) if r and r.split()[-1].isdigit() else 0
+                except Exception as te:
+                    print(f"[db] purge_store {table} error: {te}")
+        print(f"[db] 🗑️ purged store {store_id!r}: {counts}")
+    except Exception as e:
+        print(f"[db] purge_store({store_id!r}) error: {e}")
+    return counts
+
+
 async def save_ai_config(store_id: str, ai_config: dict):
     """Upsert only the ai_config column, leaving tokens and cache unchanged."""
     if not _pool:
