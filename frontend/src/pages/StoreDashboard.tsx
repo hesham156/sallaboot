@@ -124,6 +124,7 @@ export default function StoreDashboard() {
   const [botEnabled, setBotEnabled]   = useState(true)
   const [loadingBot, setLoadingBot]   = useState(false)
   const [storeType, setStoreType]     = useState<'printing' | 'general'>('printing')
+  const [sidebarOpen, setSidebarOpen] = useState(false)   // mobile drawer
 
   const basePath     = `/store/${storeId}`
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
@@ -154,7 +155,10 @@ export default function StoreDashboard() {
   }
 
   function logout()        { clearAuth(); navigate('/login', { replace: true }) }
-  function goTab(key: string) { navigate(key ? `${basePath}/${key}` : basePath) }
+  function goTab(key: string) {
+    navigate(key ? `${basePath}/${key}` : basePath)
+    setSidebarOpen(false)   // close the mobile drawer after navigating
+  }
 
   if (!store) {
     return (
@@ -169,8 +173,30 @@ export default function StoreDashboard() {
   return (
     <div className="flex min-h-screen bg-background" dir="rtl">
 
+      {/* ── Mobile top bar (hamburger) — hidden on md+ ── */}
+      <div className="md:hidden fixed top-0 inset-x-0 h-14 bg-content1 border-b border-divider z-30 flex items-center justify-between px-4">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          aria-label="فتح القائمة"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-default-600 hover:bg-content2"
+        >
+          <Icon paths={['M4 6h16', 'M4 12h16', 'M4 18h16']} size={20} />
+        </button>
+        <span className="font-bold text-sm text-foreground truncate">{store.store_name}</span>
+      </div>
+
+      {/* ── Mobile backdrop ── */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/40 z-40"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* ════════════ SIDEBAR ════════════ */}
-      <aside className="w-60 bg-content1 border-l border-divider shadow-soft flex flex-col fixed right-0 h-screen z-40">
+      <aside className={`w-60 bg-content1 border-l border-divider shadow-soft flex flex-col fixed right-0 h-screen z-50 transition-transform duration-300 ${
+        sidebarOpen ? 'translate-x-0' : 'translate-x-full'
+      } md:translate-x-0`}>
 
         {/* ── Store header ── */}
         <div className="p-4 border-b border-divider">
@@ -279,7 +305,7 @@ export default function StoreDashboard() {
       </aside>
 
       {/* ════════════ MAIN CONTENT ════════════ */}
-      <main className="mr-60 flex-1 min-h-screen overflow-y-auto">
+      <main className="mr-0 md:mr-60 pt-14 md:pt-0 flex-1 min-h-screen overflow-y-auto">
         <Suspense fallback={
           <div className="flex items-center justify-center min-h-screen">
             <Spinner size="lg" color="primary" label="جاري التحميل..." />

@@ -303,7 +303,17 @@ async def admin_auth_middleware(request: Request, call_next):
         if not claims or not claims.get("su"):
             return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
 
-    return await call_next(request)
+    response = await call_next(request)
+
+    # ── Security hardening headers (defense-in-depth) ─────────────────────────
+    # nosniff + a sane referrer policy are safe everywhere. Clickjacking
+    # protection is applied only to the admin dashboard pages — never the
+    # script-injected widget or the /chat API, so embedding still works.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if path == "/admin" or path.startswith("/admin/"):
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    return response
 
 
 # CORS registered AFTER admin_auth_middleware so it becomes the outermost
