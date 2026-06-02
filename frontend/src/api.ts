@@ -371,6 +371,7 @@ export interface AIConfig {
   ai_model: string
   bot_name: string
   provider: 'groq' | 'anthropic' | 'openai' | 'env'
+  store_type: 'printing' | 'general'
 }
 
 // ── AI Brain / store knowledge ─────────────────────────────────────────────

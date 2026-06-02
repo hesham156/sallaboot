@@ -43,6 +43,7 @@ export default function Settings({ storeId }: Props) {
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [botName, setBotName] = useState('')
+  const [storeType, setStoreType] = useState<'printing' | 'general'>('general')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiSaving, setAiSaving] = useState(false)
   const [aiMsg, setAiMsg] = useState('')
@@ -72,6 +73,7 @@ export default function Settings({ storeId }: Props) {
       setProvider((ai.provider !== 'env' ? ai.provider : 'groq') as ProviderKey)
       setBotName(ai.bot_name || '')
       setModel(ai.ai_model || '')
+      setStoreType((ai.store_type === 'printing' ? 'printing' : 'general'))
       setTokenStatus(tok)
     } catch (e) { console.error(e) }
     finally { setAiLoading(false) }
@@ -86,6 +88,7 @@ export default function Settings({ storeId }: Props) {
         openai_api_key:    '',
         ai_model:          model,
         bot_name:          botName,
+        store_type:        storeType,
       }
       if (apiKey.trim()) {
         if (provider === 'groq')      payload.groq_api_key      = apiKey.trim()
@@ -255,6 +258,43 @@ export default function Settings({ storeId }: Props) {
               onChange={setBotName}
               placeholder="مساعد المتجر"
             />
+
+            {/* Store type — gates printing features */}
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-2">
+                نوع المتجر
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { key: 'general',  title: 'متجر عام',   desc: 'منتجات عامة (عبايات، أحذية، إلخ)', icon: '🛍️' },
+                  { key: 'printing', title: 'متجر طباعة', desc: 'حاسبات الأسعار وعروض الطباعة',     icon: '🖨️' },
+                ] as const).map(opt => {
+                  const active = storeType === opt.key
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setStoreType(opt.key)}
+                      className={`text-right rounded-xl border p-3 transition-all ${
+                        active
+                          ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/40'
+                          : 'border-divider bg-content2 hover:border-blue-500/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-sm text-foreground">
+                        <span>{opt.icon}</span>{opt.title}
+                      </div>
+                      <div className="text-[11px] text-foreground-500 mt-1 leading-relaxed">{opt.desc}</div>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-foreground-400 mt-2 leading-relaxed">
+                {storeType === 'printing'
+                  ? '✅ ميزات الطباعة مفعّلة: حاسبات الأسعار، عروض الأسعار، تسعير العلب، والتحويل للموظف.'
+                  : 'ميزات الطباعة مخفية. فعّل "متجر طباعة" فقط إذا كان متجرك يقدّم خدمات طباعة.'}
+              </p>
+            </div>
 
             {aiMsg && (
               <div className={`rounded-lg p-3 text-sm border ${

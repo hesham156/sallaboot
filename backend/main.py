@@ -364,6 +364,7 @@ class AIConfigRequest(BaseModel):
     openai_api_key:    Optional[str] = ""  # sk-proj-...
     ai_model:          Optional[str] = ""  # e.g. "gpt-4o", "llama-3.3-70b-versatile", "claude-sonnet-4-6"
     bot_name:          Optional[str] = ""
+    store_type:        Optional[str] = None  # "printing" | "general" — gates printing features
 
 
 class PasswordChangeRequest(BaseModel):
@@ -726,6 +727,12 @@ async def get_ai_settings(store_id: str):
         provider = "openai"
     else:
         provider = "env"
+    # Resolve store type: explicit setting, else heuristic (configured pricing
+    # ⇒ printing). Mirrors agent._is_printing_store so UI matches bot behaviour.
+    store_type = (cfg.get("store_type") or "").strip().lower()
+    if not store_type:
+        store_type = "printing" if cfg.get("pricing_config") else "general"
+
     return {
         "groq_api_key":      "••••" if groq_set      else "",
         "anthropic_api_key": "••••" if anthropic_set else "",
@@ -733,6 +740,7 @@ async def get_ai_settings(store_id: str):
         "ai_model":          cfg.get("ai_model",  ""),
         "bot_name":          cfg.get("bot_name",  ""),
         "provider":          provider,
+        "store_type":        store_type,
     }
 
 
@@ -748,14 +756,23 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
     anthropic_key = (req.anthropic_api_key or "").strip()
     openai_key    = (req.openai_api_key    or "").strip()
 
-    config = {
+    # Start from a copy of the existing config so OTHER keys (pricing_config,
+    # store_type, …) are preserved — they used to be silently wiped here.
+    config = dict(existing)
+    config.update({
         # Keep existing key when frontend sends empty string (masked value)
         "groq_api_key":      groq_key      or existing.get("groq_api_key",      ""),
         "anthropic_api_key": anthropic_key or existing.get("anthropic_api_key", ""),
         "openai_api_key":    openai_key    or existing.get("openai_api_key",    ""),
         "ai_model":          (req.ai_model  or "").strip() or existing.get("ai_model",  ""),
         "bot_name":          (req.bot_name  or "").strip() or existing.get("bot_name",  ""),
-    }
+    })
+
+    # Store type — only overwrite when the frontend sends a valid value.
+    if req.store_type is not None:
+        st = req.store_type.strip().lower()
+        if st in ("printing", "general"):
+            config["store_type"] = st
 
     # When a specific provider key is explicitly set, clear the other two
     # so only one provider is active at a time

@@ -85,6 +85,7 @@ const NAV_ITEMS = [
     activeColor: 'text-cyan-400',
     activeBg: 'bg-cyan-500/10',
     activeBorder: 'border-r-cyan-500',
+    printingOnly: true,   // hidden for non-printing stores
   },
   {
     key: 'brain',
@@ -119,6 +120,7 @@ export default function StoreDashboard() {
   const [store, setStore]         = useState<StoreInfo | null>(null)
   const [botEnabled, setBotEnabled]   = useState(true)
   const [loadingBot, setLoadingBot]   = useState(false)
+  const [storeType, setStoreType]     = useState<'printing' | 'general'>('printing')
 
   const basePath     = `/store/${storeId}`
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
@@ -128,13 +130,15 @@ export default function StoreDashboard() {
 
   async function loadStore() {
     try {
-      const [storeRes, botRes] = await Promise.all([
+      const [storeRes, botRes, aiRes] = await Promise.all([
         api.listStores(),
         api.botStatus(storeId),
+        api.getAI(storeId).catch(() => null),
       ])
       const found = storeRes.stores.find(s => s.store_id === storeId)
       if (found) setStore(found)
       setBotEnabled(botRes.bot_globally_enabled)
+      if (aiRes?.store_type) setStoreType(aiRes.store_type === 'printing' ? 'printing' : 'general')
     } catch (e) { console.error(e) }
   }
 
@@ -189,7 +193,7 @@ export default function StoreDashboard() {
 
         {/* ── Navigation ── */}
         <nav className="flex-1 py-2 overflow-y-auto">
-          {NAV_ITEMS.map(item => {
+          {NAV_ITEMS.filter(item => !('printingOnly' in item) || storeType === 'printing').map(item => {
             const isActive = activeKey === item.key
             return (
               <button
