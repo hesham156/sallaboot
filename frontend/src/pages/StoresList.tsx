@@ -407,10 +407,7 @@ export default function StoresList() {
               {stores.map(s => (
                 <TableRow key={s.store_id}>
                   <TableCell>
-                    <button
-                      onClick={() => navigate(`/store/${s.store_id}`)}
-                      className="flex items-center gap-3 text-right group"
-                    >
+                    <div className="flex items-center gap-3 text-right">
                       <Avatar
                         src={s.store_avatar || undefined}
                         name={s.store_name[0]}
@@ -418,12 +415,12 @@ export default function StoresList() {
                         className="bg-blue-500/20 text-blue-400 font-bold flex-shrink-0"
                       />
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm text-foreground group-hover:text-blue-400 transition-colors truncate">
+                        <p className="font-semibold text-sm text-foreground truncate">
                           {s.store_name}
                         </p>
                         <p className="text-xs text-slate-600 font-mono truncate">{s.store_id}</p>
                       </div>
-                    </button>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <span className="text-sm text-slate-400">{s.store_domain || '—'}</span>
@@ -452,14 +449,6 @@ export default function StoresList() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
-                      <Tooltip content="فتح لوحة المتجر" placement="top">
-                        <button
-                          onClick={() => navigate(`/store/${s.store_id}`)}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
-                        >
-                          <Icon paths="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" size={13} />
-                        </button>
-                      </Tooltip>
                       <Tooltip content="إعادة تعيين كلمة المرور">
                         <button
                           onClick={() => handleReset(s.store_id)}

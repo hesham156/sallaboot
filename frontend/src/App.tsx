@@ -20,6 +20,15 @@ function RequireSuper({ children }: { children: JSX.Element }) {
   return children
 }
 
+// Store dashboard is for store owners only — super admins are blocked
+function RequireStoreOwner({ children }: { children: JSX.Element }) {
+  const token = getToken()
+  const isSuper = getIsSuper()
+  if (!token) return <Navigate to="/login" replace />
+  if (isSuper) return <Navigate to="/" replace />
+  return children
+}
+
 export default function App() {
   return (
     <HashRouter>
@@ -41,13 +50,13 @@ export default function App() {
           }
         />
 
-        {/* Per-store dashboard */}
+        {/* Per-store dashboard — store owners only, admins blocked */}
         <Route
           path="/store/:storeId/*"
           element={
-            <RequireAuth>
+            <RequireStoreOwner>
               <StoreDashboard />
-            </RequireAuth>
+            </RequireStoreOwner>
           }
         />
 
