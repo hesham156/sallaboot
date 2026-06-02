@@ -278,7 +278,7 @@ export default function Conversations({ storeId }: Props) {
                         {c.bot_enabled ? '🤖' : '👨‍💼'}
                       </div>
                       {c.unread && (
-                        <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0a1422]" />
+                        <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-content1" />
                       )}
                     </div>
 
@@ -324,7 +324,7 @@ export default function Conversations({ storeId }: Props) {
       </aside>
 
       {/* ════════════════ CHAT PANEL (left side, RTL) ════════════════ */}
-      <main className="flex-1 flex flex-col bg-[#070d17] min-w-0">
+      <main className="flex-1 flex flex-col bg-content2 min-w-0">
         {!selected ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
             <div className="w-20 h-20 rounded-3xl bg-content1 border border-divider flex items-center justify-center mb-4">
@@ -427,18 +427,18 @@ export default function Conversations({ storeId }: Props) {
                         ${isUser
                           ? 'bg-gradient-to-br from-teal-600 to-cyan-700 text-white rounded-tr-sm'
                           : isAdmin
-                          ? 'bg-amber-500/15 text-amber-100 border border-amber-500/30 rounded-tl-sm'
+                          ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-tl-sm'
                           : 'bg-content1 text-foreground border border-divider rounded-tl-sm'
                         }
                       `}>
                         {isAdmin && (
-                          <p className="text-[10px] text-amber-400 mb-1 font-bold">الإدارة</p>
+                          <p className="text-[10px] text-amber-600 mb-1 font-bold">الإدارة</p>
                         )}
                         <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                           {renderMessageBody(msg.content)}
                         </div>
                         <p className={`text-[10px] mt-1 ${
-                          isUser ? 'text-blue-200' : 'text-slate-500'
+                          isUser ? 'text-white/70' : 'text-slate-500'
                         }`}>
                           {fmtTime(msg.ts)}
                         </p>

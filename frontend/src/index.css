@@ -50,3 +50,19 @@
 
 /* ── Sidebar active accent ── */
 .nav-active { box-shadow: inset -3px 0 0 #14b8a6; }
+
+/* ── Focus: soft teal ring instead of the harsh black outline ── */
+input:focus,
+textarea:focus,
+select:focus,
+[data-slot="input"]:focus,
+[contenteditable]:focus {
+  outline: none !important;
+  box-shadow: none;
+}
+/* HeroUI bordered field wrappers — teal border + subtle ring on focus
+   (overrides HeroUI's default dark "default-foreground" focus border) */
+[data-slot="input-wrapper"]:focus-within {
+  border-color: #14b8a6 !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15) !important;
+}

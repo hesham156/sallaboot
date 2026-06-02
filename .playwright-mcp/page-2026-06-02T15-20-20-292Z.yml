@@ -1,0 +1,70 @@
+- main [ref=e4]:
+  - generic [ref=e191]:
+    - complementary [ref=e197]:
+      - generic [ref=e199]:
+        - img "م" [ref=e202]
+        - generic [ref=e204]:
+          - paragraph [ref=e205]: متجر 963634590
+          - paragraph [ref=e206]: "963634590"
+      - navigation [ref=e207]:
+        - button "نظرة عامة" [ref=e208] [cursor=pointer]:
+          - img [ref=e209]
+          - generic [ref=e211]: نظرة عامة
+        - button "المحادثات" [ref=e212] [cursor=pointer]:
+          - img [ref=e213]
+          - generic [ref=e215]: المحادثات
+        - button "المنتجات" [ref=e216] [cursor=pointer]:
+          - img [ref=e217]
+          - generic [ref=e219]: المنتجات
+        - button "الطلبات" [ref=e220] [cursor=pointer]:
+          - img [ref=e221]
+          - generic [ref=e223]: الطلبات
+        - button "سلات متروكة" [ref=e224] [cursor=pointer]:
+          - img [ref=e225]
+          - generic [ref=e227]: سلات متروكة
+        - button "التحليلات" [ref=e228] [cursor=pointer]:
+          - img [ref=e229]
+          - generic [ref=e231]: التحليلات
+        - button "حاسبة الأسعار" [ref=e232] [cursor=pointer]:
+          - img [ref=e233]
+          - generic [ref=e235]: حاسبة الأسعار
+        - button "ذاكرة الـ AI" [ref=e236] [cursor=pointer]:
+          - img [ref=e237]
+          - generic [ref=e239]: ذاكرة الـ AI
+        - button "تدريب البوت" [ref=e240] [cursor=pointer]:
+          - img [ref=e241]
+          - generic [ref=e244]: تدريب البوت
+        - button "الإعدادات" [ref=e245] [cursor=pointer]:
+          - img [ref=e246]
+          - generic [ref=e249]: الإعدادات
+      - generic [ref=e250]:
+        - button "البوت شغّال إيقاف" [ref=e251] [cursor=pointer]:
+          - generic [ref=e253]: البوت شغّال
+          - generic [ref=e254]: إيقاف
+        - generic [ref=e255]:
+          - button "كل المتاجر" [ref=e256] [cursor=pointer]:
+            - img [ref=e257]
+            - text: كل المتاجر
+          - button "خروج" [ref=e259] [cursor=pointer]:
+            - img [ref=e260]
+            - text: خروج
+        - paragraph [ref=e262]: المحادثات
+    - main [ref=e263]:
+      - generic [ref=e1400]:
+        - complementary [ref=e1401]:
+          - generic [ref=e1402]:
+            - generic [ref=e1403]:
+              - generic [ref=e1404]:
+                - heading "المحادثات" [level=1] [ref=e1405]
+                - paragraph [ref=e1406]: 0 محادثة
+              - button "تحديث" [ref=e1407] [cursor=pointer]:
+                - img [ref=e1408]
+            - generic [ref=e1413]:
+              - img [ref=e1414]
+              - textbox "بحث..." [ref=e1417]
+          - generic "Loading" [ref=e1420]
+        - main [ref=e1424]:
+          - generic [ref=e1425]:
+            - img [ref=e1427]
+            - paragraph [ref=e1429]: اختر محادثة لعرضها
+            - paragraph [ref=e1430]: اضغط على أي محادثة من القائمة على اليمين
