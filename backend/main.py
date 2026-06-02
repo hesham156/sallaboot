@@ -631,6 +631,19 @@ async def health():
 
 
 # ── Admin HTML (React app or legacy fallback) ──────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def root_index():
+    """Root — serves the React SPA (HashRouter redirects to #/landing for guests)."""
+    return _serve_react_or_legacy()
+
+
+@app.get("/landing", response_class=HTMLResponse)
+async def landing_page():
+    """Public landing page — serves the React SPA."""
+    return _serve_react_or_legacy()
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_index():
     """Super-admin dashboard — serves the React app if built, legacy HTML otherwise."""
