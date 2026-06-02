@@ -188,13 +188,13 @@ export default function Conversations({ storeId }: Props) {
     <div className="flex h-screen" dir="rtl">
 
       {/* ════════════════ LIST PANEL (right side, RTL) ════════════════ */}
-      <aside className="w-80 border-l border-[#1c2d42] bg-[#0a1422] flex flex-col flex-shrink-0">
+      <aside className="w-80 border-l border-divider bg-content2 flex flex-col flex-shrink-0">
 
         {/* List header */}
-        <div className="px-4 py-3 border-b border-[#1c2d42] flex-shrink-0">
+        <div className="px-4 py-3 border-b border-divider flex-shrink-0">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h1 className="text-base font-bold text-white flex items-center gap-2">
+              <h1 className="text-base font-bold text-foreground flex items-center gap-2">
                 المحادثات
                 {unreadCount > 0 && (
                   <span className="text-[10px] bg-red-500 text-white rounded-full px-1.5 py-0.5 font-bold">
@@ -206,7 +206,7 @@ export default function Conversations({ storeId }: Props) {
             </div>
             <button
               onClick={loadConversations}
-              className="w-8 h-8 rounded-lg bg-[#111e32] border border-[#1c2d42] flex items-center justify-center text-slate-400 hover:text-white hover:border-slate-500"
+              className="w-8 h-8 rounded-lg bg-content2 border border-divider flex items-center justify-center text-slate-400 hover:text-foreground hover:border-slate-500"
               title="تحديث"
             >
               <Icon paths="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" size={13} />
@@ -220,7 +220,7 @@ export default function Conversations({ storeId }: Props) {
             variant="bordered"
             size="sm"
             classNames={{
-              inputWrapper: 'border-[#1c2d42] bg-[#111e32] h-9 min-h-9',
+              inputWrapper: 'border-divider bg-content2 h-9 min-h-9',
               input: 'text-xs text-foreground',
             }}
             startContent={
@@ -238,7 +238,7 @@ export default function Conversations({ storeId }: Props) {
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-[#111e32] flex items-center justify-center mb-3">
+              <div className="w-12 h-12 rounded-2xl bg-content2 flex items-center justify-center mb-3">
                 <Icon paths="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
                       size={22} className="text-slate-600" />
               </div>
@@ -258,13 +258,13 @@ export default function Conversations({ storeId }: Props) {
                     key={c.session_id}
                     onClick={() => openConversation(c)}
                     className={`
-                      w-full text-right px-4 py-3 border-b border-[#1c2d42]/40
+                      w-full text-right px-4 py-3 border-b border-divider/40
                       transition-colors flex gap-3 items-start
                       ${isActive
                         ? 'bg-violet-500/10 border-r-2 border-r-violet-500'
                         : c.unread
-                        ? 'bg-blue-500/5 hover:bg-[#111e32]'
-                        : 'hover:bg-[#111e32]'
+                        ? 'bg-blue-500/5 hover:bg-content2'
+                        : 'hover:bg-content2'
                       }
                     `}
                   >
@@ -272,7 +272,7 @@ export default function Conversations({ storeId }: Props) {
                     <div className="relative flex-shrink-0">
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${
                         c.bot_enabled
-                          ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white'
+                          ? 'bg-gradient-to-br from-teal-500 to-cyan-600 text-white'
                           : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white'
                       }`}>
                         {c.bot_enabled ? '🤖' : '👨‍💼'}
@@ -285,7 +285,7 @@ export default function Conversations({ storeId }: Props) {
                     {/* Body */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-0.5">
-                        <span className="text-xs font-bold text-white truncate">
+                        <span className="text-xs font-bold text-foreground truncate">
                           {c.session_id.slice(0, 8)}…
                         </span>
                         <span className="text-[10px] text-slate-500 flex-shrink-0">
@@ -327,7 +327,7 @@ export default function Conversations({ storeId }: Props) {
       <main className="flex-1 flex flex-col bg-[#070d17] min-w-0">
         {!selected ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-            <div className="w-20 h-20 rounded-3xl bg-[#0c1627] border border-[#1c2d42] flex items-center justify-center mb-4">
+            <div className="w-20 h-20 rounded-3xl bg-content1 border border-divider flex items-center justify-center mb-4">
               <Icon paths="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
                     size={36} className="text-slate-600" />
             </div>
@@ -341,18 +341,18 @@ export default function Conversations({ storeId }: Props) {
         ) : (
           <>
             {/* Chat header */}
-            <header className="px-5 py-3 border-b border-[#1c2d42] bg-[#0c1627] flex-shrink-0">
+            <header className="px-5 py-3 border-b border-divider bg-content1 flex-shrink-0">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <Avatar
                     name={selected.session_id[0]}
                     size="sm"
                     className={selected.bot_enabled
-                      ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white'
+                      ? 'bg-gradient-to-br from-teal-500 to-cyan-600 text-white'
                       : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white'}
                   />
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-white truncate">
+                    <p className="text-sm font-bold text-foreground truncate">
                       {selected.customer_info?.name || `جلسة ${selected.session_id.slice(0, 8)}`}
                     </p>
                     <div className="flex items-center gap-2 text-xs">
@@ -425,10 +425,10 @@ export default function Conversations({ storeId }: Props) {
                       <div className={`
                         max-w-[70%] min-w-[80px] rounded-2xl px-4 py-2.5 text-sm leading-relaxed
                         ${isUser
-                          ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-tr-sm'
+                          ? 'bg-gradient-to-br from-teal-600 to-cyan-700 text-white rounded-tr-sm'
                           : isAdmin
                           ? 'bg-amber-500/15 text-amber-100 border border-amber-500/30 rounded-tl-sm'
-                          : 'bg-[#0c1627] text-slate-200 border border-[#1c2d42] rounded-tl-sm'
+                          : 'bg-content1 text-foreground border border-divider rounded-tl-sm'
                         }
                       `}>
                         {isAdmin && (
@@ -457,7 +457,7 @@ export default function Conversations({ storeId }: Props) {
 
             {/* Reply input — only when admin took over */}
             {!selected.bot_enabled && (
-              <footer className="px-4 py-3 border-t border-[#1c2d42] bg-[#0c1627] flex-shrink-0">
+              <footer className="px-4 py-3 border-t border-divider bg-content1 flex-shrink-0">
                 <div className="flex gap-2">
                   <Textarea
                     placeholder="اكتب ردك كأدمن..."
@@ -467,7 +467,7 @@ export default function Conversations({ storeId }: Props) {
                     minRows={1}
                     maxRows={4}
                     classNames={{
-                      inputWrapper: 'border-[#1c2d42] bg-[#111e32]',
+                      inputWrapper: 'border-divider bg-content2',
                       input: 'text-sm',
                     }}
                     onKeyDown={e => {
@@ -483,7 +483,7 @@ export default function Conversations({ storeId }: Props) {
                     isIconOnly
                     onPress={sendReply}
                     isDisabled={!replyText.trim()}
-                    className="self-end h-10 w-10 min-w-10 bg-gradient-to-br from-blue-600 to-indigo-700"
+                    className="self-end h-10 w-10 min-w-10 bg-gradient-to-br from-teal-600 to-cyan-700"
                   >
                     <Icon paths={['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7z']} size={15} />
                   </Button>
@@ -496,7 +496,7 @@ export default function Conversations({ storeId }: Props) {
 
             {/* Banner when bot is in control */}
             {selected.bot_enabled && (
-              <footer className="px-4 py-3 border-t border-[#1c2d42] bg-blue-500/5 flex-shrink-0">
+              <footer className="px-4 py-3 border-t border-divider bg-blue-500/5 flex-shrink-0">
                 <p className="text-xs text-blue-300/80 text-center">
                   🤖 البوت يتولى هذه المحادثة. اضغط <span className="font-bold">تولي المحادثة</span> للرد كأدمن.
                 </p>

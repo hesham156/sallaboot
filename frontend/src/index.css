@@ -7,10 +7,10 @@
 }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar        { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: #1c2d42; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #2d4060; }
+::-webkit-scrollbar-thumb  { background: #cbd5e0; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #a0aec0; }
 
 /* ── Transitions ── */
 *, *::before, *::after {
@@ -19,13 +19,21 @@
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ── Gradient text ── */
+/* ── Gradient text (teal → cyan, Purity accent) ── */
 .text-gradient {
-  background: linear-gradient(135deg, #93c5fd 0%, #a78bfa 100%);
+  background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* ── Purity accent gradient (for buttons / accent cards) ── */
+.bg-accent-gradient {
+  background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);
+}
+/* ── Soft card shadow (Purity signature) ── */
+.shadow-soft  { box-shadow: 0 4px 18px rgba(45, 55, 72, 0.06); }
+.shadow-soft-lg { box-shadow: 0 8px 30px rgba(45, 55, 72, 0.08); }
 
 /* ── Status pulse ── */
 @keyframes pulse-dot {
@@ -34,11 +42,11 @@
 }
 .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
 
-/* ── Stat card hover glow ── */
-.card-blue:hover   { box-shadow: 0 0 28px rgba(59,130,246,0.12); }
-.card-green:hover  { box-shadow: 0 0 28px rgba(34,197,94,0.12);  }
-.card-purple:hover { box-shadow: 0 0 28px rgba(139,92,246,0.12); }
-.card-amber:hover  { box-shadow: 0 0 28px rgba(245,158,11,0.12); }
+/* ── Stat card hover glow (soft, light theme) ── */
+.card-blue:hover   { box-shadow: 0 8px 28px rgba(20,184,166,0.12); }
+.card-green:hover  { box-shadow: 0 8px 28px rgba(22,163,74,0.12);  }
+.card-purple:hover { box-shadow: 0 8px 28px rgba(6,182,212,0.12); }
+.card-amber:hover  { box-shadow: 0 8px 28px rgba(217,119,6,0.12); }
 
-/* ── Sidebar active glow ── */
-.nav-active { box-shadow: inset -3px 0 0 #3b82f6; }
+/* ── Sidebar active accent ── */
+.nav-active { box-shadow: inset -3px 0 0 #14b8a6; }

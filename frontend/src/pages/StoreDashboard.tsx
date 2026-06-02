@@ -107,7 +107,7 @@ const NAV_ITEMS = [
     key: 'settings',
     label: 'الإعدادات',
     icon: ['M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', 'M15 12a3 3 0 11-6 0 3 3 0 016 0z'],
-    activeColor: 'text-slate-300',
+    activeColor: 'text-slate-600',
     activeBg: 'bg-slate-500/10',
     activeBorder: 'border-r-slate-400',
   },
@@ -167,26 +167,26 @@ export default function StoreDashboard() {
     <div className="flex min-h-screen bg-background" dir="rtl">
 
       {/* ════════════ SIDEBAR ════════════ */}
-      <aside className="w-60 bg-[#0c1627] border-l border-[#1c2d42] flex flex-col fixed right-0 h-screen z-40">
+      <aside className="w-60 bg-content1 border-l border-divider shadow-soft flex flex-col fixed right-0 h-screen z-40">
 
         {/* ── Store header ── */}
-        <div className="p-4 border-b border-[#1c2d42]">
+        <div className="p-4 border-b border-divider">
           <div className="flex items-center gap-3">
             <div className="relative flex-shrink-0">
               <Avatar
                 src={store.store_avatar || undefined}
                 name={store.store_name[0]}
                 size="sm"
-                className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold"
+                className="bg-gradient-to-br from-teal-500 to-cyan-600 text-white font-bold"
               />
               {/* Bot status dot */}
-              <span className={`absolute -bottom-0.5 -left-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#0c1627] ${
-                botEnabled ? 'bg-emerald-400' : 'bg-slate-500'
+              <span className={`absolute -bottom-0.5 -left-0.5 w-2.5 h-2.5 rounded-full border-2 border-content1 ${
+                botEnabled ? 'bg-emerald-500' : 'bg-default-300'
               }`} />
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-sm text-white truncate">{store.store_name}</p>
-              <p className="text-xs text-slate-600 font-mono truncate">{store.store_id}</p>
+              <p className="font-bold text-sm text-foreground truncate">{store.store_name}</p>
+              <p className="text-xs text-default-400 font-mono truncate">{store.store_id}</p>
             </div>
           </div>
         </div>
@@ -204,14 +204,14 @@ export default function StoreDashboard() {
                   border-r-2 transition-all duration-150
                   ${isActive
                     ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}`
-                    : 'border-r-transparent text-slate-500 hover:text-slate-300 hover:bg-[#111e32]'
+                    : 'border-r-transparent text-default-500 hover:text-foreground hover:bg-content2'
                   }
                 `}
               >
                 <Icon
                   paths={item.icon}
                   size={16}
-                  className={`flex-shrink-0 ${isActive ? item.activeColor : 'text-slate-600'}`}
+                  className={`flex-shrink-0 ${isActive ? item.activeColor : 'text-default-400'}`}
                 />
                 <span>{item.label}</span>
               </button>
@@ -220,7 +220,7 @@ export default function StoreDashboard() {
         </nav>
 
         {/* ── Footer ── */}
-        <div className="p-3 border-t border-[#1c2d42] space-y-2">
+        <div className="p-3 border-t border-divider space-y-2">
           {/* Bot toggle */}
           <button
             onClick={!loadingBot ? toggleBot : undefined}
@@ -228,8 +228,8 @@ export default function StoreDashboard() {
               w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm
               transition-all duration-200
               ${botEnabled
-                ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/15'
-                : 'bg-[#111e32] border-[#1c2d42] text-slate-500 hover:text-slate-300 hover:border-slate-500'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                : 'bg-content2 border-divider text-default-500 hover:text-foreground hover:border-default-300'
               }
             `}
           >
@@ -237,13 +237,13 @@ export default function StoreDashboard() {
               <Spinner size="sm" color="success" />
             ) : (
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                botEnabled ? 'bg-emerald-400 animate-pulse-dot' : 'bg-slate-600'
+                botEnabled ? 'bg-emerald-500 animate-pulse-dot' : 'bg-default-400'
               }`} />
             )}
             <span className="font-semibold flex-1 text-right">
               {botEnabled ? 'البوت شغّال' : 'البوت موقوف'}
             </span>
-            <span className={`text-xs ${botEnabled ? 'text-emerald-600' : 'text-slate-600'}`}>
+            <span className={`text-xs ${botEnabled ? 'text-emerald-600' : 'text-default-400'}`}>
               {botEnabled ? 'إيقاف' : 'تشغيل'}
             </span>
           </button>
@@ -253,7 +253,7 @@ export default function StoreDashboard() {
             {getIsSuper() && (
               <button
                 onClick={() => navigate('/')}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium text-slate-400 bg-[#111e32] border border-[#1c2d42] hover:text-white hover:border-slate-500"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium text-default-500 bg-content2 border border-divider hover:text-foreground hover:border-default-300"
               >
                 <Icon paths="M10 19l-7-7m0 0l7-7m-7 7h18" size={12} />
                 كل المتاجر
@@ -261,7 +261,7 @@ export default function StoreDashboard() {
             )}
             <button
               onClick={logout}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/15"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium text-red-600 bg-red-50 border border-red-200 hover:bg-red-100"
             >
               <Icon paths="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" size={12} />
               خروج
@@ -269,7 +269,7 @@ export default function StoreDashboard() {
           </div>
 
           {/* Active section label */}
-          <p className="text-center text-xs text-slate-700 pt-1">
+          <p className="text-center text-xs text-default-400 pt-1">
             {activeItem?.label}
           </p>
         </div>

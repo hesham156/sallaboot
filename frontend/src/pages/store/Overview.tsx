@@ -26,7 +26,7 @@ function StatCard({ label, value, sub, icon, color }: {
   color: { gradient: string; border: string; iconBg: string; iconColor: string; numColor: string; glow: string }
 }) {
   return (
-    <div className={`group relative overflow-hidden rounded-3xl bg-[#0c1627]/60 backdrop-blur-xl border ${color.border} p-6 ${color.glow} hover:-translate-y-1 transition-all duration-300 shadow-xl`}>
+    <div className={`group relative overflow-hidden rounded-3xl bg-content1/60 backdrop-blur-xl border ${color.border} p-6 ${color.glow} hover:-translate-y-1 transition-all duration-300 shadow-xl`}>
       <div className={`absolute inset-0 bg-gradient-to-br ${color.gradient} opacity-40 group-hover:opacity-65 transition-opacity duration-300 pointer-events-none`} />
       
       {/* Glowing card border overlay */}
@@ -78,19 +78,19 @@ export default function Overview({ storeId, store }: Props) {
   return (
     <div className="p-6 space-y-6" dir="rtl">
 
-      {/* ── Premium Greeting Banner ── */}
-      <div className="relative overflow-hidden rounded-3xl border border-blue-500/20 bg-gradient-to-r from-blue-950/40 via-indigo-950/20 to-transparent p-6 sm:p-8 shadow-2xl">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
+      {/* ── Premium Greeting Banner (Purity teal) ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-teal-500 to-cyan-500 p-6 sm:p-8 shadow-soft-lg">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-white/5 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
         
         <div className="relative flex flex-col sm:flex-row items-center gap-6 justify-between">
           <div className="flex items-center gap-4 text-center sm:text-right flex-col sm:flex-row">
-            <div className="relative p-1 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-xl shadow-blue-500/20">
+            <div className="relative p-1 bg-white/25 rounded-2xl shadow-lg">
               <Avatar
                 src={store.store_avatar || undefined}
                 name={store.store_name[0]}
                 size="lg"
-                className="bg-[#020917] text-white font-black text-xl border-2 border-transparent w-16 h-16"
+                className="bg-white/20 text-white font-black text-xl border-2 border-transparent w-16 h-16"
               />
             </div>
             <div>
@@ -100,8 +100,8 @@ export default function Overview({ storeId, store }: Props) {
                   {store.has_ai_config ? "✓ المساعد الذكي نشط" : "⚠️ وضع البيئة الافتراضية"}
                 </Chip>
               </div>
-              <p className="text-sm text-slate-400 mt-1.5 flex items-center gap-2 justify-center sm:justify-start">
-                <span className="opacity-60">🔗</span>
+              <p className="text-sm text-white/80 mt-1.5 flex items-center gap-2 justify-center sm:justify-start">
+                <span className="opacity-80">🔗</span>
                 <span className="font-mono">{store.store_domain || store.store_id}</span>
               </p>
             </div>
@@ -179,13 +179,13 @@ export default function Overview({ storeId, store }: Props) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* ── Messages breakdown ── */}
             {m && m.total > 0 && (
-              <div className="rounded-3xl bg-[#0c1627]/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
+              <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
                 <div className="flex items-center gap-2.5 px-6 py-5 border-b border-divider">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-violet-500/20">
                     <Icon paths="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" size={14} />
                   </div>
-                  <h2 className="font-bold text-white text-base">توزيع وتحليل الرسائل</h2>
+                  <h2 className="font-bold text-foreground text-base">توزيع وتحليل الرسائل</h2>
                   <Chip size="sm" variant="flat" color="secondary" className="mr-auto font-bold">
                     {m.total} رسالة نشطة
                   </Chip>
@@ -198,7 +198,7 @@ export default function Overview({ storeId, store }: Props) {
                   ].map(item => (
                     <div key={item.label} className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-300 font-semibold">{item.label}</span>
+                        <span className="text-sm text-default-600 font-semibold">{item.label}</span>
                         <div className="flex items-center gap-3">
                           <span className="text-xs text-slate-400 font-medium">{item.value} رسالة</span>
                           <span className="text-sm font-black px-2 py-0.5 rounded-lg text-white" style={{ background: `${item.hex}15`, color: item.hex }}>
@@ -212,7 +212,7 @@ export default function Overview({ storeId, store }: Props) {
                         size="md"
                         className="max-w-full"
                         classNames={{
-                          track: 'bg-[#111e32]/60 border border-white/5',
+                          track: 'bg-content2/60 border border-white/5',
                           indicator: 'rounded-full bg-gradient-to-r',
                         }}
                       />
@@ -224,13 +224,13 @@ export default function Overview({ storeId, store }: Props) {
 
             {/* ── Ratings ── */}
             {r && r.count > 0 && (
-              <div className="rounded-3xl bg-[#0c1627]/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
+              <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
                 <div className="flex items-center gap-2.5 px-6 py-5 border-b border-divider">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-lg shadow-amber-500/20">
                     <Icon paths="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" size={14} />
                   </div>
-                  <h2 className="font-bold text-white text-base">تقييمات ومراجعات العملاء</h2>
+                  <h2 className="font-bold text-foreground text-base">تقييمات ومراجعات العملاء</h2>
                   <Chip size="sm" variant="flat" color="warning" className="mr-auto font-black">
                     ★ {r.avg} متوسط التقييم
                   </Chip>
@@ -250,12 +250,12 @@ export default function Overview({ storeId, store }: Props) {
                             size="md"
                             color="warning"
                             classNames={{
-                              track: 'bg-[#111e32]/60 border border-white/5',
+                              track: 'bg-content2/60 border border-white/5',
                               indicator: 'bg-gradient-to-r from-amber-500 to-orange-400 rounded-full',
                             }}
                           />
                         </div>
-                        <span className="text-xs text-slate-500 font-bold w-12 text-right shrink-0 group-hover/row:text-slate-300 transition-colors">
+                        <span className="text-xs text-slate-500 font-bold w-12 text-right shrink-0 group-hover/row:text-default-600 transition-colors">
                           {count} تقييم
                         </span>
                       </div>
@@ -268,13 +268,13 @@ export default function Overview({ storeId, store }: Props) {
 
           {/* ── Daily chart ── */}
           {c?.daily_counts && c.daily_counts.length > 0 && (
-            <div className="rounded-3xl bg-[#0c1627]/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
+            <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
               <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
               <div className="flex items-center gap-2.5 px-6 py-5 border-b border-divider">
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
                   <Icon paths="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" size={14} />
                 </div>
-                <h2 className="font-bold text-white text-base">نشاط المحادثات اليومي (آخر 14 يوم)</h2>
+                <h2 className="font-bold text-foreground text-base">نشاط المحادثات اليومي (آخر 14 يوم)</h2>
               </div>
               <div className="p-6">
                 {/* Bar chart */}
@@ -289,7 +289,7 @@ export default function Overview({ storeId, store }: Props) {
                           style={{ height: `${h}px` }}
                         >
                           {/* Tooltip */}
-                          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#111e32] border border-[#1c2d42] text-white text-[11px] font-bold px-2.5 py-1 rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-all duration-200 transform translate-y-1 group-hover:translate-y-0 shadow-2xl z-10">
+                          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[11px] font-bold px-2.5 py-1 rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-all duration-200 transform translate-y-1 group-hover:translate-y-0 shadow-soft-lg z-10">
                             {d.count} محادثة
                           </div>
                         </div>
@@ -310,8 +310,8 @@ export default function Overview({ storeId, store }: Props) {
 
           {/* Empty state */}
           {!m?.total && !c?.total && (
-            <div className="rounded-3xl bg-[#0c1627]/60 backdrop-blur-xl border border-divider py-20 text-center shadow-xl">
-              <div className="w-16 h-16 bg-[#111e32] rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/5">
+            <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider py-20 text-center shadow-xl">
+              <div className="w-16 h-16 bg-content2 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/5">
                 <Icon paths="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={26} className="text-slate-600" />
               </div>
               <p className="text-slate-400 text-sm font-semibold">لا توجد بيانات بعد</p>

@@ -17,8 +17,56 @@ export default {
   darkMode: 'class',
   plugins: [
     heroui({
-      defaultTheme: 'dark',
+      defaultTheme: 'light',
       themes: {
+        // ── Purity-style light theme (teal accent) ──────────────────────────
+        light: {
+          extend: 'light',
+          colors: {
+            background: '#f8f9fe',   // soft airy page bg
+            foreground: '#2d3748',   // slate-700 body text
+            divider:    '#e2e8f0',   // soft borders
+            content1:   '#ffffff',   // cards
+            content2:   '#f7fafc',   // subtle insets
+            content3:   '#edf2f7',
+            content4:   '#e2e8f0',
+            // Teal primary (Purity accent)
+            primary: {
+              50:  '#f0fdfa',
+              100: '#ccfbf1',
+              200: '#99f6e4',
+              300: '#5eead4',
+              400: '#2dd4bf',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              800: '#115e59',
+              900: '#134e4a',
+              DEFAULT: '#14b8a6',
+              foreground: '#ffffff',
+            },
+            secondary: {
+              DEFAULT: '#06b6d4',   // cyan complement
+              foreground: '#ffffff',
+            },
+            success: { DEFAULT: '#16a34a', foreground: '#ffffff' },
+            warning: { DEFAULT: '#d97706', foreground: '#ffffff' },
+            danger:  { DEFAULT: '#e53e3e', foreground: '#ffffff' },
+            default: {
+              50:  '#f7fafc',
+              100: '#edf2f7',
+              200: '#e2e8f0',
+              300: '#cbd5e0',
+              400: '#a0aec0',
+              500: '#718096',
+              600: '#4a5568',
+              700: '#2d3748',
+              800: '#1a202c',
+              900: '#171923',
+            },
+          },
+        },
+        // Dark theme kept for users who prefer it (no longer default)
         dark: {
           extend: 'dark',
           colors: {
@@ -30,23 +78,10 @@ export default {
             content3: '#1c2d42',
             content4: '#2d4060',
             primary: {
-              50:  '#eff6ff',
-              100: '#dbeafe',
-              200: '#bfdbfe',
-              300: '#93c5fd',
-              400: '#60a5fa',
-              500: '#3b82f6',
-              600: '#2563eb',
-              700: '#1d4ed8',
-              800: '#1e40af',
-              900: '#1e3a8a',
-              DEFAULT: '#3b82f6',
+              DEFAULT: '#14b8a6',
               foreground: '#ffffff',
             },
-            secondary: {
-              DEFAULT: '#8b5cf6',
-              foreground: '#ffffff',
-            },
+            secondary: { DEFAULT: '#06b6d4', foreground: '#ffffff' },
             success: { DEFAULT: '#22c55e', foreground: '#ffffff' },
             warning: { DEFAULT: '#f59e0b', foreground: '#ffffff' },
             danger:  { DEFAULT: '#ef4444', foreground: '#ffffff' },

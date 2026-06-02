@@ -194,11 +194,11 @@ export default function StoresList() {
       <div className="flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30 flex-shrink-0">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center shadow-lg shadow-teal-500/30 flex-shrink-0">
             <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-black text-white leading-tight">لوحة التحكم</h1>
+            <h1 className="text-xl font-black text-foreground leading-tight">لوحة التحكم</h1>
             <p className="text-xs text-slate-500 mt-0.5">إدارة جميع المتاجر</p>
           </div>
         </div>
@@ -219,7 +219,7 @@ export default function StoresList() {
 
           <button
             onClick={onOpen}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-[#0c1627] border-[#1c2d42] text-slate-300 hover:text-white hover:border-slate-500 hover:bg-[#111e32]"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-content1 border-divider text-default-600 hover:text-foreground hover:border-slate-500 hover:bg-content2"
           >
             <Icon paths="M12 4v16m8-8H4" size={13} />
             تسجيل متجر
@@ -340,7 +340,7 @@ export default function StoresList() {
         {STATS.map(s => (
           <div
             key={s.key}
-            className={`relative overflow-hidden rounded-2xl bg-[#0c1627] border ${s.border} p-5 ${s.glow} transition-all duration-300`}
+            className={`relative overflow-hidden rounded-2xl bg-content1 border ${s.border} p-5 ${s.glow} transition-all duration-300`}
           >
             <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} pointer-events-none`} />
             <div className="relative flex items-start justify-between gap-3">
@@ -359,15 +359,15 @@ export default function StoresList() {
       </div>
 
       {/* ════════════════ TABLE ════════════════ */}
-      <div className="rounded-2xl bg-[#0c1627] border border-[#1c2d42] overflow-hidden">
+      <div className="rounded-2xl bg-content1 border border-divider overflow-hidden">
 
         {/* Table header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1c2d42]">
-          <h2 className="font-bold text-white text-sm flex items-center gap-2.5">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-divider">
+          <h2 className="font-bold text-foreground text-sm flex items-center gap-2.5">
             <span className="w-1 h-5 bg-gradient-to-b from-blue-400 to-indigo-500 rounded-full" />
             المتاجر المسجلة
           </h2>
-          <span className="text-xs text-slate-500 bg-[#111e32] px-2.5 py-1 rounded-lg border border-[#1c2d42]">
+          <span className="text-xs text-slate-500 bg-content2 px-2.5 py-1 rounded-lg border border-divider">
             {stores.length} متجر
           </span>
         </div>
@@ -381,9 +381,9 @@ export default function StoresList() {
             aria-label="stores-table"
             classNames={{
               wrapper: 'bg-transparent shadow-none p-0 rounded-none',
-              th: 'bg-[#0a1422] text-slate-500 text-xs font-semibold uppercase tracking-wide border-0 first:rounded-none last:rounded-none',
-              td: 'py-3.5 border-b border-[#1c2d42]/60 last-of-type:border-0',
-              tr: 'hover:bg-[#111e32] transition-colors',
+              th: 'bg-content2 text-slate-500 text-xs font-semibold uppercase tracking-wide border-0 first:rounded-none last:rounded-none',
+              td: 'py-3.5 border-b border-divider/60 last-of-type:border-0',
+              tr: 'hover:bg-content2 transition-colors',
             }}
           >
             <TableHeader>
@@ -396,7 +396,7 @@ export default function StoresList() {
             </TableHeader>
             <TableBody emptyContent={
               <div className="py-20 text-center">
-                <div className="w-16 h-16 bg-[#111e32] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-content2 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={26} className="text-slate-600" />
                 </div>
                 <p className="text-slate-400 text-sm font-semibold">لا يوجد متاجر مسجلة</p>
@@ -417,7 +417,7 @@ export default function StoresList() {
                         className="bg-blue-500/20 text-blue-400 font-bold flex-shrink-0"
                       />
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm text-slate-200 group-hover:text-blue-400 transition-colors truncate">
+                        <p className="font-semibold text-sm text-foreground group-hover:text-blue-400 transition-colors truncate">
                           {s.store_name}
                         </p>
                         <p className="text-xs text-slate-600 font-mono truncate">{s.store_id}</p>
@@ -478,8 +478,8 @@ export default function StoresList() {
 
       {/* ════════════════ REGISTER MODAL ════════════════ */}
       <Modal isOpen={isOpen} onClose={onClose} placement="center">
-        <ModalContent className="bg-[#0c1627] border border-[#1c2d42]">
-          <ModalHeader className="text-white font-bold border-b border-[#1c2d42] pb-4">
+        <ModalContent className="bg-content1 border border-divider">
+          <ModalHeader className="text-foreground font-bold border-b border-divider pb-4">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 bg-blue-500/15 rounded-xl flex items-center justify-center text-blue-400">
                 <Icon paths="M12 4v16m8-8H4" size={15} />
@@ -494,7 +494,7 @@ export default function StoresList() {
               value={regStoreId}
               onValueChange={setRegStoreId}
               variant="bordered"
-              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
             />
             <Input
               label="Access Token *"
@@ -503,7 +503,7 @@ export default function StoresList() {
               value={regToken}
               onValueChange={setRegToken}
               variant="bordered"
-              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
             />
             <Input
               label="Refresh Token"
@@ -511,7 +511,7 @@ export default function StoresList() {
               value={regRefresh}
               onValueChange={setRegRefresh}
               variant="bordered"
-              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
             />
             <Input
               label="اسم المتجر"
@@ -519,7 +519,7 @@ export default function StoresList() {
               value={regName}
               onValueChange={setRegName}
               variant="bordered"
-              classNames={{ inputWrapper: 'border-[#1c2d42] hover:border-slate-500 bg-[#111e32]' }}
+              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
             />
             {regError && (
               <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 text-red-400 text-sm">
@@ -528,8 +528,8 @@ export default function StoresList() {
               </div>
             )}
           </ModalBody>
-          <ModalFooter className="border-t border-[#1c2d42] pt-4">
-            <Button variant="flat" onPress={onClose} className="text-slate-400 bg-[#111e32]">
+          <ModalFooter className="border-t border-divider pt-4">
+            <Button variant="flat" onPress={onClose} className="text-slate-400 bg-content2">
               إلغاء
             </Button>
             <Button color="primary" isLoading={regLoading} onPress={handleRegister} className="font-bold">
