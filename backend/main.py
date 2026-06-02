@@ -634,19 +634,26 @@ async def health():
 
 @app.get("/", response_class=HTMLResponse)
 async def root_index():
-    """Root — serves the React SPA (HashRouter redirects to #/landing for guests)."""
     return _serve_react_or_legacy()
-
 
 @app.get("/landing", response_class=HTMLResponse)
 async def landing_page():
-    """Public landing page — serves the React SPA."""
     return _serve_react_or_legacy()
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return _serve_react_or_legacy()
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_index():
-    """Super-admin dashboard — serves the React app if built, legacy HTML otherwise."""
+    return _serve_react_or_legacy()
+
+@app.get("/store/{store_id}", response_class=HTMLResponse)
+async def store_spa(store_id: str):
+    return _serve_react_or_legacy()
+
+@app.get("/store/{store_id}/{rest:path}", response_class=HTMLResponse)
+async def store_spa_sub(store_id: str, rest: str):
     return _serve_react_or_legacy()
 
 

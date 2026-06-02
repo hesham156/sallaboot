@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Spinner } from '@heroui/react'
 import { getToken, getStoreId, getIsSuper } from './api'
 import Login from './pages/Login'
@@ -27,7 +27,7 @@ function RequireStoreOwner({ children }: { children: JSX.Element }) {
 
 export default function App() {
   return (
-    <HashRouter>
+    <BrowserRouter>
       <Suspense fallback={
         <div className="flex items-center justify-center min-h-screen bg-background">
           <Spinner size="lg" color="primary" label="جاري التحميل..." />
@@ -77,6 +77,6 @@ export default function App() {
         />
       </Routes>
       </Suspense>
-    </HashRouter>
+    </BrowserRouter>
   )
 }
