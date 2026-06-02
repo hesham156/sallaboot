@@ -2611,8 +2611,13 @@ async def get_uploaded_file(file_id: str):
     """
     Serve an uploaded file. Tries PostgreSQL first (persistent across
     deploys), then falls back to the local /uploads disk cache.
+
+    On Railway the disk is ephemeral, so after a redeploy the UPLOAD_DIR may
+    not exist and any DB-less file is simply gone. Both lookups are guarded so
+    a missing file returns a clean 404 instead of a 500 (FileNotFoundError on
+    iterdir of a non-existent directory).
     """
-    # 1) Try DB
+    # 1) Try DB (load_upload already swallows its own errors → None)
     if db.available():
         record = await db.load_upload(file_id)
         if record:
@@ -2626,9 +2631,14 @@ async def get_uploaded_file(file_id: str):
                 },
             )
 
-    # 2) Disk fallback — scan UPLOAD_DIR for any file starting with file_id
-    for path in UPLOAD_DIR.iterdir():
-        if path.stem == file_id:
-            return FileResponse(path)
+    # 2) Disk fallback — scan UPLOAD_DIR for any file whose stem == file_id.
+    #    Guard against the directory being absent (fresh/ephemeral deploy).
+    try:
+        if UPLOAD_DIR.exists():
+            for path in UPLOAD_DIR.iterdir():
+                if path.stem == file_id:
+                    return FileResponse(path)
+    except Exception as e:
+        print(f"[file] disk lookup failed for {file_id!r}: {e}")
 
     raise HTTPException(404, "الملف غير موجود أو تم حذفه")
