@@ -5,6 +5,7 @@ import aiofiles
 import collections
 import datetime as _dt
 from pathlib import Path
+from urllib.parse import quote
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -2620,6 +2621,22 @@ async def upload_file(
     }
 
 
+def _content_disposition(filename: str, disposition: str = "inline") -> str:
+    """
+    Build a latin-1-safe Content-Disposition header value.
+
+    HTTP header values must be encodable as latin-1, but uploaded filenames
+    are often Arabic/UTF-8. We emit an ASCII fallback for old clients plus a
+    percent-encoded UTF-8 `filename*` (RFC 5987) for modern ones.
+    """
+    name = filename or "file"
+    # ASCII fallback: drop non-latin-1 chars; if nothing's left, use a default.
+    ascii_name = name.encode("ascii", "ignore").decode("ascii").strip() or "file"
+    ascii_name = ascii_name.replace('"', "")
+    utf8_name  = quote(name, safe="")
+    return f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+
+
 @app.get("/file/{file_id}")
 async def get_uploaded_file(file_id: str):
     """
@@ -2640,7 +2657,10 @@ async def get_uploaded_file(file_id: str):
                 content=record["data"],
                 media_type=record["content_type"],
                 headers={
-                    "Content-Disposition": f'inline; filename="{record["filename"]}"',
+                    # RFC 5987/6266: HTTP headers are latin-1 only, so a non-ASCII
+                    # filename (e.g. Arabic) must be percent-encoded via filename*.
+                    # We send an ASCII fallback + the UTF-8 version.
+                    "Content-Disposition": _content_disposition(record["filename"]),
                     "Cache-Control": "private, max-age=3600",
                 },
             )
