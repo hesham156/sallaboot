@@ -1,0 +1,96 @@
+- main [ref=e4]:
+  - generic [ref=e191]:
+    - complementary [ref=e197]:
+      - generic [ref=e199]:
+        - img "م" [ref=e202]
+        - generic [ref=e204]:
+          - paragraph [ref=e205]: متجر 963634590
+          - paragraph [ref=e206]: "963634590"
+      - navigation [ref=e207]:
+        - button "نظرة عامة" [ref=e208] [cursor=pointer]:
+          - img [ref=e209]
+          - generic [ref=e211]: نظرة عامة
+        - button "المحادثات" [ref=e212] [cursor=pointer]:
+          - img [ref=e213]
+          - generic [ref=e215]: المحادثات
+        - button "المنتجات" [ref=e216] [cursor=pointer]:
+          - img [ref=e217]
+          - generic [ref=e219]: المنتجات
+        - button "الطلبات" [ref=e220] [cursor=pointer]:
+          - img [ref=e221]
+          - generic [ref=e223]: الطلبات
+        - button "سلات متروكة" [ref=e224] [cursor=pointer]:
+          - img [ref=e225]
+          - generic [ref=e227]: سلات متروكة
+        - button "التحليلات" [ref=e228] [cursor=pointer]:
+          - img [ref=e229]
+          - generic [ref=e231]: التحليلات
+        - button "حاسبة الأسعار" [ref=e232] [cursor=pointer]:
+          - img [ref=e233]
+          - generic [ref=e235]: حاسبة الأسعار
+        - button "ذاكرة الـ AI" [ref=e236] [cursor=pointer]:
+          - img [ref=e237]
+          - generic [ref=e239]: ذاكرة الـ AI
+        - button "تدريب البوت" [ref=e240] [cursor=pointer]:
+          - img [ref=e241]
+          - generic [ref=e244]: تدريب البوت
+        - button "الإعدادات" [ref=e245] [cursor=pointer]:
+          - img [ref=e246]
+          - generic [ref=e249]: الإعدادات
+      - generic [ref=e250]:
+        - button "البوت شغّال إيقاف" [ref=e251] [cursor=pointer]:
+          - generic [ref=e253]: البوت شغّال
+          - generic [ref=e254]: إيقاف
+        - generic [ref=e255]:
+          - button "كل المتاجر" [ref=e256] [cursor=pointer]:
+            - img [ref=e257]
+            - text: كل المتاجر
+          - button "خروج" [ref=e259] [cursor=pointer]:
+            - img [ref=e260]
+            - text: خروج
+        - paragraph [ref=e262]: حاسبة الأسعار
+    - main [ref=e263]:
+      - generic [ref=e2122]:
+        - generic [ref=e2127]:
+          - generic [ref=e2128]:
+            - heading "حاسبة أسعار الطباعة" [level=1] [ref=e2129]
+            - paragraph [ref=e2130]: الأسعار اللي تضبطها هنا الـ AI هيستخدمها لما يحسب للعميل من الشات
+          - button "حفظ الإعدادات" [ref=e2131] [cursor=pointer]
+        - tablist [ref=e2133]:
+          - tab "عام" [selected] [ref=e2135] [cursor=pointer]:
+            - generic [ref=e2136]: عام
+          - tab "رول" [ref=e2137] [cursor=pointer]:
+            - generic [ref=e2138]: رول
+          - tab "ديجيتال" [ref=e2139] [cursor=pointer]:
+            - generic [ref=e2140]: ديجيتال
+          - tab "أوفست" [ref=e2141] [cursor=pointer]:
+            - generic [ref=e2142]: أوفست
+          - tab "UV DTF" [ref=e2143] [cursor=pointer]:
+            - generic [ref=e2144]: UV DTF
+          - tab "🧪 اختبار" [ref=e2145] [cursor=pointer]:
+            - generic [ref=e2146]: 🧪 اختبار
+        - generic [ref=e2147]:
+          - heading "إعدادات عامة" [level=2] [ref=e2150]
+          - separator [ref=e2151]
+          - generic [ref=e2152]:
+            - generic [ref=e2155]:
+              - generic: نسبة الضريبة (VAT) %
+              - spinbutton "نسبة الضريبة (VAT) %" [ref=e2157]: "15"
+            - generic [ref=e2160]:
+              - generic: هامش الربح %
+              - spinbutton "هامش الربح %" [ref=e2162]: "15"
+            - generic [ref=e2163]:
+              - heading "تفعيل أنواع الطباعة" [level=3] [ref=e2164]
+              - generic [ref=e2165]:
+                - button "رول مُفعّل" [ref=e2166] [cursor=pointer]:
+                  - generic [ref=e2167]: رول
+                  - generic [ref=e2169]: مُفعّل
+                - button "ديجيتال مُفعّل" [ref=e2170] [cursor=pointer]:
+                  - generic [ref=e2171]: ديجيتال
+                  - generic [ref=e2173]: مُفعّل
+                - button "أوفست مُفعّل" [ref=e2174] [cursor=pointer]:
+                  - generic [ref=e2175]: أوفست
+                  - generic [ref=e2177]: مُفعّل
+                - button "UV DTF مُفعّل" [ref=e2178] [cursor=pointer]:
+                  - generic [ref=e2179]: UV DTF
+                  - generic [ref=e2181]: مُفعّل

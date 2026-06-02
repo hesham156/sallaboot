@@ -7,6 +7,7 @@ import {
 import {
   api, PricingConfig, PaperType, SheetSize, AddonItem, DiscountRule, TierRule,
 } from '../../api'
+import { Field } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -62,7 +63,7 @@ export default function Pricing({ storeId }: Props) {
   }
 
   const inputCls = {
-    inputWrapper: 'border-divider bg-content2 h-10 min-h-10',
+    inputWrapper: 'border-default-200 bg-default-50 h-12 min-h-12 rounded-xl px-4 data-[hover=true]:border-default-300 group-data-[focus=true]:!border-primary',
     label:        'text-default-400 text-xs font-medium',
     input:        'text-foreground text-sm',
   }
@@ -119,20 +120,24 @@ export default function Pricing({ storeId }: Props) {
           </CardHeader>
           <Divider />
           <CardBody className="px-5 py-6 grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Input
-              type="number" label="نسبة الضريبة (VAT) %"
+            <Field label="نسبة الضريبة (VAT) %">
+              <Input
+              type="number"
               value={String(cfg.tax_rate)} onValueChange={v => patch('tax_rate', parseFloat(v) || 0)}
-              variant="bordered" labelPlacement="outside" placeholder="15"
+              variant="bordered" placeholder="15"
               description="النسبة الافتراضية في السعودية 15%"
               classNames={inputCls}
             />
-            <Input
-              type="number" label="هامش الربح %"
+              </Field>
+            <Field label="هامش الربح %">
+              <Input
+              type="number"
               value={String(cfg.profit_margin)} onValueChange={v => patch('profit_margin', parseFloat(v) || 0)}
-              variant="bordered" labelPlacement="outside" placeholder="15"
+              variant="bordered" placeholder="15"
               description="يُضاف فوق التكلفة قبل الضريبة"
               classNames={inputCls}
             />
+              </Field>
 
             <div className="md:col-span-2 mt-2 space-y-3">
               <h3 className="text-sm font-bold text-default-500">تفعيل أنواع الطباعة</h3>
@@ -178,18 +183,22 @@ export default function Pricing({ storeId }: Props) {
           <Divider />
           <CardBody className="px-5 py-6 space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field label="سعر المتر المربع الأساسي (ريال)">
               <Input
-                type="number" label="سعر المتر المربع الأساسي (ريال)"
+                type="number"
                 value={String(cfg.roll_unit_price)}
                 onValueChange={v => patch('roll_unit_price', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="عرض الرول الافتراضي (سم)">
               <Input
-                type="number" label="عرض الرول الافتراضي (سم)"
+                type="number"
                 value={String(cfg.default_roll_width)}
                 onValueChange={v => patch('default_roll_width', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
             </div>
             <DiscountEditor
               title="شرائح الخصم على المساحة (متر مربع)"
@@ -238,24 +247,30 @@ export default function Pricing({ storeId }: Props) {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-violet-500/5 p-4 rounded-xl border border-violet-500/20">
               <h3 className="md:col-span-3 text-sm font-bold text-violet-300">إعدادات البصمة (Foil)</h3>
+              <Field label="سعر 1 سم² للقالب">
               <Input
-                type="number" label="سعر 1 سم² للقالب"
+                type="number"
                 value={String(cfg.foil_mold_price_per_cm2)}
                 onValueChange={v => patch('foil_mold_price_per_cm2', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="الحد الأدنى لسعر القالب">
               <Input
-                type="number" label="الحد الأدنى لسعر القالب"
+                type="number"
                 value={String(cfg.foil_min_mold_price)}
                 onValueChange={v => patch('foil_min_mold_price', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="سعر التبصيم (للحبة)">
               <Input
-                type="number" label="سعر التبصيم (للحبة)"
+                type="number"
                 value={String(cfg.foil_stamping_unit_price)}
                 onValueChange={v => patch('foil_stamping_unit_price', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
             </div>
 
             <DiscountEditor
@@ -283,20 +298,24 @@ export default function Pricing({ storeId }: Props) {
           <Divider />
           <CardBody className="px-5 py-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field label="ثابت العرض (A)">
               <Input
-                type="number" label="ثابت العرض (A)"
+                type="number"
                 value={String(cfg.offset_fixed_width)}
                 onValueChange={v => patch('offset_fixed_width', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
                 description="يُستخدم في معادلة CEILING(عرض ÷ A)"
               />
+              </Field>
+              <Field label="ثابت الطول (B)">
               <Input
-                type="number" label="ثابت الطول (B)"
+                type="number"
                 value={String(cfg.offset_fixed_height)}
                 onValueChange={v => patch('offset_fixed_height', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
                 description="يُستخدم في معادلة CEILING(طول ÷ B)"
               />
+              </Field>
             </div>
 
             <PaperListEditor
@@ -308,30 +327,38 @@ export default function Pricing({ storeId }: Props) {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-amber-500/5 p-4 rounded-xl border border-amber-500/20">
               <h3 className="col-span-2 md:col-span-4 text-sm font-bold text-amber-300">تكاليف إضافية (لكل 1000)</h3>
+              <Field label="قص عادي">
               <Input
-                type="number" label="قص عادي"
+                type="number"
                 value={String(cfg.offset_cutting_normal)}
                 onValueChange={v => patch('offset_cutting_normal', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="قص داي كت">
               <Input
-                type="number" label="قص داي كت"
+                type="number"
                 value={String(cfg.offset_cutting_diecut)}
                 onValueChange={v => patch('offset_cutting_diecut', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="ثنية">
               <Input
-                type="number" label="ثنية"
+                type="number"
                 value={String(cfg.offset_folding_per_1000)}
                 onValueChange={v => patch('offset_folding_per_1000', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="تخريم">
               <Input
-                type="number" label="تخريم"
+                type="number"
                 value={String(cfg.offset_punching_per_1000)}
                 onValueChange={v => patch('offset_punching_per_1000', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
             </div>
 
             <DiscountEditor
@@ -359,18 +386,22 @@ export default function Pricing({ storeId }: Props) {
           <Divider />
           <CardBody className="px-5 py-6 space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field label="سعر المتر الطولي الأساسي (ريال)">
               <Input
-                type="number" label="سعر المتر الطولي الأساسي (ريال)"
+                type="number"
                 value={String(cfg.uvdtf_unit_price)}
                 onValueChange={v => patch('uvdtf_unit_price', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
+              <Field label="عرض المسطح الفعلي (سم)">
               <Input
-                type="number" label="عرض المسطح الفعلي (سم)"
+                type="number"
                 value={String(cfg.uvdtf_roll_width)}
                 onValueChange={v => patch('uvdtf_roll_width', parseFloat(v) || 0)}
-                variant="bordered" labelPlacement="outside" classNames={inputCls}
+                variant="bordered" classNames={inputCls}
               />
+              </Field>
             </div>
             <TierEditor
               title="شرائح السعر حسب الاستهلاك (متر طولي)"
@@ -680,15 +711,21 @@ function TestCalculator({ storeId, cfg }: { storeId: string; cfg: PricingConfig 
             <option value="offset">أوفست</option>
             <option value="uvdtf">UV DTF</option>
           </select>
-          <Input size="sm" label="عرض" placeholder="9" type="number" value={width} onValueChange={setWidth}
-                 variant="bordered" labelPlacement="outside"
+          <Field label="عرض">
+              <Input size="sm" placeholder="9" type="number" value={width} onValueChange={setWidth}
+                 variant="bordered"
                  classNames={{ inputWrapper: 'border-divider bg-content2' }} />
-          <Input size="sm" label="ارتفاع" placeholder="5" type="number" value={height} onValueChange={setHeight}
-                 variant="bordered" labelPlacement="outside"
+              </Field>
+          <Field label="ارتفاع">
+              <Input size="sm" placeholder="5" type="number" value={height} onValueChange={setHeight}
+                 variant="bordered"
                  classNames={{ inputWrapper: 'border-divider bg-content2' }} />
-          <Input size="sm" label="كمية" placeholder="1000" type="number" value={quantity} onValueChange={setQuantity}
-                 variant="bordered" labelPlacement="outside"
+              </Field>
+          <Field label="كمية">
+              <Input size="sm" placeholder="1000" type="number" value={quantity} onValueChange={setQuantity}
+                 variant="bordered"
                  classNames={{ inputWrapper: 'border-divider bg-content2' }} />
+              </Field>
         </div>
 
         {papers.length > 0 && (

@@ -1,0 +1,2 @@
+[  832815ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ https://gc.kis.v2.scr.kaspersky-labs.com/9E7D88BF-1E81-4F7D-B818-99BC0F867408/EAF5873C-8251-454D-9104-DE92AC444892/longpooling?get&nocache=1d3e3&tm=2026-06-02T15%3A17%3A17.122Z:0
+[ 1030331ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ https://gc.kis.v2.scr.kaspersky-labs.com/9E7D88BF-1E81-4F7D-B818-99BC0F867408/EAF5873C-8251-454D-9104-DE92AC444892/longpooling?get&nocache=19f48&tm=2026-06-02T15%3A34%3A12.925Z&second=true:0
