@@ -79,6 +79,10 @@ export const api = {
   listStores: () =>
     get<{ stores: StoreInfo[] }>('/admin/stores'),
 
+  // Single store info — accessible with store token (no super needed)
+  getStoreInfo: (storeId: string) =>
+    get<StoreInfo>(`/admin/${storeId}/info`),
+
   // Conversations
   listConversations: (storeId: string, limit = 100, offset = 0) =>
     get<{ total: number; conversations: ConvSummary[] }>(

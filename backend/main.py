@@ -276,7 +276,7 @@ def _serve_react_or_legacy() -> HTMLResponse:
 # ── Auth middleware ────────────────────────────────────────────────────────────
 # Protects all per-store admin API routes (not the HTML pages or auth endpoints).
 _PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info)"
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
@@ -739,6 +739,19 @@ async def verify_store_token(store_id: str, request: Request):
     if not claims.get("su") and claims.get("s") != store_id:
         raise HTTPException(403, "غير مصرح")
     return {"ok": True, "store_id": store_id, "is_super": claims.get("su", False)}
+
+
+# ── Store info (for store owner — no super token needed) ─────────────────────
+@app.get("/admin/{store_id}/info")
+async def get_store_info_endpoint(store_id: str):
+    """Basic store metadata accessible with a store-level token."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    stores = sm.list_stores()
+    found = next((s for s in stores if s["store_id"] == store_id), None)
+    if not found:
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    return found
 
 
 # ── Settings: AI config ────────────────────────────────────────────────────────

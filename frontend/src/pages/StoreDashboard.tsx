@@ -134,13 +134,12 @@ export default function StoreDashboard() {
 
   async function loadStore() {
     try {
-      const [storeRes, botRes, aiRes] = await Promise.all([
-        api.listStores(),
+      const [storeInfo, botRes, aiRes] = await Promise.all([
+        api.getStoreInfo(storeId),
         api.botStatus(storeId),
         api.getAI(storeId).catch(() => null),
       ])
-      const found = storeRes.stores.find(s => s.store_id === storeId)
-      if (found) setStore(found)
+      setStore(storeInfo)
       setBotEnabled(botRes.bot_globally_enabled)
       if (aiRes?.store_type) setStoreType(aiRes.store_type === 'printing' ? 'printing' : 'general')
     } catch (e) { console.error(e) }
@@ -281,7 +280,7 @@ export default function StoreDashboard() {
           <div className="flex gap-1.5">
             {getIsSuper() && (
               <button
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/admin')}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium text-default-500 bg-content2 border border-divider hover:text-foreground hover:border-default-300"
               >
                 <Icon paths="M10 19l-7-7m0 0l7-7m-7 7h18" size={12} />
