@@ -1,0 +1,6 @@
+[  550144ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ https://gc.kis.v2.scr.kaspersky-labs.com/9E7D88BF-1E81-4F7D-B818-99BC0F867408/84C7C0E9-C255-466A-95D9-9EE85AED107C/longpooling?get&nocache=16877&tm=2026-06-02T14%3A07%3A39.811Z:0
+[  550155ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ https://gc.kis.v2.scr.kaspersky-labs.com/9E7D88BF-1E81-4F7D-B818-99BC0F867408/84C7C0E9-C255-466A-95D9-9EE85AED107C/longpooling?get&nocache=1e96a&tm=2026-06-02T14%3A28%3A43.833Z&second=true:0
+[  760380ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://sallaboot-t.up.railway.app/admin#/store/963634590/settings:0
+[  760381ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://sallaboot-t.up.railway.app/admin#/store/963634590/settings:0
+[  760381ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://sallaboot-t.up.railway.app/admin#/store/963634590/settings:0
+[  761029ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://sallaboot-t.up.railway.app/admin#/store/963634590/settings:0

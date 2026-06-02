@@ -15,20 +15,25 @@
 import { Input, Textarea, Select, SelectItem } from '@heroui/react'
 import type { ReactNode } from 'react'
 
-// ── Shared HeroUI classNames (the project's dark design tokens) ──────────────
+// ── Shared HeroUI classNames (light design tokens — Purity-style) ────────────
+// Comfortable height + clear padding so labels never overlap the value and the
+// control reads as a proper, roomy field.
 export const FIELD_INPUT = {
   inputWrapper:
-    'border-divider bg-content2 h-11 min-h-11 rounded-xl ' +
-    'hover:border-slate-500 group-data-[focus=true]:border-primary ' +
-    'group-data-[focus=true]:bg-content2 transition-colors',
-  input: 'text-foreground text-sm placeholder:text-default-500',
+    'border-default-200 bg-default-50 h-12 min-h-12 rounded-xl px-4 ' +
+    'data-[hover=true]:border-default-300 ' +
+    'group-data-[focus=true]:!border-primary group-data-[focus=true]:bg-content1 ' +
+    'transition-colors',
+  input: 'text-foreground text-sm placeholder:text-default-400',
 }
 
 export const FIELD_TEXTAREA = {
   inputWrapper:
-    'border-divider bg-content2 rounded-xl py-2 ' +
-    'hover:border-slate-500 group-data-[focus=true]:border-primary transition-colors',
-  input: 'text-foreground text-sm leading-relaxed placeholder:text-default-500',
+    'border-default-200 bg-default-50 rounded-xl px-4 py-3 !h-auto items-start ' +
+    'data-[hover=true]:border-default-300 ' +
+    'group-data-[focus=true]:!border-primary group-data-[focus=true]:bg-content1 ' +
+    'transition-colors',
+  input: 'text-foreground text-sm leading-relaxed placeholder:text-default-400 py-0.5',
 }
 
 // ── Field: explicit label + optional hint above any control ──────────────────
@@ -39,11 +44,11 @@ export function Field({ label, hint, error, children }: {
   children: ReactNode
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {label && (
-        <label className="flex items-center gap-1.5 text-xs font-semibold text-default-500 px-0.5">
+        <label className="flex items-center gap-1.5 text-sm font-semibold text-default-700 px-0.5">
           {label}
-          {hint && <span className="text-[10px] font-normal text-default-400">({hint})</span>}
+          {hint && <span className="text-[11px] font-normal text-default-400">({hint})</span>}
         </label>
       )}
       {children}

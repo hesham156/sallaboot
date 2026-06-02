@@ -1,0 +1,115 @@
+- main [ref=e4]:
+  - generic [ref=e191]:
+    - complementary [ref=e197]:
+      - generic [ref=e199]:
+        - img "م" [ref=e202]
+        - generic [ref=e204]:
+          - paragraph [ref=e205]: متجر 963634590
+          - paragraph [ref=e206]: "963634590"
+      - navigation [ref=e207]:
+        - button "نظرة عامة" [ref=e208] [cursor=pointer]:
+          - img [ref=e209]
+          - generic [ref=e211]: نظرة عامة
+        - button "المحادثات" [ref=e212] [cursor=pointer]:
+          - img [ref=e213]
+          - generic [ref=e215]: المحادثات
+        - button "المنتجات" [ref=e216] [cursor=pointer]:
+          - img [ref=e217]
+          - generic [ref=e219]: المنتجات
+        - button "الطلبات" [ref=e220] [cursor=pointer]:
+          - img [ref=e221]
+          - generic [ref=e223]: الطلبات
+        - button "سلات متروكة" [ref=e224] [cursor=pointer]:
+          - img [ref=e225]
+          - generic [ref=e227]: سلات متروكة
+        - button "التحليلات" [ref=e228] [cursor=pointer]:
+          - img [ref=e229]
+          - generic [ref=e231]: التحليلات
+        - button "حاسبة الأسعار" [ref=e232] [cursor=pointer]:
+          - img [ref=e233]
+          - generic [ref=e235]: حاسبة الأسعار
+        - button "ذاكرة الـ AI" [ref=e236] [cursor=pointer]:
+          - img [ref=e237]
+          - generic [ref=e239]: ذاكرة الـ AI
+        - button "تدريب البوت" [ref=e240] [cursor=pointer]:
+          - img [ref=e241]
+          - generic [ref=e244]: تدريب البوت
+        - button "الإعدادات" [ref=e245] [cursor=pointer]:
+          - img [ref=e246]
+          - generic [ref=e249]: الإعدادات
+      - generic [ref=e250]:
+        - button "البوت شغّال إيقاف" [ref=e251] [cursor=pointer]:
+          - generic [ref=e253]: البوت شغّال
+          - generic [ref=e254]: إيقاف
+        - generic [ref=e255]:
+          - button "كل المتاجر" [ref=e256] [cursor=pointer]:
+            - img [ref=e257]
+            - text: كل المتاجر
+          - button "خروج" [ref=e259] [cursor=pointer]:
+            - img [ref=e260]
+            - text: خروج
+        - paragraph [ref=e262]: الإعدادات
+    - main [ref=e263]:
+      - generic [ref=e937]:
+        - generic [ref=e938]:
+          - heading "الإعدادات" [level=1] [ref=e939]
+          - paragraph [ref=e940]: إدارة المساعد الذكي والأمان والاتصال بسلة
+        - generic [ref=e941]:
+          - heading "إعدادات الذكاء الاصطناعي" [level=2] [ref=e945]
+          - separator [ref=e946]
+          - generic [ref=e947]:
+            - generic [ref=e948]:
+              - text: المزوّد
+              - generic [ref=e949]:
+                - button "Groq Llama 3.3" [ref=e950] [cursor=pointer]:
+                  - generic [ref=e951]: Groq
+                  - generic [ref=e952]: Llama 3.3
+                - button "Anthropic Claude" [ref=e954] [cursor=pointer]:
+                  - generic [ref=e955]: Anthropic
+                  - generic [ref=e956]: Claude
+                - button "OpenAI GPT-4o" [ref=e957] [cursor=pointer]:
+                  - generic [ref=e958]: OpenAI
+                  - generic [ref=e959]: GPT-4o
+            - generic [ref=e960]:
+              - generic [ref=e961]: مفتاح API
+              - textbox "gsk_..." [ref=e966]
+            - generic [ref=e967]:
+              - generic [ref=e968]:
+                - generic [ref=e969]: الموديل
+                - textbox "llama-3.3-70b-versatile" [ref=e974]
+              - generic [ref=e975]:
+                - button "llama-3.3-70b-versatile" [ref=e976] [cursor=pointer]
+                - button "llama-3.1-70b-versatile" [ref=e977] [cursor=pointer]
+                - button "mixtral-8x7b-32768" [ref=e978] [cursor=pointer]
+            - generic [ref=e979]:
+              - generic [ref=e980]: اسم البوت
+              - textbox "مساعد المتجر" [ref=e985]
+            - generic [ref=e986]:
+              - generic [ref=e987]: نوع المتجر
+              - generic [ref=e988]:
+                - button "🛍️ متجر عام منتجات عامة (عبايات، أحذية، إلخ)" [ref=e989] [cursor=pointer]:
+                  - generic [ref=e990]:
+                    - generic [ref=e991]: 🛍️
+                    - text: متجر عام
+                  - generic [ref=e992]: منتجات عامة (عبايات، أحذية، إلخ)
+                - button "🖨️ متجر طباعة حاسبات الأسعار وعروض الطباعة" [ref=e993] [cursor=pointer]:
+                  - generic [ref=e994]:
+                    - generic [ref=e995]: 🖨️
+                    - text: متجر طباعة
+                  - generic [ref=e996]: حاسبات الأسعار وعروض الطباعة
+              - paragraph [ref=e997]: ميزات الطباعة مخفية. فعّل "متجر طباعة" فقط إذا كان متجرك يقدّم خدمات طباعة.
+            - button "حفظ إعدادات AI" [ref=e998] [cursor=pointer]
+        - generic [ref=e999]:
+          - heading "تغيير كلمة المرور" [level=2] [ref=e1002]
+          - separator [ref=e1003]
+          - generic [ref=e1004]:
+            - generic [ref=e1005]:
+              - generic [ref=e1006]: كلمة المرور الحالية
+              - textbox "أدخل كلمة المرور الحالية" [ref=e1011]
+            - generic [ref=e1012]:
+              - generic [ref=e1013]: كلمة المرور الجديدة
+              - textbox "٦ أحرف على الأقل" [ref=e1018]
+            - generic [ref=e1019]:
+              - generic [ref=e1020]: تأكيد كلمة المرور الجديدة
+              - textbox "أعد إدخال كلمة المرور الجديدة" [ref=e1025]
+            - button "تغيير كلمة المرور" [disabled]

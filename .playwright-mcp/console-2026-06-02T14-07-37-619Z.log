@@ -1,0 +1,3 @@
+[    2330ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://sallaboot-t.up.railway.app/admin#/login:0
+[    2510ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://sallaboot-t.up.railway.app/favicon.ico:0
+[    2756ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://sallaboot-t.up.railway.app/favicon.ico:0
