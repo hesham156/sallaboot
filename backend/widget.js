@@ -37,6 +37,7 @@
   var sessionId = null;
   var isOpen = false;
   var isLoading = false;
+  var historyLoaded = false;      // guards one-time re-render of past messages
   var botEnabled = true;          // tracks whether AI bot is handling this session
   var pollTimer = null;           // setInterval handle for admin message polling
   var humanBannerShown = false;   // prevent duplicate "human took over" banners
@@ -826,6 +827,41 @@
     }
   }
 
+  // ── Restore previous conversation on load ─────────────────────────────────────
+  // When a returning visitor has a persisted session_id, fetch the server-side
+  // transcript and re-render it so they continue exactly where they left off
+  // after a page refresh or leaving and coming back. Returns count rendered.
+  async function loadHistory() {
+    if (historyLoaded || !sessionId) return 0;
+    historyLoaded = true;
+    try {
+      var res = await fetch(
+        CONFIG.apiUrl + "/chat/history?session_id=" + encodeURIComponent(sessionId)
+      );
+      if (!res.ok) return 0;
+      var data = await res.json();
+      var msgs = (data && data.messages) || [];
+      if (!msgs.length) return 0;
+
+      var container = document.getElementById("salla-chat-messages");
+      if (container) container.innerHTML = "";   // clear stray welcome/quick-actions
+      msgs.forEach(function (m) {
+        appendMessage(m.role === "user" ? "user" : "bot", m.content || "");
+      });
+
+      // Sync bot/human mode so the input + banner match the live state.
+      if (typeof data.bot_enabled !== "undefined" && !data.bot_enabled) {
+        botEnabled = false;
+        setHumanMode(true);
+      }
+      // Returning visitor with an active thread → keep admin polling alive.
+      startPolling();
+      return msgs.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   async function pollAdmin() {
     if (!sessionId) return;
     try {
@@ -888,7 +924,7 @@
         } catch(ignored) {}
         appendMessage("bot", errMsg);
       } else {
-        if (data.session_id) sessionId = data.session_id;
+        if (data.session_id) { sessionId = data.session_id; savePersistedSession(); }
 
         // Check bot_enabled flag from response
         if (typeof data.bot_enabled !== "undefined") {
@@ -971,6 +1007,12 @@
   function init() {
     buildWidget();
 
+    // Identify the visitor (Salla customer if logged in) and resume their
+    // persisted session_id from localStorage so a refresh / return continues
+    // the same conversation instead of starting a fresh empty thread.
+    detectSallaCustomer();
+    loadPersistedSession();
+
     var btn = document.getElementById("salla-chat-btn");
     var panel = document.getElementById("salla-chat-panel");
     var closeBtn = document.getElementById("salla-chat-close");
@@ -986,15 +1028,23 @@
     badge.style.display = "flex";
 
     // Toggle panel
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", async function () {
       isOpen = !isOpen;
       panel.classList.toggle("open", isOpen);
       badge.style.display = "none";
-      if (isOpen && document.getElementById("salla-chat-messages").children.length === 0) {
-        appendMessage("bot", CONFIG.welcomeMessage);
-        appendQuickActions();
+      if (isOpen) {
+        var msgsEl = document.getElementById("salla-chat-messages");
+        // Resume a returning visitor's previous conversation first.
+        if (!historyLoaded && sessionId) {
+          await loadHistory();
+        }
+        // Only greet when there's no prior conversation to restore.
+        if (msgsEl.children.length === 0) {
+          appendMessage("bot", CONFIG.welcomeMessage);
+          appendQuickActions();
+        }
+        input.focus();
       }
-      if (isOpen) input.focus();
     });
 
     closeBtn.addEventListener("click", function () {

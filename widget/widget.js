@@ -13,10 +13,41 @@
   // Allow overriding via window.SallaChatConfig
   var CONFIG = Object.assign({}, _defaults, window.SallaChatConfig || {});
 
+  // ── Session persistence (survives refresh / leave-and-return) ──────────────────
+  // The conversation itself lives server-side (keyed by session_id). We persist
+  // ONLY the session_id in this browser's localStorage so a returning visitor
+  // resumes the same thread. This is per-device/per-browser — more reliable and
+  // private than IP-based matching (IPs are shared behind NAT and change often).
+  var SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+  var SESSION_KEY = "salla_chat_session_" + (CONFIG.storeId || "default");
+
+  function loadStoredSession() {
+    try {
+      var raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || !obj.id) return null;
+      // Expire stale sessions
+      if (obj.ts && Date.now() - obj.ts > SESSION_TTL_MS) {
+        localStorage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return obj.id;
+    } catch (e) { return null; }
+  }
+
+  function saveSession(id) {
+    if (!id) return;
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ id: id, ts: Date.now() }));
+    } catch (e) { /* localStorage unavailable (private mode) — degrade gracefully */ }
+  }
+
   // ── State ─────────────────────────────────────────────────────────────────────
-  var sessionId = null;
+  var sessionId = loadStoredSession();   // resume previous thread if present
   var isOpen = false;
   var isLoading = false;
+  var historyLoaded = false;
 
   // ── Styles ────────────────────────────────────────────────────────────────────
   var styles = `
@@ -216,6 +247,32 @@
     if (el) el.remove();
   }
 
+  // ── Restore previous conversation on load ─────────────────────────────────────
+  // Fetches the server-side history for the stored session_id and re-renders it
+  // so a returning visitor picks up exactly where they left off.
+  // Returns the number of messages rendered (0 if none / no session).
+  async function loadHistory() {
+    if (historyLoaded || !sessionId) return 0;
+    historyLoaded = true;
+    try {
+      var res = await fetch(
+        CONFIG.apiUrl + "/chat/history?session_id=" + encodeURIComponent(sessionId)
+      );
+      if (!res.ok) return 0;
+      var data = await res.json();
+      var msgs = (data && data.messages) || [];
+      if (!msgs.length) return 0;
+      var container = document.getElementById("salla-chat-messages");
+      if (container) container.innerHTML = "";   // clear any stray welcome
+      msgs.forEach(function (m) {
+        appendMessage(m.role === "user" ? "user" : "bot", m.content || "");
+      });
+      return msgs.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   // ── API ───────────────────────────────────────────────────────────────────────
   async function sendMessage(message) {
     if (isLoading) return;
@@ -233,7 +290,7 @@
       });
       var data = await res.json();
       hideTyping();
-      if (data.session_id) sessionId = data.session_id;
+      if (data.session_id) { sessionId = data.session_id; saveSession(sessionId); }
       appendMessage("bot", data.reply || "عذراً، حدث خطأ. حاول مرة أخرى.");
     } catch (e) {
       hideTyping();
@@ -296,14 +353,22 @@
     badge.style.display = "flex";
 
     // Toggle panel
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", async function () {
       isOpen = !isOpen;
       panel.classList.toggle("open", isOpen);
       badge.style.display = "none";
-      if (isOpen && document.getElementById("salla-chat-messages").children.length === 0) {
-        appendMessage("bot", CONFIG.welcomeMessage);
+      if (isOpen) {
+        var msgsEl = document.getElementById("salla-chat-messages");
+        // Restore a returning visitor's previous conversation first.
+        if (!historyLoaded && sessionId) {
+          await loadHistory();
+        }
+        // Only show the welcome message if there's no prior conversation.
+        if (msgsEl.children.length === 0) {
+          appendMessage("bot", CONFIG.welcomeMessage);
+        }
+        input.focus();
       }
-      if (isOpen) input.focus();
     });
 
     closeBtn.addEventListener("click", function () {

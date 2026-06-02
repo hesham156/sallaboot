@@ -2478,6 +2478,41 @@ async def chat_poll(session_id: str):
     return {"messages": pending, "bot_enabled": bot_on}
 
 
+@app.get("/chat/history")
+async def chat_history(session_id: str):
+    """
+    Public endpoint the widget calls on load so a returning visitor sees
+    their previous conversation after a refresh / leave-and-return.
+
+    Access model: session_id is an unguessable random UUID stored in the
+    visitor's own browser (localStorage), so possessing it acts as the
+    access token for that single conversation — same model as /chat/poll.
+    No admin auth required (this is the visitor's own thread).
+
+    Returns messages mapped to the widget's two visual roles:
+      'user'                  → 'user'  (right bubble)
+      'assistant' | 'admin'   → 'bot'   (left bubble)
+    """
+    if not session_id or "{{" in session_id:
+        return {"messages": [], "bot_enabled": True}
+    await cs.restore_to_memory(session_id)
+    conv = cs.all_conversations().get(session_id)
+    if not conv:
+        return {"messages": [], "bot_enabled": True}
+
+    out = []
+    for m in conv.get("messages", []):
+        role = m.get("role")
+        if role not in ("user", "assistant", "admin"):
+            continue
+        out.append({
+            "role":    "user" if role == "user" else "bot",
+            "content": m.get("content", ""),
+            "ts":      m.get("ts", ""),
+        })
+    return {"messages": out, "bot_enabled": cs.is_bot_enabled(session_id)}
+
+
 # ── File upload ────────────────────────────────────────────────────────────────
 # MIME content-type lookup for the few extensions we care about
 _CONTENT_TYPES = {
