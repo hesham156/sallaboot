@@ -30,6 +30,7 @@ from salla_oauth import get_auth_url, exchange_code, save_tokens
 import conversation_store as cs
 import pricing_calculator as pc
 import store_brain as brain
+import smart_router
 
 # ── Rate limiter for login endpoints (DB-backed, survives restarts) ──────────
 
@@ -874,6 +875,7 @@ async def add_text_training(store_id: str, req: TrainingTextRequest):
     if new_id is None:
         raise HTTPException(503, "تعذّر الحفظ — قاعدة البيانات غير متاحة")
     sm.reset_agent(store_id)
+    smart_router.invalidate_faq_cache(store_id)   # pick up new FAQ immediately
     return {"status": "ok", "id": new_id, "message": "تمت إضافة التدريب ✅"}
 
 
@@ -952,6 +954,7 @@ async def toggle_training(store_id: str, training_id: int, payload: dict):
     if not ok:
         raise HTTPException(500, "تعذّر التحديث")
     sm.reset_agent(store_id)
+    smart_router.invalidate_faq_cache(store_id)
     return {"status": "ok"}
 
 
@@ -964,6 +967,7 @@ async def delete_training_entry(store_id: str, training_id: int):
     if not ok:
         raise HTTPException(500, "تعذّر الحذف")
     sm.reset_agent(store_id)
+    smart_router.invalidate_faq_cache(store_id)
     return {"status": "ok", "deleted_file_id": deleted_file_id}
 
 

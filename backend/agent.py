@@ -11,6 +11,7 @@ import conversation_store as cs
 import store_manager as sm
 import pricing_calculator as pc
 import store_brain as brain
+import smart_router
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
@@ -2459,6 +2460,31 @@ class PrintingAgent:
 
     # ── Chat entry point ───────────────────────────────────────────────────────
     async def chat(self, message: str, session_id: str) -> str:
+        # ── Pre-LLM fast path ────────────────────────────────────────────────
+        # Try to answer greetings / stored FAQs / informational intents WITHOUT
+        # calling the LLM (cheaper + faster). Strictly scoped to stable factual
+        # queries — pricing/quotes/recommendations always fall through. Any miss
+        # or error returns None and the normal LLM flow runs.
+        try:
+            fp = await smart_router.route(message, self.store_id)
+        except Exception as exc:
+            print(f"[agent] fast-path skipped: {exc}")
+            fp = None
+
+        if fp:
+            if fp["type"] == "tool":
+                reply = await self._run_tool(fp["tool"], {}, session_id)
+            else:
+                reply = fp.get("text", "")
+            # Persist user+assistant ONLY when we actually answer here, so an
+            # empty tool result can fall through to the LLM without the user
+            # message being recorded twice.
+            if reply:
+                await cs.add_message(session_id, "user", message, self.store_id)
+                await cs.add_message(session_id, "assistant", reply, self.store_id)
+                print(f"[fast-path] {fp.get('source')} — answered without LLM")
+                return reply
+
         if self.provider == "groq":
             return await self._chat_groq(message, session_id)
         if self.provider == "openai":
