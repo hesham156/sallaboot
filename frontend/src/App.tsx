@@ -22,7 +22,6 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/login/:storeId" element={<Login />} />
 
         {/* Super-admin: all stores */}
         <Route

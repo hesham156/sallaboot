@@ -353,6 +353,7 @@ class BotToggleRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str
+    email: Optional[str] = ""
 
 
 class AIConfigRequest(BaseModel):
@@ -637,11 +638,12 @@ async def admin_store_page(store_id: str):
     return _serve_react_or_legacy()
 
 
-# ── Auth: Super admin login ────────────────────────────────────────────────────
+# ── Auth: Admin login (email + password) ────────────────────────────────────────
 @app.post("/admin/auth/login")
 async def super_login(req: LoginRequest, request: Request):
-    ip         = request.client.host if request.client else "unknown"
-    super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
+    ip          = request.client.host if request.client else "unknown"
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "h456ad@gmail.com").strip().lower()
+    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
 
     # Warn once in logs if default password is still in use
     if super_pass == "admin":
@@ -650,11 +652,15 @@ async def super_login(req: LoginRequest, request: Request):
     if await _is_rate_limited(f"super:{ip}"):
         raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
 
-    if not req.password or req.password != super_pass:
-        print(f"[auth] ❌ Failed super-admin login attempt from {ip}")
-        raise HTTPException(401, "كلمة المرور غير صحيحة")
+    email_in = (req.email or "").strip().lower()
+    # Constant-time comparison for both fields to avoid timing leaks.
+    email_ok = hmac.compare_digest(email_in, super_email)
+    pass_ok  = bool(req.password) and hmac.compare_digest(req.password, super_pass)
+    if not (email_ok and pass_ok):
+        print(f"[auth] ❌ Failed admin login attempt from {ip} (email={email_in!r})")
+        raise HTTPException(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة")
 
-    print(f"[auth] ✅ Super-admin login from {ip}")
+    print(f"[auth] ✅ Admin login ({email_in}) from {ip}")
     token = _auth.create_token("super", is_super=True)
     return {"token": token, "store_id": "super", "is_super": True}
 

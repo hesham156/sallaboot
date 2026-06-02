@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Input, Button, Spinner } from '@heroui/react'
 import { api, setToken, setStoreId, setIsSuper } from '../api'
 
@@ -17,37 +17,31 @@ function Icon({ paths, size = 16, className = '' }: {
 }
 
 export default function Login() {
-  const { storeId } = useParams<{ storeId?: string }>()
-  const navigate    = useNavigate()
+  const navigate = useNavigate()
 
-  const [mode, setMode]           = useState<'super' | 'store'>(storeId ? 'store' : 'super')
-  const [inputStoreId, setInputStoreId] = useState(storeId || '')
-  const [password, setPassword]   = useState('')
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState('')
+  const [email, setEmail]       = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
 
   async function handleLogin() {
     if (loading) return
-    setError(''); setLoading(true)
+    setError('')
+    if (!email.trim())    { setError('يرجى إدخال البريد الإلكتروني'); return }
+    if (!password)        { setError('يرجى إدخال كلمة المرور'); return }
+    setLoading(true)
     try {
-      if (mode === 'super') {
-        const res = await api.superLogin(password)
-        setToken(res.token); setStoreId('super'); setIsSuper(true)
-        navigate('/', { replace: true })
-      } else {
-        if (!inputStoreId.trim()) { setError('يرجى إدخال معرف المتجر'); return }
-        const res = await api.storeLogin(inputStoreId.trim(), password)
-        setToken(res.token); setStoreId(res.store_id); setIsSuper(false)
-        navigate(`/store/${res.store_id}`, { replace: true })
-      }
+      const res = await api.superLogin(email.trim(), password)
+      setToken(res.token); setStoreId('super'); setIsSuper(true)
+      navigate('/', { replace: true })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'عذراً، كلمة المرور أو معرف المتجر غير صحيح')
+      setError(e instanceof Error ? e.message : 'البريد الإلكتروني أو كلمة المرور غير صحيحة')
     } finally { setLoading(false) }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#020917] p-4 relative overflow-hidden" dir="rtl">
-      
+
       {/* Background glowing gradients */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
@@ -73,65 +67,53 @@ export default function Login() {
             <h1 className="text-3xl font-black tracking-tight text-white">
               بـوت الـمـتـجـر <span className="text-gradient">SallaBot</span>
             </h1>
-            <p className="text-sm text-slate-400 font-medium mt-2">لوحة التحكم السحابية الموحدة للمساعد الذكي</p>
+            <p className="text-sm text-slate-400 font-medium mt-2">لوحة تحكم المشرف — تسجيل دخول آمن</p>
           </div>
         </div>
 
         {/* ── Login Glass Card ── */}
         <div className="bg-[#0c1627]/75 backdrop-blur-xl border border-divider rounded-3xl shadow-2xl p-6 sm:p-8 space-y-6 relative overflow-hidden">
           <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
-          
-          {/* High-End Segmented Control Tab Header */}
-          <div className="flex p-1.5 bg-[#111e32]/60 rounded-2xl border border-white/5 gap-1">
-            {[
-              { key: 'super', label: 'مدير عام المنصة 🛡️', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
-              { key: 'store', label: 'بوابة المتجر 🏪', icon: ['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10'] },
-            ].map(m => {
-              const active = mode === m.key
-              return (
-                <button
-                  key={m.key}
-                  onClick={() => { setMode(m.key as typeof mode); setError('') }}
-                  className={`flex-1 flex items-center justify-center gap-2.5 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${
-                    active
-                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xl shadow-blue-500/25'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                  }`}
-                >
-                  <Icon paths={m.icon} size={15} className={ 'text-white'} />
-                  <span>{m.label}</span>
-                </button>
-              )
-            })}
+
+          {/* Header badge */}
+          <div className="flex items-center justify-center gap-2.5 py-3 rounded-2xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border border-blue-500/20">
+            <Icon
+              paths="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+              size={16}
+              className="text-blue-400"
+            />
+            <span className="text-sm font-bold text-slate-200">دخول المشرف العام 🛡️</span>
           </div>
 
           {/* Form Content */}
           <div className="space-y-5">
-            {mode === 'store' && (
-              <Input
-                label="رقم المتجر"
-                placeholder="مثال: 963634590"
-                value={inputStoreId}
-                onValueChange={setInputStoreId}
-                variant="bordered"
-                classNames={{
-                  label: 'text-slate-300 text-sm font-semibold mb-1',
-                  inputWrapper: 'border-[#1c2d42] hover:border-blue-500/50 focus-within:!border-blue-500 bg-[#111e32]/50 hover:bg-[#111e32]/80 h-12 rounded-2xl transition-all duration-300',
-                  input: 'text-sm font-semibold text-white placeholder:text-slate-500',
-                }}
-                startContent={
-                  <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={16} className="text-white flex-shrink-0 ml-2" />
-                }
-              />
-            )}
+            <Input
+              label="البريد الإلكتروني"
+              placeholder="admin@example.com"
+              type="email"
+              value={email}
+              onValueChange={setEmail}
+              variant="bordered"
+              autoComplete="email"
+              classNames={{
+                label: 'text-slate-300 text-sm font-semibold mb-1',
+                inputWrapper: 'border-[#1c2d42] hover:border-blue-500/50 focus-within:!border-blue-500 bg-[#111e32]/50 hover:bg-[#111e32]/80 h-12 rounded-2xl transition-all duration-300',
+                input: 'text-sm font-semibold text-white placeholder:text-slate-500',
+              }}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              startContent={
+                <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+              }
+            />
 
             <Input
               label="كلمة المرور"
-              placeholder={mode === 'super' ? 'كلمة مرور المشرف العام' : 'أدخل كلمة مرور المتجر'}
+              placeholder="أدخل كلمة المرور"
               type="password"
               value={password}
               onValueChange={setPassword}
               variant="bordered"
+              autoComplete="current-password"
               classNames={{
                 label: 'text-slate-300 text-sm font-semibold mb-1',
                 inputWrapper: 'border-[#1c2d42] hover:border-blue-500/50 focus-within:!border-blue-500 bg-[#111e32]/50 hover:bg-[#111e32]/80 h-12 rounded-2xl transition-all duration-300',
@@ -158,14 +140,6 @@ export default function Login() {
             >
               {loading ? <Spinner size="sm" color="white" /> : 'تسجيل الدخول الآمن'}
             </Button>
-
-            {mode === 'store' && (
-              <div className="bg-[#111e32]/30 border border-white/5 rounded-2xl p-3 text-center animate-in fade-in duration-300">
-                <p className="text-[11px] text-slate-500 font-bold leading-relaxed">
-                  💡 للمتاجر الجديدة: كلمة المرور الافتراضية هي معرف متجر سلة الخاص بك.
-                </p>
-              </div>
-            )}
           </div>
         </div>
 

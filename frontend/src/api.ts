@@ -57,16 +57,11 @@ const put  = <T>(url: string, body?: unknown) => req<T>('PUT', url, body)
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
 export const api = {
-  // Login
-  superLogin: (password: string) =>
+  // Login — admin only (email + password)
+  superLogin: (email: string, password: string) =>
     post<{ token: string; store_id: string; is_super: boolean }>(
       '/admin/auth/login',
-      { password },
-    ),
-  storeLogin: (storeId: string, password: string) =>
-    post<{ token: string; store_id: string; store_name: string }>(
-      `/admin/${storeId}/auth/login`,
-      { password },
+      { email, password },
     ),
   verifyToken: (storeId: string) =>
     get<{ ok: boolean; store_id: string; is_super: boolean }>(
