@@ -34,7 +34,8 @@ export default function App() {
         </div>
       }>
       <Routes>
-        {/* Public landing page */}
+        {/* Public landing page — always accessible, even when logged in */}
+        <Route path="/" element={<Landing />} />
         <Route path="/landing" element={<Landing />} />
 
         <Route path="/login" element={<Login />} />
