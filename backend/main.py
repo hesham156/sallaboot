@@ -1539,8 +1539,14 @@ async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyReque
     if not req.message.strip():
         raise HTTPException(400, "الرسالة فارغة")
     await cs.restore_to_memory(session_id)
-    msg = await cs.add_message(session_id, "admin", req.message.strip(), store_id)
+    text = req.message.strip()
+    msg = await cs.add_message(session_id, "admin", text, store_id)
     cs.mark_admin_read(session_id)
+    # Learn from this correction in the background: the admin's answer is the
+    # right response, captured as a pending lesson for review. Fire-and-forget
+    # so it never slows the reply.
+    import bot_learning
+    asyncio.create_task(bot_learning.capture_admin_correction(store_id, session_id, text))
     return {"status": "sent", "message": msg}
 
 

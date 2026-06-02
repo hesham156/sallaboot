@@ -94,6 +94,7 @@ async def build_training_block(store_id: str) -> str:
     instructions: list[dict] = []
     faqs:         list[dict] = []
     files:        list[dict] = []
+    lessons:      list[dict] = []
     for e in entries:
         if not e.get("enabled", True):
             continue
@@ -101,8 +102,9 @@ async def build_training_block(store_id: str) -> str:
         if   kind == "instruction": instructions.append(e)
         elif kind == "faq":         faqs.append(e)
         elif kind == "file":        files.append(e)
+        elif kind == "lesson":      lessons.append(e)
 
-    if not (instructions or faqs or files):
+    if not (instructions or faqs or files or lessons):
         return ""
 
     blocks: list[str] = []
@@ -121,6 +123,26 @@ async def build_training_block(store_id: str) -> str:
                 lines.append(f"• {content}")
             elif title:
                 lines.append(f"• {title}")
+        section = "\n".join(lines)
+        blocks.append(section)
+        budget -= len(section) + 2
+
+    # 1b) Lessons learned — admin-approved corrections from past chats. High
+    #     priority (right after instructions) so the bot applies them and stops
+    #     repeating the same mistake.
+    if lessons and budget > 200:
+        lines = ["══ دروس مستفادة من محادثات سابقة (طبّقها بدقة ولا تكرر الأخطاء السابقة) ══"]
+        used = 0
+        for e in lessons:
+            q = (e.get("title") or "").strip()
+            a = (e.get("content") or "").strip()
+            if not (q and a):
+                continue
+            chunk = f"• عندما يقول العميل ما يشبه: «{q}»\n  الرد الصحيح: {a}\n"
+            if used + len(chunk) > budget - 200:
+                break
+            lines.append(chunk)
+            used += len(chunk)
         section = "\n".join(lines)
         blocks.append(section)
         budget -= len(section) + 2

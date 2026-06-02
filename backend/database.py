@@ -228,8 +228,13 @@ async def list_training(store_id: str) -> list[dict]:
 
 
 async def add_training(store_id: str, kind: str, title: str, content: str,
-                        file_id: str = "", file_name: str = "") -> int | None:
-    """Insert one training row. Returns the new id, or None on failure."""
+                        file_id: str = "", file_name: str = "",
+                        enabled: bool = True) -> int | None:
+    """
+    Insert one training row. Returns the new id, or None on failure.
+    `enabled=False` is used for auto-learned lessons that wait for admin
+    approval before they're injected into the bot's prompt.
+    """
     if not _pool:
         return None
     try:
@@ -237,12 +242,12 @@ async def add_training(store_id: str, kind: str, title: str, content: str,
             row = await conn.fetchrow(
                 """
                 INSERT INTO bot_training
-                  (store_id, kind, title, content, file_id, file_name, size_chars)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                  (store_id, kind, title, content, file_id, file_name, size_chars, enabled)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING id
                 """,
                 store_id, kind, title, content or "",
-                file_id or None, file_name or None, len(content or ""),
+                file_id or None, file_name or None, len(content or ""), enabled,
             )
         return int(row["id"]) if row else None
     except Exception as e:

@@ -21,16 +21,19 @@ const KIND_LABEL: Record<TrainingEntry['kind'], string> = {
   instruction: 'توجيه',
   faq:         'سؤال شائع',
   file:        'ملف مرجعي',
+  lesson:      'درس مُتعلَّم',
 }
-const KIND_COLOR: Record<TrainingEntry['kind'], 'primary' | 'success' | 'warning'> = {
+const KIND_COLOR: Record<TrainingEntry['kind'], 'primary' | 'success' | 'warning' | 'secondary'> = {
   instruction: 'warning',
   faq:         'success',
   file:        'primary',
+  lesson:      'secondary',
 }
 const KIND_ICON: Record<TrainingEntry['kind'], string> = {
   instruction: '🎯',
   faq:         '💬',
   file:        '📄',
+  lesson:      '🧠',
 }
 
 export default function Training({ storeId }: Props) {

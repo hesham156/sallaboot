@@ -411,7 +411,7 @@ export interface StoreInfoSnapshot {
 
 export interface TrainingEntry {
   id: number
-  kind: 'instruction' | 'faq' | 'file'
+  kind: 'instruction' | 'faq' | 'file' | 'lesson'
   title: string
   content: string
   file_id: string
