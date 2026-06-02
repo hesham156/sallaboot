@@ -2402,6 +2402,61 @@ class PrintingAgent:
 
         return "العملية غير معروفة."
 
+    # ── Per-session customer context ────────────────────────────────────────────
+    def _customer_context(self, session_id: str) -> str:
+        """
+        Build a short Arabic block describing the CURRENT logged-in customer so
+        the bot greets them by name and personalises the conversation. Returns
+        "" for anonymous visitors (no Salla id and no name).
+
+        Kept separate from the cached system prompt: it's injected as its own
+        (uncached) block per request so the big static prompt stays cacheable.
+        """
+        if not session_id:
+            return ""
+        try:
+            c = cs.get_customer_info(session_id) or {}
+        except Exception:
+            return ""
+        if not c:
+            return ""
+
+        name    = (c.get("name") or "").strip()
+        has_id  = bool(c.get("salla_customer_id"))
+        # Only personalise when we actually know who they are.
+        if not has_id and not name:
+            return ""
+
+        lines = ["══ بيانات العميل الحالي (للتخصيص — لا تذكر أنك تقرؤها من نظام) ══"]
+        if has_id:
+            lines.append("• العميل مسجّل دخوله في المتجر ومعروف لدينا.")
+        else:
+            lines.append("• زائر غير مسجّل — تعامل بترحيب عام.")
+        if name:
+            lines.append(f"• الاسم: {name} — ناده باسمه ورحّب به بحرارة.")
+        if c.get("phone"):
+            lines.append(f"• الجوال محفوظ ({c['phone']}) — لا تطلبه منه مرة أخرى.")
+        if c.get("email"):
+            lines.append(f"• البريد محفوظ ({c['email']}) — لا تطلبه منه مرة أخرى.")
+        if c.get("city"):
+            lines.append(f"• المدينة: {c['city']}.")
+
+        oc = c.get("orders_count")
+        if oc is not None:
+            try:
+                ocn = int(oc)
+                if ocn > 0:
+                    extra = f" (إجمالي مشترياته {c['orders_amount']})" if c.get("orders_amount") else ""
+                    lines.append(
+                        f"• عميل عائد لديه {ocn} طلب سابق{extra} — رحّب بعودته وقدّم له اهتماماً مميزاً."
+                    )
+                else:
+                    lines.append("• عميل جديد لم يطلب من قبل — شجّعه بلطف على أول طلب.")
+            except (ValueError, TypeError):
+                pass
+
+        return "\n".join(lines)
+
     # ── Chat entry point ───────────────────────────────────────────────────────
     async def chat(self, message: str, session_id: str) -> str:
         if self.provider == "groq":
@@ -2427,7 +2482,11 @@ class PrintingAgent:
             for t in TOOLS
         ]
 
-        messages = [{"role": "system", "content": await get_system_prompt_async(self.store_id)}] + history
+        _sys_prompt = await get_system_prompt_async(self.store_id)
+        _cust_ctx   = self._customer_context(session_id)
+        if _cust_ctx:
+            _sys_prompt = _sys_prompt + "\n\n" + _cust_ctx
+        messages = [{"role": "system", "content": _sys_prompt}] + history
 
         tool_rounds = 0
         while True:
@@ -2497,7 +2556,11 @@ class PrintingAgent:
             for t in TOOLS
         ]
 
-        messages = [{"role": "system", "content": await get_system_prompt_async(self.store_id)}] + history
+        _sys_prompt = await get_system_prompt_async(self.store_id)
+        _cust_ctx   = self._customer_context(session_id)
+        if _cust_ctx:
+            _sys_prompt = _sys_prompt + "\n\n" + _cust_ctx
+        messages = [{"role": "system", "content": _sys_prompt}] + history
 
         tool_rounds = 0
         while True:
@@ -2578,6 +2641,12 @@ class PrintingAgent:
             "text":          system_text,
             "cache_control": {"type": "ephemeral"},
         }]
+        # Per-customer context goes in its OWN block AFTER the cached one and
+        # WITHOUT cache_control — so the big static prompt stays cached while
+        # each customer's small personalised note is sent fresh (cheap).
+        cust_ctx = self._customer_context(session_id)
+        if cust_ctx:
+            cached_system.append({"type": "text", "text": cust_ctx})
         cached_tools = [
             *TOOLS[:-1],
             {**TOOLS[-1], "cache_control": {"type": "ephemeral"}},

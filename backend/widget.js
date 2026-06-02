@@ -906,11 +906,23 @@
     // Only show typing animation when bot is handling the conversation
     if (botEnabled) showTyping();
 
+    // Re-detect the logged-in Salla customer — the storefront SDK may have
+    // finished loading after init(). Sending the customer_id lets the backend
+    // fetch their profile (name, phone, order history) so the bot greets them
+    // by name and personalises the conversation.
+    detectSallaCustomer();
+
     try {
       var res = await fetch(CONFIG.apiUrl + "/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: message, session_id: sessionId, store_id: CONFIG.storeId }),
+        body: JSON.stringify({
+          message:       message,
+          session_id:    sessionId,
+          store_id:      CONFIG.storeId,
+          customer_id:   sallaCustomerId   || "",
+          customer_name: sallaCustomerName || "",
+        }),
       });
       var data = await res.json();
       hideTyping();

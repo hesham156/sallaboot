@@ -2265,7 +2265,13 @@ async def _fetch_salla_customer(store_id: str, customer_id: str,
     try:
         from salla_client import SallaClient
         client = SallaClient(token, store_id=store_id)
-        resp   = await client.get_customer(int(customer_id))
+        # Request order stats too so the bot can tell a returning buyer from a
+        # first-timer and personalise accordingly. Falls back gracefully if the
+        # scope/fields aren't available.
+        resp   = await client.get_customer(
+            int(customer_id),
+            fields=["orders_count", "orders_amount"],
+        )
         c      = resp.get("data") or {}
     except Exception as exc:
         print(f"[chat] customer lookup failed for {customer_id}: {exc}")
@@ -2282,7 +2288,7 @@ async def _fetch_salla_customer(store_id: str, customer_id: str,
     mobile      = str(c.get("mobile", "") or "")
     phone       = (f"+{mobile_code}{mobile}" if mobile_code and mobile else mobile) or ""
 
-    return {
+    data = {
         "name":     full_name,
         "phone":    phone,
         "email":    c.get("email", "") or "",
@@ -2293,6 +2299,14 @@ async def _fetch_salla_customer(store_id: str, customer_id: str,
         # IDs go in their own field — keep "name" clean for display
         "salla_customer_id": str(c.get("id") or customer_id),
     }
+    # Order history (optional — only when the fields came back)
+    oc = c.get("orders_count")
+    if oc is not None:
+        data["orders_count"] = oc
+    oa = c.get("orders_amount")
+    if isinstance(oa, dict) and oa.get("amount") is not None:
+        data["orders_amount"] = f"{oa.get('amount')} {oa.get('currency', 'SAR')}"
+    return data
 
 
 # ── Chat ───────────────────────────────────────────────────────────────────────
