@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { useNavigate, useParams, Routes, Route, useLocation } from 'react-router-dom'
 import { Avatar, Spinner } from '@heroui/react'
 import { api, StoreInfo, clearAuth, getIsSuper } from '../api'
-import Overview      from './store/Overview'
-import Conversations from './store/Conversations'
-import Products      from './store/Products'
-import Analytics     from './store/Analytics'
-import Settings      from './store/Settings'
-import Orders        from './store/Orders'
-import AbandonedCarts from './store/AbandonedCarts'
-import Pricing       from './store/Pricing'
-import Brain         from './store/Brain'
-import Training      from './store/Training'
+
+// Lazy-load each page so the initial bundle stays small. Heavy deps like
+// recharts (Analytics/Overview) only download when that page is opened.
+const Overview       = lazy(() => import('./store/Overview'))
+const Conversations  = lazy(() => import('./store/Conversations'))
+const Products       = lazy(() => import('./store/Products'))
+const Analytics      = lazy(() => import('./store/Analytics'))
+const Settings       = lazy(() => import('./store/Settings'))
+const Orders         = lazy(() => import('./store/Orders'))
+const AbandonedCarts = lazy(() => import('./store/AbandonedCarts'))
+const Pricing        = lazy(() => import('./store/Pricing'))
+const Brain          = lazy(() => import('./store/Brain'))
+const Training       = lazy(() => import('./store/Training'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -277,18 +280,24 @@ export default function StoreDashboard() {
 
       {/* ════════════ MAIN CONTENT ════════════ */}
       <main className="mr-60 flex-1 min-h-screen overflow-y-auto">
-        <Routes>
-          <Route index element={<Overview storeId={storeId} store={store} />} />
-          <Route path="conversations/*" element={<Conversations storeId={storeId} />} />
-          <Route path="products"        element={<Products storeId={storeId} />} />
-          <Route path="orders"          element={<Orders storeId={storeId} />} />
-          <Route path="carts"           element={<AbandonedCarts storeId={storeId} />} />
-          <Route path="analytics"       element={<Analytics storeId={storeId} />} />
-          <Route path="pricing"         element={<Pricing storeId={storeId} />} />
-          <Route path="brain"           element={<Brain storeId={storeId} />} />
-          <Route path="training"        element={<Training storeId={storeId} />} />
-          <Route path="settings"        element={<Settings storeId={storeId} />} />
-        </Routes>
+        <Suspense fallback={
+          <div className="flex items-center justify-center min-h-screen">
+            <Spinner size="lg" color="primary" label="جاري التحميل..." />
+          </div>
+        }>
+          <Routes>
+            <Route index element={<Overview storeId={storeId} store={store} />} />
+            <Route path="conversations/*" element={<Conversations storeId={storeId} />} />
+            <Route path="products"        element={<Products storeId={storeId} />} />
+            <Route path="orders"          element={<Orders storeId={storeId} />} />
+            <Route path="carts"           element={<AbandonedCarts storeId={storeId} />} />
+            <Route path="analytics"       element={<Analytics storeId={storeId} />} />
+            <Route path="pricing"         element={<Pricing storeId={storeId} />} />
+            <Route path="brain"           element={<Brain storeId={storeId} />} />
+            <Route path="training"        element={<Training storeId={storeId} />} />
+            <Route path="settings"        element={<Settings storeId={storeId} />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   )

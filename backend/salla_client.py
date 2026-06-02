@@ -1,6 +1,12 @@
 import os
+import asyncio
+import random
 import httpx
 from typing import Optional
+
+# Transient HTTP statuses worth retrying (rate-limit + server errors).
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
 
 
 def normalize_mobile_e164(phone: str, default_dial: str = "966") -> str:
@@ -50,38 +56,81 @@ class SallaClient:
             "Accept":        "application/json",
         }
 
+    @staticmethod
+    def _backoff(attempt: int) -> float:
+        """Exponential backoff (0.5,1,2,4…) capped at 6s, with ±25% jitter."""
+        base = min(0.5 * (2 ** attempt), 6.0)
+        return base * (0.75 + 0.5 * random.random())
+
+    @staticmethod
+    def _retry_after(r: httpx.Response) -> Optional[float]:
+        """Honour a sane Retry-After header (seconds, ≤30) if Salla sends one."""
+        ra = r.headers.get("retry-after")
+        if not ra:
+            return None
+        try:
+            v = float(ra)
+            return v if 0 < v <= 30 else None
+        except ValueError:
+            return None
+
     async def _request(self, method: str, path: str, **kwargs) -> dict:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.request(
-                method, f"{self.BASE_URL}{path}", headers=self.headers, **kwargs
-            )
+        """
+        Issue a Salla API request with resilience:
+          • 401  → refresh the token once and retry.
+          • 429 / 5xx → retry with exponential backoff (honours Retry-After).
+          • network/timeout errors → retry, but ONLY for idempotent GET (so a
+            POST whose response was lost doesn't create a duplicate order).
+        Non-retryable 4xx still raise with Salla's real error body so callers
+        can log the actual reason (missing scope, validation, …).
+        """
+        url        = f"{self.BASE_URL}{path}"
+        idempotent = method.upper() == "GET"
+        last_err: str = ""
 
-            if r.status_code == 401:
-                # Token expired — refresh once and retry.
-                # The asyncio lock inside refresh_access_token() ensures that
-                # concurrent 401s for the same store only trigger one refresh call.
-                from salla_oauth import refresh_access_token
+        async with httpx.AsyncClient(timeout=20) as client:
+            for attempt in range(_MAX_RETRIES + 1):
+                # ── Send (retry transient network errors on GET only) ──────────
                 try:
-                    new_token = await refresh_access_token(self.store_id)
-                    self.access_token = new_token
-                    self._set_headers(new_token)
-                    r = await client.request(
-                        method, f"{self.BASE_URL}{path}", headers=self.headers, **kwargs
-                    )
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Token refresh failed for store {self.store_id!r}: {exc}"
-                    ) from exc
+                    r = await client.request(method, url, headers=self.headers, **kwargs)
+                except (httpx.TimeoutException, httpx.TransportError) as exc:
+                    last_err = f"network: {type(exc).__name__}: {exc}"
+                    if idempotent and attempt < _MAX_RETRIES:
+                        await asyncio.sleep(self._backoff(attempt))
+                        continue
+                    raise RuntimeError(f"Salla {method} {path} → {last_err}") from exc
 
-            # Raise with Salla's actual error body so callers can log the real
-            # reason (missing scope, validation fields, etc.) instead of a bare
-            # "HTTP 422". raise_for_status() alone hides the response body.
-            if r.status_code >= 400:
-                body_preview = r.text[:600]
-                raise RuntimeError(
-                    f"Salla {method} {path} → HTTP {r.status_code}: {body_preview}"
-                )
-            return r.json()
+                # ── 401 → refresh token once, then re-send this attempt ────────
+                if r.status_code == 401:
+                    from salla_oauth import refresh_access_token
+                    try:
+                        new_token = await refresh_access_token(self.store_id)
+                        self.access_token = new_token
+                        self._set_headers(new_token)
+                        r = await client.request(method, url, headers=self.headers, **kwargs)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Token refresh failed for store {self.store_id!r}: {exc}"
+                        ) from exc
+
+                # ── Transient rate-limit / server error → back off and retry ───
+                if r.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                    delay = self._retry_after(r) or self._backoff(attempt)
+                    last_err = f"HTTP {r.status_code}"
+                    print(f"[salla] {method} {path} → {last_err}, retry "
+                          f"{attempt + 1}/{_MAX_RETRIES} in {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    continue
+
+                # ── Final outcome ─────────────────────────────────────────────
+                if r.status_code >= 400:
+                    raise RuntimeError(
+                        f"Salla {method} {path} → HTTP {r.status_code}: {r.text[:600]}"
+                    )
+                return r.json()
+
+        # Exhausted retries on a retryable status
+        raise RuntimeError(f"Salla {method} {path} → failed after retries ({last_err})")
 
     # ── Product endpoints ─────────────────────────────────────────────────────
 

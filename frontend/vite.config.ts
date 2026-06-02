@@ -10,6 +10,20 @@ export default defineConfig({
   build: {
     outDir: '../backend/admin-dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Route vendor libs to dedicated, independently-cached chunks. A
+        // function reliably isolates recharts + all its d3-* transitive deps
+        // (the heaviest tree) so they don't get merged into the HeroUI chunk.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return
+          if (/recharts|d3-|internmap|victory-vendor/.test(id)) return 'charts'
+          if (/@heroui|framer-motion|@react-aria|@react-stately|@react-types/.test(id)) return 'heroui'
+          if (/react-router|react-dom|\/react\//.test(id)) return 'react'
+        },
+      },
+    },
   },
   server: {
     port: 3000,

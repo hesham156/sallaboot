@@ -857,20 +857,27 @@ class PrintingAgent:
         self._anthropic_model = (cfg_model if ai_cfg.get("anthropic_api_key") else "") or "claude-sonnet-4-6"
         self._openai_model    = (cfg_model if ai_cfg.get("openai_api_key")    else "") or "gpt-4o-mini"
 
+        # Resilience: all three SDKs (Anthropic/Groq/OpenAI) retry 429/5xx/408/409
+        # with exponential backoff + jitter and honour the Retry-After header.
+        # Default is only 2 retries; bump it so transient rate-limits (common on
+        # free Groq tiers) self-heal BEFORE the user ever sees a "busy" message.
+        _MAX_RETRIES = 4
+        _TIMEOUT     = 45.0   # seconds per request
+
         # Provider priority: Groq → Anthropic → OpenAI (fallback to env vars)
         if groq_key:
             self.provider       = "groq"
-            self.groq_client    = AsyncGroq(api_key=groq_key)
+            self.groq_client    = AsyncGroq(api_key=groq_key, max_retries=_MAX_RETRIES, timeout=_TIMEOUT)
             self.ai             = None
             self.openai_client  = None
         elif anthropic_key:
             self.provider       = "anthropic"
-            self.ai             = AsyncAnthropic(api_key=anthropic_key)
+            self.ai             = AsyncAnthropic(api_key=anthropic_key, max_retries=_MAX_RETRIES, timeout=_TIMEOUT)
             self.groq_client    = None
             self.openai_client  = None
         elif openai_key:
             self.provider       = "openai"
-            self.openai_client  = AsyncOpenAI(api_key=openai_key)
+            self.openai_client  = AsyncOpenAI(api_key=openai_key, max_retries=_MAX_RETRIES, timeout=_TIMEOUT)
             self.ai             = None
             self.groq_client    = None
         else:

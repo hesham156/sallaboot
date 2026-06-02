@@ -262,7 +262,14 @@ export default function Brain({ storeId }: Props) {
         <ChipCard
           dot="bg-sky-400" title="🏬 الفروع"
           count={data.branches.length}
-          chips={data.branches.map(b => b.city ? `${b.name} (${b.city})` : b.name)}
+          chips={data.branches.map(b => {
+            // Salla sometimes returns city as an object ({name}) not a string —
+            // guard against rendering "[object Object]".
+            const city = typeof b.city === 'object' && b.city !== null
+              ? ((b.city as { name?: string }).name || '')
+              : (b.city || '')
+            return city ? `${b.name} (${city})` : b.name
+          })}
           color="primary"
         />
       )}
