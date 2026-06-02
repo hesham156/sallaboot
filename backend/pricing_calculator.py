@@ -478,6 +478,224 @@ def _calculate_uvdtf(cfg: dict, width: float, height: float, quantity: int) -> d
     }
 
 
+# ── Box (carton) calculator ─────────────────────────────────────────────────
+# Prices printed carton boxes (انفربرش / كرافت) using offset presses.
+# Input: flat (مفرود) size — the fully-unfolded dieline dimensions.
+# Three press sizes: Quarter (ربع), Half (نص), Full (كامل).
+# Defaults match the spec file; all can be overridden via pricing_config.
+
+_BOX_DEFAULT_PAPER_PRICE = 1.35      # SAR per reference sheet
+_BOX_MARGIN               = 0.40      # 40% profit margin (different from roll 15%)
+_BOX_WASTE                = 0.05      # 5% waste on sheet count
+_BOX_SAFETY_CM            = 1.0       # 1 cm safety gap around flat piece
+
+# Tiered per-unit print cost tables (setup, tier1, tier2, tier3)
+# Tiers: qty ≤1000 → tier1×qty; ≤5000 → tier1×1000+tier2×(qty-1000);
+#        else    → tier1×1000+tier2×4000+tier3×(qty-5000)
+_PRESS_QUARTER = {"sheet_w": 35, "sheet_h": 50, "max_flat_w": 47, "max_flat_h": 33,
+                  "setup": 1050, "tier1": 0.30, "tier2": 0.65, "tier3": 0.61}
+_PRESS_HALF    = {"sheet_w": 50, "sheet_h": 70, "max_flat_w": 69, "max_flat_h": 49,
+                  "setup": 1467, "tier1": 1.07, "tier2": 1.25, "tier3": 1.09}
+_PRESS_FULL    = {"sheet_w": 70, "sheet_h": 100}   # separate detailed model
+
+# Full-press (كامل 70×100) printing cost lookup table: qty → cost
+# Linear interpolation used between points. Below 1000 → 450. Above 10000 → extrapolate.
+_FULL_PRESS_TABLE = [
+    (1000, 450), (2000, 600), (3000, 700), (5000, 900), (10000, 1500),
+]
+
+
+def _box_fits(flat_l: float, flat_w: float, max_l: float, max_w: float) -> bool:
+    """True if (flat_l × flat_w) fits in (max_l × max_w) in either orientation."""
+    return (
+        (flat_l <= max_l and flat_w <= max_w) or
+        (flat_w <= max_l and flat_l <= max_w)
+    )
+
+
+def _box_nesting(flat_l: float, flat_w: float, sheet_w: float, sheet_h: float) -> int:
+    """Max pieces per sheet using 1 cm safety gap, choosing best orientation."""
+    usable_w = sheet_w - _BOX_SAFETY_CM
+    usable_h = sheet_h - _BOX_SAFETY_CM
+    a = math.floor(usable_w / flat_l) * math.floor(usable_h / flat_w)
+    b = math.floor(usable_w / flat_w) * math.floor(usable_h / flat_l)
+    return max(a, b)
+
+
+def _tiered_print_cost(qty: int, setup: float, t1: float, t2: float, t3: float) -> float:
+    """Quarter / Half-press tiered cost formula."""
+    if qty <= 1000:
+        cost = t1 * qty
+    elif qty <= 5000:
+        cost = t1 * 1000 + t2 * (qty - 1000)
+    else:
+        cost = t1 * 1000 + t2 * 4000 + t3 * (qty - 5000)
+    return setup + cost
+
+
+def _full_press_print_cost(qty: int) -> float:
+    """Full-press (70×100) printing cost via linear interpolation of lookup table."""
+    table = _FULL_PRESS_TABLE
+    if qty <= table[0][0]:
+        return float(table[0][1])
+    if qty >= table[-1][0]:
+        # Linear extrapolation from last segment
+        q1, c1 = table[-2]
+        q2, c2 = table[-1]
+        slope = (c2 - c1) / (q2 - q1)
+        return c1 + slope * (qty - q1)
+    for i in range(len(table) - 1):
+        q1, c1 = table[i]
+        q2, c2 = table[i + 1]
+        if q1 <= qty <= q2:
+            slope = (c2 - c1) / (q2 - q1)
+            return c1 + slope * (qty - q1)
+    return float(table[-1][1])
+
+
+def _calculate_box(
+    cfg: dict,
+    flat_length: float,     # الطول المفرود (سم)
+    flat_width: float,      # العرض المفرود (سم)
+    quantity: int,          # عدد العلب
+    paper_type: str = "انفربرش",     # انفربرش | كرافت
+    sides: str = "single",           # single | double
+    lamination_sides: int = 0,       # 0 | 1 | 2 (أوجه السلوفان)
+) -> dict:
+    """
+    Price a batch of printed carton boxes using offset press.
+    Inputs are the FLAT (unfolded dieline) dimensions.
+    """
+    if flat_length <= 0 or flat_width <= 0 or quantity <= 0:
+        return {"error": "أبعاد الفرد والكمية لازم تكون أكبر من صفر"}
+    if quantity < 500:
+        return {"error": "الحد الأدنى للعلب 500 حبة"}
+
+    tax_rate       = float(cfg.get("tax_rate",          15.0)) / 100
+    margin_rate    = 1 + float(cfg.get("box_margin",    _BOX_MARGIN))
+    paper_price    = float(cfg.get("box_paper_price",   _BOX_DEFAULT_PAPER_PRICE))
+    lam_per_unit   = float(cfg.get("box_lamination_per_unit", 0.20))  # ربع/نص
+    lam_full_per_sheet = float(cfg.get("box_lamination_full_per_sheet", 0.60))  # كامل
+
+    # Override paper price if the store configured per-paper prices
+    box_papers = cfg.get("box_paper_types", [])
+    if box_papers:
+        match = next((p for p in box_papers if p.get("name", "") == paper_type), None)
+        if match and match.get("price"):
+            paper_price = float(match["price"])
+
+    sides_multiplier = 1.5 if sides == "double" else 1.0
+
+    # ── Press selection ──────────────────────────────────────────────────────
+    q = _PRESS_QUARTER
+    h = _PRESS_HALF
+    press = None
+    press_name = ""
+
+    if _box_fits(flat_length, flat_width, q["max_flat_w"], q["max_flat_h"]):
+        press = q; press_name = "ربع"
+    elif _box_fits(flat_length, flat_width, h["max_flat_w"], h["max_flat_h"]):
+        press = h; press_name = "نص"
+    elif _box_fits(flat_length, flat_width, 99, 69):
+        press_name = "كامل"
+    else:
+        return {
+            "error": (
+                f"مقاس الفرد ({flat_length}×{flat_width} سم) أكبر من ماكيناتنا القياسية. "
+                "يحتاج خامة خاصة وعرض سعر مخصّص."
+            ),
+            "needs_escalation": True,
+        }
+
+    # ── Nesting + waste sheets ───────────────────────────────────────────────
+    if press_name in ("ربع", "نص"):
+        per_sheet   = _box_nesting(flat_length, flat_width, press["sheet_w"], press["sheet_h"])
+        if per_sheet <= 0:
+            return {"error": "لا تدخل العلبة في الماكينة — راجع المقاس."}
+        total_sheets_raw = math.ceil(quantity / per_sheet)
+        total_sheets     = math.ceil(total_sheets_raw * (1 + _BOX_WASTE))
+
+        # Print cost (tiered) × sides multiplier; paper adjustment (difference from reference)
+        print_cost  = _tiered_print_cost(
+            quantity,
+            press["setup"], press["tier1"], press["tier2"], press["tier3"]
+        ) * sides_multiplier
+        paper_adj   = total_sheets * (paper_price - _BOX_DEFAULT_PAPER_PRICE)
+        lam_cost    = lam_per_unit * lamination_sides * quantity
+        total_cost  = print_cost + paper_adj + lam_cost
+
+    else:
+        # Full press (70×100)
+        full_sheet_w, full_sheet_h = _PRESS_FULL["sheet_w"], _PRESS_FULL["sheet_h"]
+        per_sheet       = _box_nesting(flat_length, flat_width, full_sheet_w, full_sheet_h)
+        if per_sheet <= 0:
+            return {"error": "لا تدخل العلبة في الماكينة الكاملة — راجع المقاس."}
+        total_sheets_raw = math.ceil(quantity / per_sheet)
+        total_sheets     = math.ceil(total_sheets_raw * (1 + _BOX_WASTE))
+
+        cutting_cost = 250 + (math.ceil(quantity / 1000) - 1) * 150   # التكسير
+        mold_cost    = 600                                              # القالب (ثابت)
+        print_cost   = _full_press_print_cost(quantity) * sides_multiplier
+        lam_cost     = lam_full_per_sheet * lamination_sides * total_sheets_raw
+        paper_cost   = total_sheets * paper_price
+        total_cost   = print_cost + cutting_cost + mold_cost + lam_cost + paper_cost
+
+    # ── Price → sale price → VAT ─────────────────────────────────────────────
+    sale_price_ex_vat  = total_cost * margin_rate
+    tax_amount         = sale_price_ex_vat * tax_rate
+    price_with_tax     = sale_price_ex_vat + tax_amount
+    price_per_unit     = price_with_tax / quantity
+    final_price, is_floored = _apply_min_floor(cfg, price_with_tax)
+    final_per_unit     = final_price / quantity
+
+    return {
+        "type":             "box",
+        "press":            press_name,
+        "paper_type":       paper_type,
+        "sides":            sides,
+        "lamination_sides": lamination_sides,
+        "flat_length":      flat_length,
+        "flat_width":       flat_width,
+        "quantity":         quantity,
+        "per_sheet":        per_sheet,
+        "total_sheets":     total_sheets,
+        "price_before_tax": round(sale_price_ex_vat, 2),
+        "tax_amount":       round(tax_amount, 2),
+        "price_per_unit":   round(price_per_unit, 2),
+        "final_per_unit":   round(final_per_unit, 2),
+        "final_price":      final_price,
+        "is_floored":       is_floored,
+        "currency":         "SAR",
+        "details":          (
+            f"علب {paper_type} — فرد {flat_length}×{flat_width} سم، "
+            f"كمية {quantity}، {'وجهين' if sides=='double' else 'وجه واحد'}"
+            + (f"، سلوفان {lamination_sides} وجه" if lamination_sides > 0 else "")
+        ),
+    }
+
+
+def calculate_box_quote(
+    config: dict | None,
+    *,
+    flat_length: float,
+    flat_width: float,
+    quantity: int,
+    paper_type: str = "انفربرش",
+    sides: str = "single",
+    lamination_sides: int = 0,
+) -> dict:
+    """Public API for the box calculator."""
+    cfg = _merge_with_defaults(config)
+    if not cfg.get("box_enabled", True):
+        return {"error": "حاسبة العلب معطّلة في إعدادات المتجر"}
+    try:
+        return _calculate_box(cfg, flat_length, flat_width, int(quantity),
+                               paper_type=paper_type, sides=sides,
+                               lamination_sides=int(lamination_sides))
+    except Exception as e:
+        return {"error": f"خطأ في الحساب: {type(e).__name__}: {e}"}
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 PRINTING_TYPES = ("roll", "digital", "offset", "uvdtf")
@@ -535,6 +753,109 @@ def calculate_quote(
         return {"error": f"خطأ في الحساب: {type(e).__name__}: {e}"}
 
     return {"error": "نوع طباعة غير معروف"}
+
+
+def _tiered_anchors_for(printing_type: str, requested_qty: int) -> list[int]:
+    """
+    Return 2-3 quantity anchors above the requested qty, capped sensibly per type.
+    Used to show the customer how price-per-unit drops with volume.
+    """
+    if printing_type == "digital":
+        # Digital is capped at 500; only show anchors up to 500
+        candidates = [100, 200, 300, 500]
+    elif printing_type == "offset":
+        candidates = [1000, 3000, 5000, 10000]
+    elif printing_type in ("roll", "uvdtf"):
+        # Scale relative to requested qty: 2x, 5x, 10x
+        candidates = [
+            requested_qty * 2,
+            requested_qty * 5,
+            requested_qty * 10,
+        ]
+    else:
+        candidates = [requested_qty * 2, requested_qty * 5]
+
+    above = [q for q in candidates if q > requested_qty]
+    return sorted(set(above))[:3]
+
+
+def calculate_tiered_quote(
+    printing_type: str,
+    config: dict | None,
+    requested_qty: int,
+    **kwargs,
+) -> list[dict]:
+    """
+    Calculate quotes for requested_qty + 2-3 higher anchors.
+    kwargs are passed directly to calculate_quote.
+    Returns list of {qty, final_price, price_per_unit, is_requested}.
+    price_per_unit is None for roll/uvdtf (area/meter based, not per-piece).
+    """
+    cfg = _merge_with_defaults(config)
+    anchors = _tiered_anchors_for(printing_type, requested_qty)
+    all_qtys = sorted({requested_qty} | set(anchors))
+
+    results = []
+    for qty in all_qtys:
+        r = calculate_quote(printing_type, config, quantity=qty, **kwargs)
+        if "error" in r:
+            continue
+        # Derive a comparable "per unit" metric for each type
+        if printing_type == "digital":
+            per_unit = round(r["final_price"] / qty, 4) if qty else None
+        elif printing_type == "offset":
+            per_unit = r.get("price_per_unit")
+        elif printing_type in ("roll", "uvdtf"):
+            # Show price per linear-meter or per-m² so the customer sees the scale
+            per_unit = None
+        else:
+            per_unit = None
+
+        results.append({
+            "qty":          qty,
+            "final_price":  r["final_price"],
+            "price_per_unit": per_unit,
+            "is_requested": qty == requested_qty,
+            "raw":          r,
+        })
+    return results
+
+
+def calculate_tiered_box_quotes(
+    config: dict | None,
+    *,
+    flat_length: float,
+    flat_width: float,
+    requested_qty: int,
+    paper_type: str = "انفربرش",
+    sides: str = "single",
+    lamination_sides: int = 0,
+    anchors: tuple = (500, 1000, 3000, 5000, 10000),
+) -> list[dict]:
+    """
+    Calculate box quotes for multiple quantity anchors in one call.
+    Returns a list of dicts sorted ascending by quantity. Each dict has:
+      qty, final_price, price_per_unit, is_requested (True for the anchor
+      closest to requested_qty), error (if this anchor failed).
+    Used by the agent to show the customer how price-per-unit drops with volume.
+    """
+    results = []
+    # Always include the requested qty if not already in anchors
+    qty_set = sorted(set(list(anchors) + [requested_qty]))
+    for qty in qty_set:
+        if qty < 500:
+            continue
+        r = calculate_box_quote(config, flat_length=flat_length, flat_width=flat_width,
+                                 quantity=qty, paper_type=paper_type, sides=sides,
+                                 lamination_sides=lamination_sides)
+        results.append({
+            "qty":            qty,
+            "final_price":    r.get("final_price"),
+            "price_per_unit": r.get("price_per_unit"),
+            "is_requested":   qty == requested_qty,
+            "error":          r.get("error"),
+        })
+    return results
 
 
 def list_available_options(config: dict | None) -> dict:
