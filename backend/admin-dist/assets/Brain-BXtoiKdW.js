@@ -1,4 +1,4 @@
-import{d as c,j as e}from"./react-CKps_nJv.js";import{a as w}from"./index-CLMNnTb4.js";import{s as A,b as S,d as x,e as h,f as l,g as u,c as m,z as B}from"./heroui-YZkUJbkF.js";function D({paths:r,size:s=14,className:d=""}){const n=Array.isArray(r)?r:[r];return e.jsx("svg",{width:s,height:s,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:d,children:n.map((i,o)=>e.jsx("path",{d:i},o))})}const R=`مثال:
+import{d as c,j as e}from"./react-CKps_nJv.js";import{a as w}from"./index-9ntNSTDL.js";import{s as A,b as S,d as x,e as h,f as l,g as u,c as m,z as B}from"./heroui-YZkUJbkF.js";function D({paths:r,size:s=14,className:d=""}){const n=Array.isArray(r)?r:[r];return e.jsx("svg",{width:s,height:s,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:d,children:n.map((i,o)=>e.jsx("path",{d:i},o))})}const R=`مثال:
 • ساعات العمل: من السبت إلى الخميس، ٩ صباحاً - ٦ مساءً
 • سياسة الإرجاع: استبدال خلال ٧ أيام بشرط عدم الاستخدام
 • الشحن: مجاناً للطلبات فوق ٢٠٠ ريال، يستغرق ٢-٤ أيام
