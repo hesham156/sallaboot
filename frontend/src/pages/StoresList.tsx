@@ -7,6 +7,7 @@ import {
   Table, TableHeader, TableColumn, TableBody, TableRow, TableCell,
 } from '@heroui/react'
 import { api, StoreInfo, clearAuth } from '../api'
+import { Field } from '../components/ui'
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -488,39 +489,43 @@ export default function StoresList() {
             </div>
           </ModalHeader>
           <ModalBody className="gap-3 pt-4">
-            <Input
-              label="معرف المتجر *"
-              placeholder="store-123"
-              value={regStoreId}
-              onValueChange={setRegStoreId}
-              variant="bordered"
-              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
-            />
-            <Input
-              label="Access Token *"
-              placeholder="ey..."
-              type="password"
-              value={regToken}
-              onValueChange={setRegToken}
-              variant="bordered"
-              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
-            />
-            <Input
-              label="Refresh Token"
-              placeholder="اختياري"
-              value={regRefresh}
-              onValueChange={setRegRefresh}
-              variant="bordered"
-              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
-            />
-            <Input
-              label="اسم المتجر"
-              placeholder="متجري"
-              value={regName}
-              onValueChange={setRegName}
-              variant="bordered"
-              classNames={{ inputWrapper: 'border-divider hover:border-slate-500 bg-content2' }}
-            />
+            <Field label="معرف المتجر *">
+              <Input
+                placeholder="store-123"
+                value={regStoreId}
+                onValueChange={setRegStoreId}
+                variant="bordered"
+                classNames={{ inputWrapper: 'border-default-200 hover:border-default-300 bg-default-50 h-12 rounded-xl' }}
+              />
+            </Field>
+            <Field label="Access Token *">
+              <Input
+                placeholder="ey..."
+                type="password"
+                value={regToken}
+                onValueChange={setRegToken}
+                variant="bordered"
+                classNames={{ inputWrapper: 'border-default-200 hover:border-default-300 bg-default-50 h-12 rounded-xl' }}
+              />
+            </Field>
+            <Field label="Refresh Token">
+              <Input
+                placeholder="اختياري"
+                value={regRefresh}
+                onValueChange={setRegRefresh}
+                variant="bordered"
+                classNames={{ inputWrapper: 'border-default-200 hover:border-default-300 bg-default-50 h-12 rounded-xl' }}
+              />
+            </Field>
+            <Field label="اسم المتجر">
+              <Input
+                placeholder="متجري"
+                value={regName}
+                onValueChange={setRegName}
+                variant="bordered"
+                classNames={{ inputWrapper: 'border-default-200 hover:border-default-300 bg-default-50 h-12 rounded-xl' }}
+              />
+            </Field>
             {regError && (
               <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 text-red-400 text-sm">
                 <Icon paths="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" size={15} className="flex-shrink-0" />

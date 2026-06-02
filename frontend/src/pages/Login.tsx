@@ -85,43 +85,45 @@ export default function Login() {
 
           {/* Form Content */}
           <div className="space-y-5">
-            <Input
-              label="البريد الإلكتروني"
-              placeholder="admin@example.com"
-              type="email"
-              value={email}
-              onValueChange={setEmail}
-              variant="bordered"
-              autoComplete="email"
-              classNames={{
-                label: 'text-slate-600 text-sm font-semibold mb-1',
-                inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all duration-300',
-                input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-              }}
-              onKeyDown={e => e.key === 'Enter' && handleLogin()}
-              startContent={
-                <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-              }
-            />
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
+              <Input
+                placeholder="admin@example.com"
+                type="email"
+                value={email}
+                onValueChange={setEmail}
+                variant="bordered"
+                autoComplete="email"
+                classNames={{
+                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all duration-300',
+                  input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
+                }}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                startContent={
+                  <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                }
+              />
+            </div>
 
-            <Input
-              label="كلمة المرور"
-              placeholder="أدخل كلمة المرور"
-              type="password"
-              value={password}
-              onValueChange={setPassword}
-              variant="bordered"
-              autoComplete="current-password"
-              classNames={{
-                label: 'text-slate-600 text-sm font-semibold mb-1',
-                inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all duration-300',
-                input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-              }}
-              onKeyDown={e => e.key === 'Enter' && handleLogin()}
-              startContent={
-                <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-              }
-            />
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
+              <Input
+                placeholder="أدخل كلمة المرور"
+                type="password"
+                value={password}
+                onValueChange={setPassword}
+                variant="bordered"
+                autoComplete="current-password"
+                classNames={{
+                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all duration-300',
+                  input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
+                }}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                startContent={
+                  <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                }
+              />
+            </div>
 
             {error && (
               <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-xs font-bold text-red-600 animate-in fade-in duration-300">
