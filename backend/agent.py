@@ -814,6 +814,13 @@ class PrintingAgent:
                 "في إعدادات المتجر أو متغيرات البيئة."
             )
 
+        # Diagnostic: prompt caching is Anthropic-only. If a store is on Groq
+        # or OpenAI, the Anthropic cache_control code never runs — this log
+        # makes the active provider obvious when debugging cache behaviour.
+        _cache = "prompt-caching ON" if self.provider == "anthropic" else "no caching (Anthropic-only)"
+        print(f"[agent] store={store_id!r} provider={self.provider} "
+              f"model={getattr(self, f'_{self.provider}_model', '?')} — {_cache}")
+
         token      = access_token or os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token, store_id=store_id) if token else None
 
