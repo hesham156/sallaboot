@@ -32,6 +32,11 @@ DEFAULT_PRICING_CONFIG: dict[str, Any] = {
     "tax_rate":       15.0,   # %
     "profit_margin":  15.0,   # %
 
+    # Minimum order floor (SAR, tax-inclusive). Applied as MAX(final, floor) to
+    # every calculator's result. The bot must NOT tell the customer this is a
+    # minimum — just show the number. Set to 0 to disable.
+    "min_order_floor": 57.50,
+
     # ── Roll (m² based) ─────────────────────────────────────────────────
     "roll_enabled":     True,
     "roll_unit_price":  35.0,   # ريال per m²
@@ -113,6 +118,20 @@ def _merge_with_defaults(cfg: dict | None) -> dict:
     return merged
 
 
+def _apply_min_floor(cfg: dict, final_price: float) -> tuple[float, bool]:
+    """
+    Enforce the minimum-order floor (e.g. 57.50 SAR) on a final price.
+    Returns (adjusted_price, was_floored). The agent uses `was_floored` to
+    decide whether the calculation breakdown is meaningful to show — when
+    the price is the floor, the bot should NOT expose internal numbers
+    (margin, waste, etc.). It should just present the floor amount.
+    """
+    floor = float(cfg.get("min_order_floor", 0) or 0)
+    if floor > 0 and final_price < floor:
+        return round(floor, 2), True
+    return round(final_price, 2), False
+
+
 # ── Roll calculator ──────────────────────────────────────────────────────────
 
 def _calculate_roll(cfg: dict, width: float, height: float, quantity: int,
@@ -145,6 +164,7 @@ def _calculate_roll(cfg: dict, width: float, height: float, quantity: int,
     discount_percent = _get_discount_percent(area_m2, cfg.get("roll_discounts", []))
     discount_amount  = price_with_tax * (discount_percent / 100)
     final_price      = price_with_tax - discount_amount
+    final_price, is_floored = _apply_min_floor(cfg, final_price)
 
     return {
         "type":              "roll",
@@ -157,7 +177,8 @@ def _calculate_roll(cfg: dict, width: float, height: float, quantity: int,
         "tax_amount":        round(tax_amount, 2),
         "discount_percent":  discount_percent,
         "discount_amount":   round(discount_amount, 2),
-        "final_price":       round(final_price, 2),
+        "final_price":       final_price,
+        "is_floored":        is_floored,
         "currency":          "SAR",
         "details":           f"رول {width}×{height} سم، كمية {quantity}، مساحة {area_m2:.2f} م²",
     }
@@ -272,6 +293,7 @@ def _calculate_digital(cfg: dict, width: float, height: float, quantity: int,
     discount_percent = _get_discount_percent(sheets_needed, cfg.get("digital_discounts", []))
     discount_amount  = price_with_tax * (discount_percent / 100)
     final_price      = price_with_tax - discount_amount
+    final_price, is_floored = _apply_min_floor(cfg, final_price)
 
     extras = []
     if is_foil:    extras.append("بصمة")
@@ -303,7 +325,8 @@ def _calculate_digital(cfg: dict, width: float, height: float, quantity: int,
         "tax_amount":        round(tax_amount, 2),
         "discount_percent":  discount_percent,
         "discount_amount":   round(discount_amount, 2),
-        "final_price":       round(final_price, 2),
+        "final_price":       final_price,
+        "is_floored":        is_floored,
         "is_rotated":        is_rotated,
         "currency":          "SAR",
         "details":           details,
@@ -367,6 +390,7 @@ def _calculate_offset(cfg: dict, width: float, height: float, quantity: int,
     discount_percent = _get_discount_percent(quantity, cfg.get("offset_discounts", []))
     discount_amount  = price_with_tax * (discount_percent / 100)
     final_price      = price_with_tax - discount_amount
+    final_price, is_floored = _apply_min_floor(cfg, final_price)
 
     extras = [cutting_label]
     if folding:  extras.append("ثنية")
@@ -391,7 +415,8 @@ def _calculate_offset(cfg: dict, width: float, height: float, quantity: int,
         "tax_amount":        round(tax_amount, 2),
         "discount_percent":  discount_percent,
         "discount_amount":   round(discount_amount, 2),
-        "final_price":       round(final_price, 2),
+        "final_price":       final_price,
+        "is_floored":        is_floored,
         "currency":          "SAR",
         "details":           f"أوفست {width}×{height} سم على {paper_name}، كمية {quantity}، {extras_text}",
     }
@@ -434,6 +459,7 @@ def _calculate_uvdtf(cfg: dict, width: float, height: float, quantity: int) -> d
     price_before_tax = meters * unit_price
     tax_amount = price_before_tax * tax_rate
     final_price = price_before_tax + tax_amount
+    final_price, is_floored = _apply_min_floor(cfg, final_price)
 
     return {
         "type":              "uvdtf",
@@ -443,7 +469,8 @@ def _calculate_uvdtf(cfg: dict, width: float, height: float, quantity: int) -> d
         "unit_price":        unit_price,
         "price_before_tax":  round(price_before_tax, 2),
         "tax_amount":        round(tax_amount, 2),
-        "final_price":       round(final_price, 2),
+        "final_price":       final_price,
+        "is_floored":        is_floored,
         "is_rotated":        is_rotated,
         "currency":          "SAR",
         "details":           f"UV DTF {width}×{height} سم، كمية {quantity}، يستهلك {meters} م"

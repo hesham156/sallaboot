@@ -270,17 +270,38 @@ async def add_message(session_id: str, role: str, content: str, store_id: str = 
     return msg
 
 
-def get_groq_history(session_id: str) -> list:
+# Sliding window of messages sent to the AI per request. 12 messages ≈ 6
+# full user/assistant turns — enough context for a sales conversation
+# (current need, last suggestion, cart, customer info) without re-billing
+# the whole transcript on every reply. Cart and customer state are stored
+# separately (cs.get_cart / cs.get_customer_info), so trimming history
+# does NOT lose them. Full transcript is still persisted in the DB for
+# the admin inbox.
+AI_HISTORY_TURNS = 12
+
+
+def get_groq_history(session_id: str, limit: int = AI_HISTORY_TURNS) -> list:
     """
-    Return message history in Groq/OpenAI format.
+    Return message history in Groq/OpenAI/Anthropic format.
     Only user + assistant messages (admin messages are not sent to the AI).
+    Trimmed to the last `limit` messages so prompt size stays bounded as
+    the conversation grows. Set `limit=0` to disable trimming.
     """
     conv = _conversations.get(session_id, {})
-    return [
+    msgs = [
         {"role": m["role"], "content": m["content"]}
         for m in conv.get("messages", [])
         if m["role"] in ("user", "assistant")
     ]
+    if limit and len(msgs) > limit:
+        msgs = msgs[-limit:]
+        # Anthropic + Groq tool-use both require the window to START on a
+        # user turn (the model can't reply to its own prior assistant turn
+        # without the user message that triggered it). Drop a leading
+        # assistant message if the slice lands on one.
+        if msgs and msgs[0]["role"] != "user":
+            msgs = msgs[1:]
+    return msgs
 
 
 def pop_pending_for_widget(session_id: str) -> list:
@@ -318,6 +339,80 @@ def is_bot_enabled(session_id: str) -> bool:
 def set_session_bot(session_id: str, enabled: bool):
     get_or_create(session_id)["bot_enabled"] = enabled
     mark_dirty(session_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin escalation
+# ─────────────────────────────────────────────────────────────────────────────
+# A session is "escalated" when the bot decides the request needs a human
+# (un-priced material, oversized design, custom box, etc.). Escalation:
+#   1. Disables the bot for the session so the admin's reply is final.
+#   2. Records WHY in conv["escalation"] so the admin dashboard can
+#      surface the reason without re-reading the transcript.
+# The admin dashboard already lists sessions where bot_enabled=False, so
+# escalated chats appear in the queue automatically.
+
+VALID_ESCALATION_REASONS = {
+    "unpriced_material",     # خامة بلا سعر في الجدول
+    "oversize_design",       # المقاس أكبر من عرض الرول/الشيت/المسطح
+    "digital_over_500",      # ديجيتال > 500 حبة
+    "offset_under_1000",     # أوفست < 1000 حبة
+    "offset_paper_missing",  # سعر ورق الأوفست غير محمّل
+    "box_oversize",          # علب بمقاس فرد أكبر من 99×69
+    "custom_finishing",      # تشطيب/مواصفة غير مسعّرة
+    "vip_or_complaint",      # عميل VIP أو شكوى
+    "other",                 # غير ذلك
+}
+
+
+def escalate_session(
+    session_id: str,
+    reason: str,
+    details: str = "",
+    customer_summary: str = "",
+) -> dict:
+    """
+    Hand the session over to the admin.
+
+    - `reason` must be one of VALID_ESCALATION_REASONS (else stored as "other").
+    - `details` is what the bot would tell the admin (specs, size, qty, why
+      it can't price). Free-form Arabic text.
+    - `customer_summary` is an optional pre-built one-liner the admin sees
+      in the inbox header ("علب 22×30 سم، 800 حبة، انفربرش، يحتاج تسعير").
+
+    Returns the stored escalation dict for the caller to use.
+    """
+    conv = get_or_create(session_id)
+    reason_clean = reason if reason in VALID_ESCALATION_REASONS else "other"
+    escalation = {
+        "reason":           reason_clean,
+        "details":          (details or "").strip(),
+        "customer_summary": (customer_summary or "").strip(),
+        "at":               _now(),
+        "resolved":         False,
+    }
+    conv["escalation"]   = escalation
+    conv["bot_enabled"]  = False   # admin takeover
+    mark_dirty(session_id)
+    return escalation
+
+
+def get_escalation(session_id: str) -> dict | None:
+    """Return the current escalation dict for the session, or None."""
+    conv = _conversations.get(session_id, {})
+    esc = conv.get("escalation")
+    if isinstance(esc, dict) and esc.get("reason"):
+        return esc
+    return None
+
+
+def clear_escalation(session_id: str):
+    """Mark the escalation as resolved (admin handled the request)."""
+    conv = _conversations.get(session_id)
+    if conv and isinstance(conv.get("escalation"), dict):
+        conv["escalation"]["resolved"] = True
+        conv["escalation"]["resolved_at"] = _now()
+        mark_dirty(session_id)
 
 
 def get_bot_globally() -> bool:

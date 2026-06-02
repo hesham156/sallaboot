@@ -98,7 +98,7 @@ export default function Login() {
                       : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                   }`}
                 >
-                  <Icon paths={m.icon} size={15} className={active ? 'text-white' : 'text-slate-500'} />
+                  <Icon paths={m.icon} size={15} className={ 'text-white'} />
                   <span>{m.label}</span>
                 </button>
               )
@@ -120,7 +120,7 @@ export default function Login() {
                   input: 'text-sm font-semibold text-white placeholder:text-slate-500',
                 }}
                 startContent={
-                  <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                  <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={16} className="text-white flex-shrink-0 ml-2" />
                 }
               />
             )}
