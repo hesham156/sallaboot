@@ -3,15 +3,11 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Spinner } from '@heroui/react'
 import { getToken, getStoreId, getIsSuper } from './api'
 import Login from './pages/Login'
+import Landing from './pages/Landing'
 // Lazy-load the authenticated app shells so the login screen loads fast.
 const StoresList     = lazy(() => import('./pages/StoresList'))
 const StoreDashboard = lazy(() => import('./pages/StoreDashboard'))
 
-function RequireAuth({ children }: { children: JSX.Element }) {
-  const token = getToken()
-  if (!token) return <Navigate to="/login" replace />
-  return children
-}
 
 function RequireSuper({ children }: { children: JSX.Element }) {
   const token = getToken()
@@ -25,7 +21,7 @@ function RequireStoreOwner({ children }: { children: JSX.Element }) {
   const token = getToken()
   const isSuper = getIsSuper()
   if (!token) return <Navigate to="/login" replace />
-  if (isSuper) return <Navigate to="/" replace />
+  if (isSuper) return <Navigate to="/admin" replace />
   return children
 }
 
@@ -38,11 +34,14 @@ export default function App() {
         </div>
       }>
       <Routes>
+        {/* Public landing page */}
+        <Route path="/landing" element={<Landing />} />
+
         <Route path="/login" element={<Login />} />
 
         {/* Super-admin: all stores */}
         <Route
-          path="/"
+          path="/admin"
           element={
             <RequireSuper>
               <StoresList />
@@ -60,7 +59,7 @@ export default function App() {
           }
         />
 
-        {/* Auto-redirect based on stored auth */}
+        {/* Auto-redirect: authenticated → dashboard, guest → landing */}
         <Route
           path="*"
           element={
@@ -68,9 +67,9 @@ export default function App() {
               to={
                 getToken()
                   ? getIsSuper()
-                    ? '/'
+                    ? '/admin'
                     : `/store/${getStoreId()}`
-                  : '/login'
+                  : '/landing'
               }
               replace
             />
