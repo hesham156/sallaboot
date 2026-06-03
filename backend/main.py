@@ -1483,6 +1483,136 @@ async def store_analytics(store_id: str):
 
 
 
+# ── ROI dashboard: "how much did the bot make you" ─────────────────────────────
+@app.get("/admin/{store_id}/analytics/roi")
+async def store_roi(store_id: str, days: int = 30):
+    """
+    Bottom-line value the bot delivered: revenue from orders it created,
+    conversations handled (≈ staff time saved), and carts recovered.
+    `days` selects the window (default 30).
+    """
+    import datetime as _dtt
+    days = max(1, min(int(days or 30), 365))
+    now_utc = _dtt.datetime.utcnow()
+    window_start = now_utc - _dtt.timedelta(days=days)
+
+    # 1) Bot-generated revenue (from the bot_orders ledger)
+    roi = await db.get_bot_roi(store_id, days)
+
+    # 2) Conversations handled in the window (≈ messages the bot answered)
+    convs = await cs.get_all_conversations_for_store(store_id)
+    convs_window = 0
+    msgs_handled = 0
+    for conv in convs.values():
+        try:
+            created = _dtt.datetime.fromisoformat(conv.get("created_at", ""))
+            in_window = created >= window_start
+        except Exception:
+            in_window = True   # undated → count it
+        if in_window:
+            convs_window += 1
+            msgs_handled += sum(
+                1 for m in conv.get("messages", [])
+                if m.get("role") in ("assistant", "admin")
+            )
+
+    # 3) Recovered abandoned carts (in-memory cache)
+    carts = list(_abandoned_carts.get(store_id, []))
+    carts_recovered = sum(1 for c in carts if c.get("recovered"))
+
+    # 4) Time saved: assume each handled conversation would take a human ~5 min
+    minutes_saved = convs_window * 5
+    hours_saved   = round(minutes_saved / 60, 1)
+
+    return {
+        "days":            days,
+        "currency":        roi["currency"],
+        "revenue":         roi["revenue"],        # bot revenue in window
+        "orders":          roi["orders"],         # bot orders in window
+        "avg_order":       roi["avg_order"],
+        "revenue_all":     roi["revenue_all"],    # all-time bot revenue
+        "orders_all":      roi["orders_all"],
+        "conversations":   convs_window,
+        "messages_handled": msgs_handled,
+        "hours_saved":     hours_saved,
+        "carts_recovered": carts_recovered,
+    }
+
+
+# ── Weekly performance report (week-over-week) ─────────────────────────────────
+@app.get("/admin/{store_id}/analytics/weekly")
+async def store_weekly(store_id: str):
+    """
+    A pushable weekly summary: this week vs last week for revenue, orders,
+    conversations, plus satisfaction and the top customer topic. Powers the
+    in-dashboard report card + the "copy to share" text.
+    """
+    import datetime as _dtt
+
+    def _pct(now_v: float, prev_v: float) -> int:
+        if prev_v <= 0:
+            return 100 if now_v > 0 else 0
+        return round((now_v - prev_v) / prev_v * 100)
+
+    now_utc   = _dtt.datetime.utcnow()
+    week_ago  = now_utc - _dtt.timedelta(days=7)
+    two_weeks = now_utc - _dtt.timedelta(days=14)
+
+    wroi = await db.get_weekly_roi(store_id)
+
+    # Conversations this week vs last week + ratings this week
+    convs = await cs.get_all_conversations_for_store(store_id)
+    conv_this = conv_prev = 0
+    ratings: list[int] = []
+    for conv in convs.values():
+        try:
+            created = _dtt.datetime.fromisoformat(conv.get("created_at", ""))
+        except Exception:
+            created = now_utc
+        if created >= week_ago:
+            conv_this += 1
+            r = conv.get("rating")
+            if isinstance(r, (int, float)) and r:
+                ratings.append(int(r))
+        elif two_weeks <= created < week_ago:
+            conv_prev += 1
+
+    avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 0.0
+
+    # Top customer topic this week (reuse the keyword analyzer)
+    top_topic = ""
+    try:
+        import conversation_analyzer as ca
+        recent = {sid: c for sid, c in convs.items()
+                  if (lambda d: d >= week_ago)(_safe_dt(c.get("created_at", ""), now_utc))}
+        insights = ca.analyze_insights(list(recent.values()))
+        tq = insights.get("top_questions") or []
+        if tq:
+            top_topic = tq[0].get("label", "")
+    except Exception as exc:
+        print(f"[weekly] topic analysis skipped: {exc}")
+
+    return {
+        "currency":       wroi["currency"],
+        "revenue":        wroi["rev_this"],
+        "revenue_delta":  _pct(wroi["rev_this"], wroi["rev_prev"]),
+        "orders":         wroi["ord_this"],
+        "orders_delta":   _pct(wroi["ord_this"], wroi["ord_prev"]),
+        "conversations":  conv_this,
+        "conv_delta":     _pct(conv_this, conv_prev),
+        "avg_rating":     avg_rating,
+        "top_topic":      top_topic,
+    }
+
+
+def _safe_dt(s: str, fallback):
+    import datetime as _dtt
+    try:
+        return _dtt.datetime.fromisoformat(s)
+    except Exception:
+        return fallback
+
+
 # ── Conversation insights (advanced analytics) ─────────────────────────────────
 @app.get("/admin/{store_id}/analytics/insights")
 async def store_insights(store_id: str):

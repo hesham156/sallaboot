@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Spinner, Progress, Avatar, Chip } from '@heroui/react'
-import { api, Analytics, StoreInfo } from '../../api'
+import { api, Analytics, ROIData, StoreInfo } from '../../api'
 
 interface Props { storeId: string; store: StoreInfo }
 
@@ -48,6 +48,7 @@ function StatCard({ label, value, sub, icon, color }: {
 
 export default function Overview({ storeId, store }: Props) {
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  const [roi, setRoi]             = useState<ROIData | null>(null)
   const [syncing, setSyncing]     = useState(false)
   const [syncMsg, setSyncMsg]     = useState('')
   const [loading, setLoading]     = useState(true)
@@ -56,7 +57,14 @@ export default function Overview({ storeId, store }: Props) {
 
   async function loadAnalytics() {
     setLoading(true)
-    try { setAnalytics(await api.analytics(storeId)) }
+    try {
+      const [a, r] = await Promise.all([
+        api.analytics(storeId),
+        api.roi(storeId, 30).catch(() => null),
+      ])
+      setAnalytics(a)
+      setRoi(r)
+    }
     catch (e) { console.error(e) }
     finally { setLoading(false) }
   }
@@ -144,6 +152,46 @@ export default function Overview({ storeId, store }: Props) {
         </div>
       ) : (
         <>
+          {/* ── ROI hero: "how much did the bot make you" ── */}
+          {roi && (
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-500 to-cyan-500 text-white p-6 sm:p-8 shadow-soft-lg">
+              <div className="absolute top-[-5rem] left-[-3rem] w-72 h-72 bg-white/15 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-[-6rem] right-[-3rem] w-72 h-72 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative flex flex-col lg:flex-row lg:items-center gap-6 justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 bg-white/15 rounded-full px-3 py-1 text-xs font-bold mb-3">
+                    <Icon paths="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" size={13} /> آخر 30 يوم
+                  </div>
+                  <p className="text-sm font-semibold text-teal-50">سلّابوت جابلك</p>
+                  <p className="text-4xl sm:text-5xl font-black tracking-tight mt-1">
+                    {roi.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    <span className="text-2xl font-bold mr-2">{roi.currency === 'SAR' ? 'ريال' : roi.currency}</span>
+                  </p>
+                  <p className="text-sm text-teal-50/90 mt-2">
+                    من <b>{roi.orders}</b> طلب أتمّه البوت
+                    {roi.revenue_all > roi.revenue && (
+                      <span className="opacity-80"> — وإجمالي <b>{roi.revenue_all.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b> منذ البداية</span>
+                    )}
+                  </p>
+                </div>
+                {/* breakdown chips */}
+                <div className="grid grid-cols-3 gap-3 lg:gap-4">
+                  {[
+                    { v: roi.conversations, l: 'محادثة', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
+                    { v: `${roi.hours_saved}س`, l: 'وقت موفّر', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+                    { v: roi.carts_recovered, l: 'سلة مسترجعة', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z' },
+                  ].map((s) => (
+                    <div key={s.l} className="bg-white/15 backdrop-blur-sm rounded-2xl px-4 py-3.5 text-center min-w-[5.5rem]">
+                      <Icon paths={s.icon} size={18} className="mx-auto mb-1.5 opacity-90" />
+                      <p className="text-xl font-black leading-none">{s.v}</p>
+                      <p className="text-[11px] font-semibold text-teal-50/90 mt-1">{s.l}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Stats grid ── */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard

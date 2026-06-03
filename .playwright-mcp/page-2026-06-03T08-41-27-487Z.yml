@@ -1,0 +1,607 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - navigation [ref=e8]:
+        - paragraph [ref=e14]: "Get 25% Discount. Promocode: Early25"
+        - generic [ref=e18]:
+          - link [ref=e19] [cursor=pointer]:
+            - /url: ./
+          - generic [ref=e21]:
+            - img [ref=e25] [cursor=pointer]
+            - link "G e t S t a r t e d" [ref=e28] [cursor=pointer]:
+              - /url: ./
+              - paragraph [ref=e31]:
+                - generic [ref=e32]: G
+                - generic [ref=e33]: e
+                - generic [ref=e34]: t
+                - generic [ref=e36]: S
+                - generic [ref=e37]: t
+                - generic [ref=e38]: a
+                - generic [ref=e39]: r
+                - generic [ref=e40]: t
+                - generic [ref=e41]: e
+                - generic [ref=e42]: d
+    - main [ref=e47]:
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - generic [ref=e51]:
+            - generic [ref=e52]:
+              - heading "Take charge of your money with Finex!" [level=1] [ref=e54]
+              - paragraph [ref=e56]: Finex helps you track, save, and manage money with powerful tools designed for modern life.
+            - generic [ref=e57]:
+              - link [ref=e60] [cursor=pointer]:
+                - /url: https://apps.apple.com
+                - img [ref=e63]
+                - img [ref=e67]
+              - link [ref=e71] [cursor=pointer]:
+                - /url: https://play.google.com
+                - generic [ref=e72]:
+                  - img [ref=e75]
+                  - img [ref=e79]
+                - generic [ref=e81]:
+                  - img [ref=e84]
+                  - img [ref=e88]
+          - generic [ref=e90]:
+            - paragraph [ref=e112]: 50K+ Happy Users
+            - paragraph [ref=e114]: Over 200K people are managing money with more confidence — thanks to Finex.
+        - generic [ref=e115]:
+          - img [ref=e122]
+          - generic [ref=e125]:
+            - generic [ref=e126]:
+              - paragraph [ref=e128]: Savings
+              - paragraph [ref=e130]: $1,980.00
+            - img [ref=e135]
+          - generic [ref=e144]:
+            - generic [ref=e145]:
+              - img [ref=e148]
+              - generic [ref=e150]:
+                - paragraph [ref=e152]: Income
+                - paragraph [ref=e154]: 30 Days
+            - heading "$ 12,000" [level=5] [ref=e156]
+      - list [ref=e162]:
+        - listitem [ref=e163]
+        - listitem [ref=e166]
+        - listitem [ref=e169]:
+          - img [ref=e173]
+        - listitem [ref=e175]:
+          - img [ref=e179]
+        - listitem [ref=e181]:
+          - img [ref=e185]
+        - listitem [ref=e187]:
+          - img [ref=e191]
+        - listitem [ref=e193]:
+          - img [ref=e197]
+      - generic [ref=e200]:
+        - generic [ref=e201]:
+          - heading "Loved by folks in over thirty countries" [level=2] [ref=e204]
+          - generic [ref=e206]:
+            - generic [ref=e210]:
+              - generic [ref=e211]:
+                - generic "Counter ends at 90" [ref=e214]: "70"
+                - heading "K+" [level=3] [ref=e216]
+              - paragraph [ref=e218]: Downloads
+            - generic [ref=e221]:
+              - generic [ref=e222]:
+                - generic "Counter ends at 90" [ref=e225]: "70"
+                - heading "%" [level=3] [ref=e227]
+              - paragraph [ref=e229]: Positive Review
+            - generic [ref=e232]:
+              - generic [ref=e233]:
+                - generic "Counter ends at 120" [ref=e236]: "0"
+                - heading "+" [level=3] [ref=e238]
+              - paragraph [ref=e240]: Businesses
+            - generic [ref=e243]:
+              - generic [ref=e244]:
+                - generic "Counter ends at 24" [ref=e247]: "0"
+                - heading "/7" [level=3] [ref=e249]
+              - paragraph [ref=e251]: Priority Support
+        - generic [ref=e252]:
+          - img "A young person with short brown hair in a purple shirt is looking at their phone against a dark green background." [ref=e256]
+          - generic [ref=e257]:
+            - generic [ref=e258]:
+              - paragraph [ref=e259]: With users spanning 30+ countries, Finex has become the go-to app for anyone looking to simplify money management and build healthier financial habits.
+              - paragraph [ref=e260]: From expense tracking to smart saving, Finex makes finance easy, reliable, and accessible—helping people stay in control no matter where they are.
+            - link "A b o u t U s" [ref=e263] [cursor=pointer]:
+              - /url: ./about
+              - paragraph [ref=e266]:
+                - generic [ref=e267]: A
+                - generic [ref=e268]: b
+                - generic [ref=e269]: o
+                - generic [ref=e270]: u
+                - generic [ref=e271]: t
+                - generic [ref=e273]: U
+                - generic [ref=e274]: s
+      - generic [ref=e278]:
+        - generic [ref=e279]:
+          - heading "Everything You Need to Manage Money Smarter" [level=2] [ref=e281]
+          - paragraph [ref=e283]: Finex combines smart technology with intuitive design to help you track, save, and manage your money with ease.
+        - generic [ref=e284]:
+          - generic [ref=e285]:
+            - generic [ref=e292]:
+              - heading "Grab Your Free Debit Card" [level=5] [ref=e294]
+              - paragraph [ref=e296]: Sign up and get your free debit card—spend securely and enjoy global access with zero hassle.
+            - heading "Get Smarter Insights About Your Money" [level=5] [ref=e308]
+          - generic [ref=e313]:
+            - generic [ref=e318]:
+              - generic [ref=e319]:
+                - generic [ref=e320]:
+                  - heading "See Your Money, Clearly." [level=5] [ref=e322]
+                  - paragraph [ref=e324]: Track spending, savings, and income in one clean dashboard — giving you instant clarity and confidence about your finances.
+                - link "L e a r n M o r e" [ref=e326] [cursor=pointer]:
+                  - /url: ./features
+                  - paragraph [ref=e329]:
+                    - generic [ref=e330]: L
+                    - generic [ref=e331]: e
+                    - generic [ref=e332]: a
+                    - generic [ref=e333]: r
+                    - generic [ref=e334]: "n"
+                    - generic [ref=e336]: M
+                    - generic [ref=e337]: o
+                    - generic [ref=e338]: r
+                    - generic [ref=e339]: e
+              - img [ref=e345]
+            - generic [ref=e351]:
+              - generic [ref=e358]:
+                - heading "Join Over 50K+ Satisfied Users" [level=5] [ref=e360]
+                - paragraph [ref=e362]: Simplifying finances for thousands around the globe.
+              - generic [ref=e372]:
+                - heading "Take Control of Your Financial Future" [level=5] [ref=e374]
+                - paragraph [ref=e376]: Take control, save smarter, and grow your money with ease
+      - generic [ref=e384]:
+        - generic [ref=e388]:
+          - heading "Simplify your payments and manage your finances easily." [level=2] [ref=e390]
+          - paragraph [ref=e392]: Discover how our platform streamlines personal finance and enhances your investment strategies, making smart choices easier than ever!
+        - generic [ref=e393]:
+          - generic [ref=e394]:
+            - generic [ref=e402]:
+              - heading "Smart Alerts and Instant Notifications" [level=4] [ref=e404]
+              - paragraph [ref=e406]: Get instant alerts for transactions, spending limits, and payment reminders to stay in control.
+            - generic [ref=e414]:
+              - heading "Biometric & Multi-Factor Authentication" [level=4] [ref=e416]
+              - paragraph [ref=e418]: Hey, keep your logins secure with fingerprint scans, face ID, and two-step verification! It's super easy!
+          - generic [ref=e419]:
+            - generic [ref=e427]:
+              - heading "Seamless & Secure Bill Payments" [level=4] [ref=e429]
+              - paragraph [ref=e431]: Keep tabs on all your regular payments and set them up to run automatically, all in one spot!
+            - generic [ref=e439]:
+              - heading "Monthly Statements & Reports" [level=4] [ref=e441]
+              - paragraph [ref=e443]: Download detailed financial reports and statements anytime for easy record-keeping.
+            - generic [ref=e451]:
+              - heading "Shared Accounts & Permissions" [level=4] [ref=e453]
+              - paragraph [ref=e455]: Easily manage shared accounts with family or team members with customizable access levels.
+      - generic [ref=e461]:
+        - generic [ref=e462]:
+          - generic [ref=e463]:
+            - heading "Boosting your financial success" [level=2] [ref=e465]
+            - paragraph [ref=e467]: Unlock smarter ways to manage money, grow your income, and achieve lasting financial freedom with proven strategies.
+          - generic [ref=e468]:
+            - paragraph [ref=e473] [cursor=pointer]:
+              - mark [ref=e474]: Currency
+            - paragraph [ref=e479] [cursor=pointer]:
+              - generic [ref=e480]: T
+              - generic [ref=e481]: r
+              - generic [ref=e482]: a
+              - generic [ref=e483]: "n"
+              - generic [ref=e484]: s
+              - generic [ref=e485]: f
+              - generic [ref=e486]: e
+              - generic [ref=e487]: r
+            - paragraph [ref=e492] [cursor=pointer]:
+              - generic [ref=e493]: P
+              - generic [ref=e494]: l
+              - generic [ref=e495]: a
+              - generic [ref=e496]: "n"
+              - generic [ref=e497]: "n"
+              - generic [ref=e498]: i
+              - generic [ref=e499]: "n"
+              - generic [ref=e500]: g
+        - generic [ref=e501]:
+          - generic [ref=e502]:
+            - generic [ref=e503]:
+              - heading "Bank Accounts in More than Twenty Currency" [level=4] [ref=e505]
+              - paragraph [ref=e507]: Manage your money like a global citizen. Open and use multiple bank accounts in different currencies. Say goodbye to hidden fees and hello to Finex.
+            - generic [ref=e508]:
+              - generic [ref=e510]:
+                - img [ref=e513]
+                - paragraph [ref=e516]: Open accounts in USD, EUR, GBP, and more
+              - generic [ref=e518]:
+                - img [ref=e521]
+                - paragraph [ref=e524]: Instantly switch between currencies
+              - generic [ref=e526]:
+                - img [ref=e529]
+                - paragraph [ref=e532]: No foreign exchange fees while sending money
+          - img [ref=e539]
+      - generic [ref=e542]:
+        - generic [ref=e543]:
+          - heading "Simple and Transparent Pricing for Everyone" [level=2] [ref=e545]
+          - paragraph [ref=e547]: Choose the plan that fits your goals. Start with a free trial or upgrade to unlock premium features—simple, transparent pricing with no hidden fees.
+        - generic [ref=e550]:
+          - generic [ref=e552]:
+            - paragraph [ref=e557] [cursor=pointer]:
+              - mark [ref=e558]: Monthly
+            - paragraph [ref=e563] [cursor=pointer]:
+              - generic [ref=e564]: "Y"
+              - generic [ref=e565]: e
+              - generic [ref=e566]: a
+              - generic [ref=e567]: r
+              - generic [ref=e568]: l
+              - generic [ref=e569]: "y"
+              - generic [ref=e571]: (
+              - generic [ref=e572]: S
+              - generic [ref=e573]: a
+              - generic [ref=e574]: v
+              - generic [ref=e575]: e
+              - generic [ref=e577]: "1"
+              - generic [ref=e578]: "7"
+              - generic [ref=e579]: "%"
+              - generic [ref=e580]: )
+          - generic [ref=e581]:
+            - generic [ref=e583]:
+              - generic [ref=e584]:
+                - generic [ref=e585]:
+                  - generic [ref=e586]:
+                    - heading "Starter" [level=4] [ref=e588]
+                    - paragraph [ref=e590]: Simple tools to manage your money, track expenses and insights
+                  - generic [ref=e591]:
+                    - heading "$0" [level=2] [ref=e593]
+                    - paragraph [ref=e596]: /month
+                - generic [ref=e597]:
+                  - generic [ref=e599]:
+                    - img [ref=e602]
+                    - paragraph [ref=e605]: Track income & expenses
+                  - generic [ref=e607]:
+                    - img [ref=e610]
+                    - paragraph [ref=e613]: Create budget categories
+                  - generic [ref=e615]:
+                    - img [ref=e618]
+                    - paragraph [ref=e621]: Create budget categories
+                  - generic [ref=e623]:
+                    - img [ref=e626]
+                    - paragraph [ref=e629]: Link 1 bank account
+                  - generic [ref=e631]:
+                    - img [ref=e634]
+                    - paragraph [ref=e637]: Light mode only
+              - link "C h o o s e S t a r t e r" [ref=e639] [cursor=pointer]:
+                - /url: ./contact
+                - paragraph [ref=e642]:
+                  - generic [ref=e643]: C
+                  - generic [ref=e644]: h
+                  - generic [ref=e645]: o
+                  - generic [ref=e646]: o
+                  - generic [ref=e647]: s
+                  - generic [ref=e648]: e
+                  - generic [ref=e650]: S
+                  - generic [ref=e651]: t
+                  - generic [ref=e652]: a
+                  - generic [ref=e653]: r
+                  - generic [ref=e654]: t
+                  - generic [ref=e655]: e
+                  - generic [ref=e656]: r
+            - generic [ref=e658]:
+              - generic [ref=e659]:
+                - generic [ref=e660]:
+                  - generic [ref=e661]:
+                    - heading "Pro" [level=4] [ref=e663]
+                    - paragraph [ref=e665]: Advanced insights, smart automation, and features to grow your finance
+                  - generic [ref=e666]:
+                    - heading "$9.99" [level=2] [ref=e668]
+                    - paragraph [ref=e671]: /month
+                - generic [ref=e672]:
+                  - generic [ref=e674]:
+                    - img [ref=e677]
+                    - paragraph [ref=e680]: All Starter features
+                  - generic [ref=e682]:
+                    - img [ref=e685]
+                    - paragraph [ref=e688]: Unlimited bank account
+                  - generic [ref=e690]:
+                    - img [ref=e693]
+                    - paragraph [ref=e696]: Smart savings goals & automation
+                  - generic [ref=e698]:
+                    - img [ref=e701]
+                    - paragraph [ref=e704]: Subscription tracking
+                  - generic [ref=e706]:
+                    - img [ref=e709]
+                    - paragraph [ref=e712]: Customizable reports
+              - link "C h o o s e P r o" [ref=e714] [cursor=pointer]:
+                - /url: ./contact
+                - paragraph [ref=e717]:
+                  - generic [ref=e718]: C
+                  - generic [ref=e719]: h
+                  - generic [ref=e720]: o
+                  - generic [ref=e721]: o
+                  - generic [ref=e722]: s
+                  - generic [ref=e723]: e
+                  - generic [ref=e725]: P
+                  - generic [ref=e726]: r
+                  - generic [ref=e727]: o
+            - generic [ref=e729]:
+              - generic [ref=e730]:
+                - generic [ref=e731]:
+                  - generic [ref=e732]:
+                    - heading "Premium" [level=4] [ref=e734]
+                    - paragraph [ref=e736]: All-in-one access with unlimited features, priority support and flexibility
+                  - generic [ref=e737]:
+                    - heading "$19.99" [level=2] [ref=e739]
+                    - paragraph [ref=e742]: /month
+                - generic [ref=e743]:
+                  - generic [ref=e745]:
+                    - img [ref=e748]
+                    - paragraph [ref=e751]: All Pro features
+                  - generic [ref=e753]:
+                    - img [ref=e756]
+                    - paragraph [ref=e759]: Multi-currency accounts
+                  - generic [ref=e761]:
+                    - img [ref=e764]
+                    - paragraph [ref=e767]: AI-driven financial insights
+                  - generic [ref=e769]:
+                    - img [ref=e772]
+                    - paragraph [ref=e775]: Advanced investment tracking
+                  - generic [ref=e777]:
+                    - img [ref=e780]
+                    - paragraph [ref=e783]: Multi-factor authentication
+              - link "C h o o s e P r e m i u m" [ref=e785] [cursor=pointer]:
+                - /url: ./contact
+                - paragraph [ref=e788]:
+                  - generic [ref=e789]: C
+                  - generic [ref=e790]: h
+                  - generic [ref=e791]: o
+                  - generic [ref=e792]: o
+                  - generic [ref=e793]: s
+                  - generic [ref=e794]: e
+                  - generic [ref=e796]: P
+                  - generic [ref=e797]: r
+                  - generic [ref=e798]: e
+                  - generic [ref=e799]: m
+                  - generic [ref=e800]: i
+                  - generic [ref=e801]: u
+                  - generic [ref=e802]: m
+      - generic [ref=e804]:
+        - generic [ref=e805]:
+          - heading "Trusted by Thousands of Happy Users" [level=2] [ref=e807]
+          - paragraph [ref=e810]: Real people, real results — see how Finex is helping users take control of their money every day
+        - generic [ref=e812]:
+          - generic [ref=e814]:
+            - heading "Finex changed the way I manage my money. It’s simple, intuitive, and incredibly powerful." [level=3] [ref=e818]
+            - generic [ref=e820]:
+              - heading "Carla Mendes" [level=5] [ref=e822]
+              - paragraph [ref=e824]: BrightPay
+          - generic [ref=e831]:
+            - list [ref=e833]
+            - group "Slideshow pagination controls":
+              - generic [ref=e834]:
+                - button "Scroll to page 1" [ref=e835] [cursor=pointer]
+                - button "Scroll to page 2" [ref=e837] [cursor=pointer]
+                - button "Scroll to page 3" [ref=e839] [cursor=pointer]
+                - button "Scroll to page 4" [ref=e841] [cursor=pointer]
+                - button "Scroll to page 5" [ref=e843] [cursor=pointer]
+                - button "Scroll to page 6" [ref=e845] [cursor=pointer]
+      - generic [ref=e848]:
+        - generic [ref=e852]:
+          - heading "Get Started with Finex in three simple steps" [level=2] [ref=e854]
+          - paragraph [ref=e856]: In just a few minutes, you can set up Finex and start taking control of your money.
+        - generic [ref=e860]:
+          - list [ref=e862]
+          - group "Slideshow pagination controls":
+            - generic:
+              - button "Previous" [ref=e863] [cursor=pointer]:
+                - img "Back Arrow" [ref=e864]
+              - button "Next" [ref=e865] [cursor=pointer]:
+                - img "Next Arrow" [ref=e866]
+            - generic [ref=e867]:
+              - button "Scroll to page 1" [ref=e868] [cursor=pointer]
+              - button "Scroll to page 2" [ref=e870] [cursor=pointer]
+              - button "Scroll to page 3" [ref=e872] [cursor=pointer]
+      - generic [ref=e877]:
+        - generic [ref=e879]:
+          - heading "Frequently Asked Questions" [level=2] [ref=e881]
+          - paragraph [ref=e883]:
+            - text: Find answers to the most common questions about
+            - text: using our app on your mobile device.
+        - generic [ref=e884]:
+          - generic [ref=e887] [cursor=pointer]:
+            - paragraph [ref=e890]: "1"
+            - paragraph [ref=e892]: What is Finex and how does it work?
+          - generic [ref=e896] [cursor=pointer]:
+            - paragraph [ref=e899]: "2"
+            - paragraph [ref=e901]: Is my financial data safe with Finex?
+          - generic [ref=e905] [cursor=pointer]:
+            - paragraph [ref=e908]: "3"
+            - paragraph [ref=e910]: Can I connect multiple bank accounts and cards?
+          - generic [ref=e914] [cursor=pointer]:
+            - paragraph [ref=e917]: "4"
+            - paragraph [ref=e919]: Do I need a subscription to use Finex?
+          - generic [ref=e923] [cursor=pointer]:
+            - paragraph [ref=e926]: "5"
+            - paragraph [ref=e928]: Can I use Finex on both mobile and desktop?
+      - generic [ref=e931]:
+        - generic [ref=e932]:
+          - heading "Learn more about managing your money" [level=2] [ref=e935]
+          - paragraph [ref=e938]: Stay ahead in your financial journey with expert advice, practical guides, and the latest money management strategies.
+        - generic [ref=e939]:
+          - generic [ref=e940]:
+            - link "A woman using laptop Featured Jul 12, 2025 Five Easy Steps to Get Started with Finex Today and Take Full Control of Your Finances Getting started with Finex is easier than ever. Follow these five simple steps to set up your account, link your finances, and begin managing your money smarter today." [ref=e943] [cursor=pointer]:
+              - /url: ./blog/five-easy-steps-to-get-started-with-finex-today
+              - generic [ref=e946]:
+                - generic [ref=e947]:
+                  - img "A woman using laptop" [ref=e950]
+                  - paragraph [ref=e953]: Featured
+                - generic [ref=e955]:
+                  - paragraph [ref=e958]: Jul 12, 2025
+                  - heading "Five Easy Steps to Get Started with Finex Today and Take Full Control of Your Finances" [level=4] [ref=e961]
+                  - paragraph [ref=e964]: Getting started with Finex is easier than ever. Follow these five simple steps to set up your account, link your finances, and begin managing your money smarter today.
+            - generic [ref=e966]:
+              - link "An ATM card and a Pos machine Jul 12, 2025 How to Build a Realistic Budget You’ll Actually Stick To and Achieve Your Financial Goals Learn actionable steps to create a budget that works for you, track spending effortlessly, and reach your financial goals." [ref=e967] [cursor=pointer]:
+                - /url: ./blog/how-to-build-a-realistic-budget
+                - generic [ref=e970]:
+                  - img "An ATM card and a Pos machine" [ref=e974]
+                  - generic [ref=e975]:
+                    - paragraph [ref=e978]: Jul 12, 2025
+                    - generic [ref=e979]:
+                      - heading "How to Build a Realistic Budget You’ll Actually Stick To and Achieve Your Financial Goals" [level=5] [ref=e981]
+                      - paragraph [ref=e983]: Learn actionable steps to create a budget that works for you, track spending effortlessly, and reach your financial goals.
+              - 'link "Piggy Bank Jul 12, 2025 Smart Saving Goals: Turning Dreams Into Plans with Finex Learn how to set, track, and achieve your financial goals effortlessly with Finex, turning your dreams into actionable savings plans." [ref=e984] [cursor=pointer]':
+                - /url: ./blog/smart-saving-goals
+                - generic [ref=e987]:
+                  - img "Piggy Bank" [ref=e991]
+                  - generic [ref=e992]:
+                    - paragraph [ref=e995]: Jul 12, 2025
+                    - generic [ref=e996]:
+                      - 'heading "Smart Saving Goals: Turning Dreams Into Plans with Finex" [level=5] [ref=e998]'
+                      - paragraph [ref=e1000]: Learn how to set, track, and achieve your financial goals effortlessly with Finex, turning your dreams into actionable savings plans.
+              - link "Two men looking at a laptop screen Oct 11, 2024 How to Stay on Top of Your Subscriptions and Avoid Unnecessary Charges with Finex Track, manage, and optimize all your subscriptions with Finex to avoid surprises and save more effortlessly." [ref=e1001] [cursor=pointer]:
+                - /url: ./blog/how-to-stay-on-top-of-your-subscriptions
+                - generic [ref=e1004]:
+                  - img "Two men looking at a laptop screen" [ref=e1008]
+                  - generic [ref=e1009]:
+                    - paragraph [ref=e1012]: Oct 11, 2024
+                    - generic [ref=e1013]:
+                      - heading "How to Stay on Top of Your Subscriptions and Avoid Unnecessary Charges with Finex" [level=5] [ref=e1015]
+                      - paragraph [ref=e1017]: Track, manage, and optimize all your subscriptions with Finex to avoid surprises and save more effortlessly.
+          - link "V i e w A l l B l o g s" [ref=e1020] [cursor=pointer]:
+            - /url: ./blog
+            - paragraph [ref=e1023]:
+              - generic [ref=e1024]: V
+              - generic [ref=e1025]: i
+              - generic [ref=e1026]: e
+              - generic [ref=e1027]: w
+              - generic [ref=e1029]: A
+              - generic [ref=e1030]: l
+              - generic [ref=e1031]: l
+              - generic [ref=e1033]: B
+              - generic [ref=e1034]: l
+              - generic [ref=e1035]: o
+              - generic [ref=e1036]: g
+              - generic [ref=e1037]: s
+      - generic [ref=e1047]:
+        - generic [ref=e1048]:
+          - heading "Have fun with finance like never before!" [level=2] [ref=e1050]
+          - paragraph [ref=e1052]: Introducing a revolutionary platform designed to simplify how you transfer and control your finances. Low fees.
+        - generic [ref=e1053]:
+          - link [ref=e1055] [cursor=pointer]:
+            - /url: https://apps.apple.com
+            - img [ref=e1058]
+            - img [ref=e1062]
+          - link [ref=e1065] [cursor=pointer]:
+            - /url: https://play.google.com
+            - generic [ref=e1066]:
+              - img [ref=e1069]
+              - img [ref=e1073]
+            - generic [ref=e1075]:
+              - img [ref=e1078]
+              - img [ref=e1082]
+    - contentinfo [ref=e1089]:
+      - generic [ref=e1091]:
+        - generic [ref=e1092]:
+          - generic [ref=e1093]:
+            - generic [ref=e1094]:
+              - link [ref=e1096] [cursor=pointer]:
+                - /url: ./
+              - paragraph [ref=e1099]: Simplify your money management. With Finex, tracking your finances is effortless and stress-free.
+            - generic [ref=e1100]:
+              - heading "Social" [level=5] [ref=e1102]
+              - generic [ref=e1103]:
+                - link [ref=e1105] [cursor=pointer]:
+                  - /url: https://facebook.com
+                  - img [ref=e1109]
+                - link [ref=e1112] [cursor=pointer]:
+                  - /url: https://Linkedin.com
+                  - img [ref=e1116]
+                - link [ref=e1119] [cursor=pointer]:
+                  - /url: https://Instagram.com
+                  - img [ref=e1123]
+          - generic [ref=e1125]:
+            - generic [ref=e1126]:
+              - paragraph [ref=e1128]: Subscribe to our Newsletter
+              - generic [ref=e1129]:
+                - textbox [ref=e1132]:
+                  - /placeholder: jane@framer.com
+                - button "Submit" [ref=e1134] [cursor=pointer]:
+                  - paragraph [ref=e1136]: Submit
+            - generic [ref=e1137]:
+              - generic [ref=e1138]:
+                - heading "Main Pages" [level=5] [ref=e1140]
+                - generic [ref=e1141]:
+                  - link "Home" [ref=e1143] [cursor=pointer]:
+                    - /url: ./
+                    - paragraph [ref=e1145]: Home
+                    - img [ref=e1149]
+                  - link "Features" [ref=e1152] [cursor=pointer]:
+                    - /url: ./features
+                    - paragraph [ref=e1154]: Features
+                    - img [ref=e1158]
+                  - link "About" [ref=e1161] [cursor=pointer]:
+                    - /url: ./about
+                    - paragraph [ref=e1163]: About
+                    - img [ref=e1167]
+                  - link "Contact" [ref=e1170] [cursor=pointer]:
+                    - /url: ./contact
+                    - paragraph [ref=e1172]: Contact
+                    - img [ref=e1176]
+                  - link "Pricing" [ref=e1179] [cursor=pointer]:
+                    - /url: ./pricing
+                    - paragraph [ref=e1181]: Pricing
+                    - img [ref=e1185]
+              - generic [ref=e1187]:
+                - heading "Resources" [level=5] [ref=e1189]
+                - generic [ref=e1190]:
+                  - link "Blogs" [ref=e1192] [cursor=pointer]:
+                    - /url: ./blog
+                    - paragraph [ref=e1194]: Blogs
+                    - img [ref=e1198]
+                  - link "Blog Details" [ref=e1201] [cursor=pointer]:
+                    - /url: ./blog/five-easy-steps-to-get-started-with-finex-today
+                    - paragraph [ref=e1203]: Blog Details
+                    - img [ref=e1207]
+              - generic [ref=e1209]:
+                - heading "Company" [level=5] [ref=e1211]
+                - generic [ref=e1212]:
+                  - link "Terms & Condition" [ref=e1214] [cursor=pointer]:
+                    - /url: ./legal-pages/terms-and-conditions
+                    - paragraph [ref=e1216]: Terms & Condition
+                    - img [ref=e1220]
+                  - link "Privacy Policy" [ref=e1223] [cursor=pointer]:
+                    - /url: ./legal-pages/privacy-policy
+                    - paragraph [ref=e1225]: Privacy Policy
+                    - img [ref=e1229]
+                  - link "404" [ref=e1232] [cursor=pointer]:
+                    - /url: ./404
+                    - paragraph [ref=e1234]: "404"
+                    - img [ref=e1238]
+        - generic [ref=e1240]:
+          - img [ref=e1242]:
+            - paragraph [ref=e1244]: Finex
+          - generic [ref=e1245]:
+            - paragraph [ref=e1247]: Copyright © 2025 Finex. All Rights Reserved.
+            - generic [ref=e1249]:
+              - generic [ref=e1250]:
+                - paragraph [ref=e1252]: "Design by:"
+                - link "Nivrit" [ref=e1254] [cursor=pointer]:
+                  - /url: https://x.com/nivrit_framer
+                  - paragraph [ref=e1256]: Nivrit
+              - generic [ref=e1258]:
+                - paragraph [ref=e1260]: "Design by:"
+                - link "Framer" [ref=e1262] [cursor=pointer]:
+                  - /url: https://framer.com
+                  - paragraph [ref=e1264]: Framer
+  - generic:
+    - link "Create a free website with Framer, the website builder loved by startups, designers and agencies.":
+      - /url: https://www.framer.com
+      - paragraph [ref=e1266] [cursor=pointer]: Create a free website with Framer, the website builder loved by startups, designers and agencies.
+  - img [ref=e1271]
+  - img [ref=e1278]
+  - img [ref=e1282]
+  - img [ref=e1287]
+  - img [ref=e1290]
+  - img [ref=e1294]
+  - img [ref=e1313]
+  - img [ref=e1320]
+  - img [ref=e1329]
+  - img [ref=e1333]
+  - img [ref=e1339]
+  - img [ref=e1343]
+  - img [ref=e1349]
+  - img [ref=e1354]
+  - img [ref=e1356]
+  - img [ref=e1358]
+  - img [ref=e1360]
+  - img [ref=e1362]

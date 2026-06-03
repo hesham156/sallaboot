@@ -121,6 +121,8 @@ export const api = {
     get<Analytics>(`/admin/${storeId}/analytics`),
   insights: (storeId: string) =>
     get<ConversationInsights>(`/admin/${storeId}/analytics/insights`),
+  roi: (storeId: string, days = 30) =>
+    get<ROIData>(`/admin/${storeId}/analytics/roi?days=${days}`),
 
   // AI settings
   getAI: (storeId: string) =>
@@ -373,6 +375,20 @@ export interface ConversationInsights {
     without_checkout: number
     conversion_rate: number
   }
+}
+
+export interface ROIData {
+  days: number
+  currency: string
+  revenue: number
+  orders: number
+  avg_order: number
+  revenue_all: number
+  orders_all: number
+  conversations: number
+  messages_handled: number
+  hours_saved: number
+  carts_recovered: number
 }
 
 export interface AIConfig {

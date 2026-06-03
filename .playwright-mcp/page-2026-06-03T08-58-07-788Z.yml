@@ -1,0 +1,176 @@
+- main [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e7]:
+      - img [ref=e8]
+      - text: جرّب سلّابوت مجاناً — مساعد مبيعات ذكي يشتغل على متجر سلة بتاعك
+    - navigation [ref=e14]:
+      - link "سلّابوت" [ref=e15] [cursor=pointer]:
+        - /url: /
+        - img [ref=e17]
+        - generic [ref=e19]: سلّابوت
+      - generic [ref=e20]:
+        - link "المميزات" [ref=e21] [cursor=pointer]:
+          - /url: "#features"
+        - link "كيف يعمل" [ref=e22] [cursor=pointer]:
+          - /url: "#how"
+        - link "الأرقام" [ref=e23] [cursor=pointer]:
+          - /url: "#stats"
+      - generic [ref=e24]:
+        - button "تسجيل الدخول" [ref=e25] [cursor=pointer]
+        - button "ابدأ مجاناً" [ref=e26] [cursor=pointer]:
+          - text: ابدأ مجاناً
+          - img [ref=e27]
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: مدعوم بالذكاء الاصطناعي — لمتاجر سلة
+        - heading "حوّل زوّار متجرك إلى عملاء يشترون بمساعد ذكي يبيع نيابةً عنك" [level=1] [ref=e34]:
+          - text: حوّل زوّار متجرك إلى عملاء يشترون
+          - text: بمساعد ذكي يبيع نيابةً عنك
+        - paragraph [ref=e35]: سلّابوت يجاوب عملاءك فوراً، يحسب الأسعار، يسترجع السلات المتروكة، ويتعلّم من كل محادثة — كل ده على متجرك في سلة، بالعربي.
+        - generic [ref=e36]:
+          - button "ابدأ مجاناً" [ref=e37] [cursor=pointer]:
+            - text: ابدأ مجاناً
+            - img [ref=e38]
+          - link "شاهد كيف يعمل" [ref=e40] [cursor=pointer]:
+            - /url: "#how"
+            - img [ref=e41]
+            - text: شاهد كيف يعمل
+        - generic [ref=e43]:
+          - generic [ref=e44]:
+            - generic [ref=e45]: م
+            - generic [ref=e46]: س
+            - generic [ref=e47]: ك
+            - generic [ref=e48]: ع
+          - generic [ref=e49]:
+            - generic [ref=e50]:
+              - img [ref=e51]
+              - img [ref=e53]
+              - img [ref=e55]
+              - img [ref=e57]
+              - img [ref=e59]
+            - paragraph [ref=e61]: +200 متجر يبيع أكتر مع سلّابوت
+      - generic [ref=e62]:
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: 🤖
+            - generic [ref=e67]:
+              - paragraph [ref=e68]: مساعد المتجر
+              - paragraph [ref=e69]: متصل الآن
+          - generic [ref=e71]:
+            - generic [ref=e72]: عايز أطبع 1000 كرت
+            - generic [ref=e73]:
+              - text: تمام! 9×5 سم كوشيه 300، وجهين
+              - text: "💵 السعر شامل الضريبة: 103.50 ريال"
+            - generic [ref=e74]: أكمل الطلب 👍
+        - generic [ref=e75]:
+          - img [ref=e77]
+          - generic [ref=e79]:
+            - paragraph [ref=e80]: طلب جديد
+            - paragraph [ref=e81]: +103.50 ر.س
+        - generic [ref=e82]:
+          - img [ref=e84]
+          - generic [ref=e86]:
+            - paragraph [ref=e87]: التحويل
+            - paragraph [ref=e88]: ٪40 ▲
+    - generic [ref=e90]:
+      - generic [ref=e91]:
+        - paragraph [ref=e92]: "+200"
+        - paragraph [ref=e93]: متجر يثق بسلّابوت
+      - generic [ref=e94]:
+        - paragraph [ref=e95]: ٪89
+        - paragraph [ref=e96]: توفير في تكلفة الردود
+      - generic [ref=e97]:
+        - paragraph [ref=e98]: ٪40
+        - paragraph [ref=e99]: زيادة في التحويل
+      - generic [ref=e100]:
+        - paragraph [ref=e101]: ٢٤/٧
+        - paragraph [ref=e102]: دعم بدون توقّف
+    - generic [ref=e103]:
+      - generic [ref=e104]:
+        - generic [ref=e105]: كل اللي متجرك محتاجه
+        - heading "مساعد واحد يقوم بعمل فريق مبيعات كامل" [level=2] [ref=e106]
+        - paragraph [ref=e107]: من أول رسالة للعميل لحد إتمام الطلب — سلّابوت معاك في كل خطوة.
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - img [ref=e111]
+          - heading "مساعد مبيعات يبيع نيابةً عنك" [level=3] [ref=e114]
+          - paragraph [ref=e115]: يفهم احتياج العميل، يرشّح المنتج المناسب، ويتمّ الطلب — ٢٤ ساعة بدون توقّف.
+        - generic [ref=e116]:
+          - img [ref=e118]
+          - heading "حاسبة أسعار فورية" [level=3] [ref=e120]
+          - paragraph [ref=e121]: تسعير دقيق للطباعة (رول، ديجيتال، أوفست، علب) في ثوانٍ، بإعداداتك أنت.
+        - generic [ref=e122]:
+          - img [ref=e124]
+          - heading "استرجاع السلات المتروكة" [level=3] [ref=e126]
+          - paragraph [ref=e127]: يتابع العميل اللي ساب طلبه ويكمّله معاه — مبيعات كانت ضايعة.
+        - generic [ref=e128]:
+          - img [ref=e130]
+          - heading "تحليلات ذكية" [level=3] [ref=e132]
+          - paragraph [ref=e133]: مزاج العملاء، معدل التحويل، وأكثر الأسئلة — تعرف متجرك بالأرقام.
+        - generic [ref=e134]:
+          - img [ref=e136]
+          - heading "يتعلّم ويتطوّر" [level=3] [ref=e139]
+          - paragraph [ref=e140]: يستفيد من كل محادثة، ويطبّق تصحيحاتك، وما يكررش نفس الخطأ.
+        - generic [ref=e141]:
+          - img [ref=e143]
+          - heading "عربي بطلاقة" [level=3] [ref=e146]
+          - paragraph [ref=e147]: يفهم لهجات الخليج ويرد بأسلوب ودّي طبيعي يناسب عملاءك.
+      - generic [ref=e148]:
+        - generic [ref=e150]:
+          - generic [ref=e151]:
+            - img [ref=e152]
+            - text: سرّي وآمن
+          - heading "يتعلّم من كل محادثة — ويوفّر تكلفتك" [level=3] [ref=e155]
+          - paragraph [ref=e156]: سلّابوت يلتقط تصحيحاتك ويطبّقها، ويرد على الأسئلة المتكررة بدون ذكاء اصطناعي — توفير يوصل ٪89 من التكلفة مع كل ما يتعلّم أكثر.
+          - button "ابدأ الآن" [ref=e157] [cursor=pointer]:
+            - text: ابدأ الآن
+            - img [ref=e158]
+        - generic [ref=e160]:
+          - generic [ref=e161]:
+            - generic [ref=e162]: 🧠
+            - paragraph [ref=e163]: يتذكر كل عميل
+          - generic [ref=e164]:
+            - generic [ref=e165]: ⚡
+            - paragraph [ref=e166]: رد لحظي
+          - generic [ref=e167]:
+            - generic [ref=e168]: 💰
+            - paragraph [ref=e169]: توفير ٪89
+          - generic [ref=e170]:
+            - generic [ref=e171]: 🔒
+            - paragraph [ref=e172]: بياناتك محمية
+    - generic [ref=e174]:
+      - generic [ref=e175]:
+        - heading "ابدأ في ٣ خطوات بسيطة" [level=2] [ref=e176]
+        - paragraph [ref=e177]: من الربط لأول عملية بيع — بدون تعقيد ولا أكواد.
+      - generic [ref=e178]:
+        - generic [ref=e179]:
+          - generic [ref=e180]: ١
+          - heading "اربط متجرك" [level=3] [ref=e181]
+          - paragraph [ref=e182]: تكامل مباشر مع سلة في دقيقة — بدون أكواد.
+        - generic [ref=e183]:
+          - generic [ref=e184]: ٢
+          - heading "درّب البوت" [level=3] [ref=e185]
+          - paragraph [ref=e186]: يقرأ منتجاتك وأسعارك تلقائياً، وتضيف لمساتك.
+        - generic [ref=e187]:
+          - generic [ref=e188]: ٣
+          - heading "ابدأ تبيع" [level=3] [ref=e189]
+          - paragraph [ref=e190]: البوت يرد، يسعّر، ويتمّ الطلبات — وانت مرتاح.
+    - generic [ref=e195]:
+      - heading "جاهز تبيع أكتر؟" [level=2] [ref=e196]
+      - paragraph [ref=e197]: فعّل سلّابوت على متجرك النهاردة، وخلّي مساعد ذكي يشتغل لك ٢٤ ساعة.
+      - generic [ref=e198]:
+        - button "ابدأ مجاناً" [ref=e199] [cursor=pointer]:
+          - text: ابدأ مجاناً
+          - img [ref=e200]
+        - button "تسجيل الدخول" [ref=e202] [cursor=pointer]
+    - generic [ref=e204]:
+      - generic [ref=e205]:
+        - img [ref=e207]
+        - generic [ref=e209]: سلّابوت
+      - generic [ref=e210]:
+        - link "المميزات" [ref=e211] [cursor=pointer]:
+          - /url: "#features"
+        - link "كيف يعمل" [ref=e212] [cursor=pointer]:
+          - /url: "#how"
+        - button "تسجيل الدخول" [ref=e213] [cursor=pointer]
+      - paragraph [ref=e214]: © 2026 سلّابوت — المساعد الذكي لمتاجر سلة

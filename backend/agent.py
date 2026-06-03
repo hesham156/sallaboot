@@ -12,6 +12,19 @@ import store_manager as sm
 import pricing_calculator as pc
 import store_brain as brain
 import smart_router
+import database as db
+
+
+def _amount_to_float(val) -> float:
+    """Parse a Salla amount (str like '2,254.00', int, or float) to a float."""
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(str(val).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return 0.0
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
@@ -1497,6 +1510,10 @@ class PrintingAgent:
                             # Persist cleared cart + checkout component before returning
                             # (protects against a crash between here and add_message)
                             await cs.flush(session_id)
+                            # ROI tracking — attribute this order's revenue to the bot
+                            await db.record_bot_order(
+                                self.store_id, session_id, order_ref,
+                                _amount_to_float(total_str), currency, kind="checkout")
 
                             reply = (
                                 f"✅ تم إنشاء الطلب رقم #{order_ref} بنجاح!\n"
@@ -1647,6 +1664,11 @@ class PrintingAgent:
                     amounts   = order.get("amounts", {})
                     total_str = (amounts.get("total") or {}).get("amount", f"{total_price:.2f}")
                     currency  = (amounts.get("total") or {}).get("currency", "SAR")
+
+                    # ROI tracking — custom quote→order revenue attributed to bot
+                    await db.record_bot_order(
+                        self.store_id, session_id, order_ref,
+                        _amount_to_float(total_str), currency, kind="quote")
 
                     if pay_url:
                         cs.set_last_component(session_id, {

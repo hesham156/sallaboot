@@ -187,6 +187,24 @@ async def _create_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_train_store_ts
                 ON bot_training (store_id, created_at DESC);
+
+            -- Orders the BOT created (checkout / quote→order). Powers the ROI
+            -- dashboard ("how much did the bot make you"). One row per order.
+            CREATE TABLE IF NOT EXISTS bot_orders (
+                id          BIGSERIAL PRIMARY KEY,
+                store_id    TEXT NOT NULL,
+                session_id  TEXT,
+                order_ref   TEXT,
+                amount      NUMERIC NOT NULL DEFAULT 0,
+                currency    TEXT NOT NULL DEFAULT 'SAR',
+                kind        TEXT NOT NULL DEFAULT 'checkout',  -- 'checkout' | 'quote'
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_bot_orders_store_ts
+                ON bot_orders (store_id, created_at DESC);
+            -- Avoid double-counting if the same order is recorded twice.
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_orders_unique
+                ON bot_orders (store_id, order_ref);
         """)
 
 
@@ -285,6 +303,113 @@ async def delete_training(training_id: int) -> tuple[bool, str | None]:
     except Exception as e:
         print(f"[db] delete_training error: {e}")
         return False, None
+
+
+# ── Bot ROI: orders the bot generated ───────────────────────────────────────
+
+async def record_bot_order(store_id: str, session_id: str, order_ref: str,
+                           amount: float, currency: str = "SAR",
+                           kind: str = "checkout") -> None:
+    """
+    Record an order the bot created, for the ROI dashboard. Idempotent on
+    (store_id, order_ref) so re-recording the same order doesn't double-count.
+    Best-effort — never raises.
+    """
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO bot_orders (store_id, session_id, order_ref, amount, currency, kind)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (store_id, order_ref) DO NOTHING
+                """,
+                store_id, session_id or "", str(order_ref or ""),
+                float(amount or 0), currency or "SAR", kind or "checkout",
+            )
+    except Exception as e:
+        print(f"[db] record_bot_order error: {e}")
+
+
+async def get_weekly_roi(store_id: str) -> dict:
+    """
+    Bot revenue + order counts for THIS week vs the PREVIOUS week, for the
+    weekly report's week-over-week comparison.
+    """
+    empty = {"rev_this": 0.0, "ord_this": 0, "rev_prev": 0.0, "ord_prev": 0, "currency": "SAR"}
+    if not _pool:
+        return empty
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                  COALESCE(SUM(amount) FILTER (WHERE created_at >= NOW() - interval '7 days'), 0) AS rev_this,
+                  COUNT(*)            FILTER (WHERE created_at >= NOW() - interval '7 days')        AS ord_this,
+                  COALESCE(SUM(amount) FILTER (WHERE created_at >= NOW() - interval '14 days'
+                                               AND created_at <  NOW() - interval '7 days'), 0)     AS rev_prev,
+                  COUNT(*)            FILTER (WHERE created_at >= NOW() - interval '14 days'
+                                               AND created_at <  NOW() - interval '7 days')         AS ord_prev,
+                  MAX(currency) AS currency
+                FROM bot_orders
+                WHERE store_id = $1
+                """,
+                store_id,
+            )
+        if not row:
+            return empty
+        return {
+            "rev_this": round(float(row["rev_this"] or 0), 2),
+            "ord_this": int(row["ord_this"] or 0),
+            "rev_prev": round(float(row["rev_prev"] or 0), 2),
+            "ord_prev": int(row["ord_prev"] or 0),
+            "currency": row["currency"] or "SAR",
+        }
+    except Exception as e:
+        print(f"[db] get_weekly_roi error: {e}")
+        return empty
+
+
+async def get_bot_roi(store_id: str, days: int = 30) -> dict:
+    """
+    Aggregate bot-generated revenue for the last `days`. Returns
+    {revenue, orders, currency, avg_order} for the window + all-time totals.
+    """
+    empty = {"revenue": 0.0, "orders": 0, "currency": "SAR", "avg_order": 0.0,
+             "revenue_all": 0.0, "orders_all": 0}
+    if not _pool:
+        return empty
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                  COALESCE(SUM(amount) FILTER (WHERE created_at >= NOW() - ($2 || ' days')::interval), 0) AS revenue,
+                  COUNT(*)            FILTER (WHERE created_at >= NOW() - ($2 || ' days')::interval)        AS orders,
+                  COALESCE(SUM(amount), 0) AS revenue_all,
+                  COUNT(*)                 AS orders_all,
+                  MAX(currency)            AS currency
+                FROM bot_orders
+                WHERE store_id = $1
+                """,
+                store_id, str(int(days)),
+            )
+        if not row:
+            return empty
+        revenue = float(row["revenue"] or 0)
+        orders  = int(row["orders"] or 0)
+        return {
+            "revenue":     round(revenue, 2),
+            "orders":      orders,
+            "currency":    row["currency"] or "SAR",
+            "avg_order":   round(revenue / orders, 2) if orders else 0.0,
+            "revenue_all": round(float(row["revenue_all"] or 0), 2),
+            "orders_all":  int(row["orders_all"] or 0),
+        }
+    except Exception as e:
+        print(f"[db] get_bot_roi error: {e}")
+        return empty
 
 
 # ── Conversation lookups by customer ────────────────────────────────────────
