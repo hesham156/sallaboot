@@ -1,11 +1,30 @@
 import { useEffect, useState } from 'react'
 import {
   Card, CardBody, CardHeader,
-  Button,
+  Button, Switch,
   Divider, Chip, Spinner,
 } from '@heroui/react'
 import { api, AIConfig, TokenStatus } from '../../api'
 import { TextField } from '../../components/ui'
+
+/* copy-to-clipboard helper */
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div>
+      <p className="text-xs font-semibold text-default-500 mb-1">{label}</p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 text-xs bg-content2 border border-divider rounded-lg px-3 py-2 text-foreground truncate font-mono" dir="ltr">{value}</code>
+        <button
+          onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+          className="text-xs font-bold text-teal-600 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 hover:bg-teal-100 whitespace-nowrap"
+        >
+          {copied ? 'تم النسخ ✓' : 'نسخ'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 interface Props { storeId: string }
 
@@ -48,6 +67,13 @@ export default function Settings({ storeId }: Props) {
   const [aiSaving, setAiSaving] = useState(false)
   const [aiMsg, setAiMsg] = useState('')
 
+  // WhatsApp channel
+  const [waEnabled, setWaEnabled] = useState(false)
+  const [waPhoneId, setWaPhoneId] = useState('')
+  const [waToken, setWaToken]     = useState('')
+  const [waSaving, setWaSaving]   = useState(false)
+  const [waMsg, setWaMsg]         = useState('')
+
   // Password
   const [curPass, setCurPass] = useState('')
   const [newPass, setNewPass] = useState('')
@@ -74,9 +100,27 @@ export default function Settings({ storeId }: Props) {
       setBotName(ai.bot_name || '')
       setModel(ai.ai_model || '')
       setStoreType((ai.store_type === 'printing' ? 'printing' : 'general'))
+      setWaEnabled(!!ai.whatsapp_enabled)
+      setWaPhoneId(ai.whatsapp_phone_id || '')
       setTokenStatus(tok)
     } catch (e) { console.error(e) }
     finally { setAiLoading(false) }
+  }
+
+  async function saveWhatsApp() {
+    setWaSaving(true); setWaMsg('')
+    try {
+      await api.setAI(storeId, {
+        whatsapp_enabled:  waEnabled,
+        whatsapp_phone_id: waPhoneId.trim(),
+        ...(waToken.trim() ? { whatsapp_token: waToken.trim() } : {}),
+      })
+      setWaMsg('✅ تم حفظ إعدادات واتساب')
+      setWaToken('')
+      loadSettings()
+    } catch (e: unknown) {
+      setWaMsg(e instanceof Error ? e.message : 'خطأ في الحفظ')
+    } finally { setWaSaving(false) }
   }
 
   async function saveAI() {
@@ -316,6 +360,62 @@ export default function Settings({ storeId }: Props) {
             </Button>
           </CardBody>
         )}
+      </Card>
+
+      {/* ════════════ WhatsApp channel ════════════ */}
+      <Card className="bg-content1 border border-divider shadow-sm">
+        <CardHeader className="px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 00-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1012 2zm0 18a8 8 0 01-4.1-1.1l-.3-.2-2.8.8.8-2.8-.2-.3A8 8 0 1112 20zm4.4-6c-.2-.1-1.4-.7-1.6-.8s-.4-.1-.5.1-.6.8-.7.9-.3.2-.5.1a6.5 6.5 0 01-1.9-1.2 7.3 7.3 0 01-1.4-1.7c-.1-.2 0-.4.1-.5l.4-.4.2-.4v-.4l-.7-1.7c-.2-.5-.4-.4-.5-.4h-.5a.9.9 0 00-.7.3 2.8 2.8 0 00-.9 2.1 4.9 4.9 0 001 2.6 11 11 0 004.3 3.8c2 .8 2 .5 2.4.5a2.5 2.5 0 001.6-1.1 2 2 0 00.2-1.1c-.1-.1-.3-.2-.5-.3z"/></svg>
+            </span>
+            <h2 className="font-bold text-sm">قناة واتساب</h2>
+          </div>
+          <Chip size="sm" color={waEnabled && cfg.whatsapp_token ? 'success' : 'default'} variant="flat" className="font-bold">
+            {waEnabled && cfg.whatsapp_token ? 'مفعّل' : 'غير مفعّل'}
+          </Chip>
+        </CardHeader>
+        <Divider />
+        <CardBody className="px-5 py-6 space-y-5">
+          <p className="text-sm text-default-500 leading-relaxed">
+            خلّي البوت يرد على عملائك في واتساب بنفس ذكائه. محتاج حساب WhatsApp Business من Meta.
+            انسخ الرابط والكود تحت وحطّهم في إعدادات الـ Webhook عند Meta، وأدخل بياناتك هنا.
+          </p>
+
+          <div className="flex items-center justify-between bg-content2 rounded-xl px-4 py-3 border border-divider">
+            <div>
+              <p className="text-sm font-bold text-foreground">تفعيل الرد على واتساب</p>
+              <p className="text-xs text-default-500">لما يكون مفعّل، البوت يرد تلقائياً على رسائل واتساب</p>
+            </div>
+            <Switch isSelected={waEnabled} onValueChange={setWaEnabled} color="success" />
+          </div>
+
+          <TextField label="Phone Number ID" hint="من Meta" value={waPhoneId} onChange={setWaPhoneId} placeholder="123456789012345" dir="ltr" />
+          <TextField
+            label="Access Token"
+            hint={cfg.whatsapp_token ? 'محفوظ — اتركه فارغاً للإبقاء' : 'من Meta'}
+            value={waToken} onChange={setWaToken} type="password"
+            placeholder={cfg.whatsapp_token ? '•••••••• (محفوظ)' : 'EAAG...'} dir="ltr"
+          />
+
+          {/* Webhook setup values to paste into Meta */}
+          <div className="space-y-3 pt-1">
+            <p className="text-xs font-bold text-default-600">📋 احفظ دول في إعدادات Webhook عند Meta:</p>
+            <CopyRow label="Callback URL" value={cfg.whatsapp_webhook || ''} />
+            <CopyRow label="Verify Token" value={cfg.whatsapp_verify_token || ''} />
+          </div>
+
+          {waMsg && (
+            <div className={`rounded-lg p-3 text-sm border ${
+              waMsg.startsWith('✅') ? 'bg-success/10 border-success/20 text-success' : 'bg-danger/10 border-danger/20 text-danger'
+            }`}>{waMsg}</div>
+          )}
+
+          <Button color="success" isLoading={waSaving} onPress={saveWhatsApp}
+            className="w-full font-bold h-11 bg-gradient-to-r from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/20 text-white">
+            {waSaving ? '' : 'حفظ إعدادات واتساب'}
+          </Button>
+        </CardBody>
       </Card>
 
       {/* ════════════ Token Status ════════════ */}

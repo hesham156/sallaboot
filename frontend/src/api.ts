@@ -379,6 +379,18 @@ export interface ConversationInsights {
   }
 }
 
+export interface WeeklyReport {
+  currency: string
+  revenue: number
+  revenue_delta: number
+  orders: number
+  orders_delta: number
+  conversations: number
+  conv_delta: number
+  avg_rating: number
+  top_topic: string
+}
+
 export interface ROIData {
   days: number
   currency: string
@@ -401,6 +413,11 @@ export interface AIConfig {
   bot_name: string
   provider: 'groq' | 'anthropic' | 'openai' | 'env'
   store_type: 'printing' | 'general'
+  whatsapp_enabled?: boolean
+  whatsapp_phone_id?: string
+  whatsapp_token?: string
+  whatsapp_webhook?: string
+  whatsapp_verify_token?: string
 }
 
 // ── AI Brain / store knowledge ─────────────────────────────────────────────

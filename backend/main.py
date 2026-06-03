@@ -375,6 +375,10 @@ class AIConfigRequest(BaseModel):
     ai_model:          Optional[str] = ""  # e.g. "gpt-4o", "llama-3.3-70b-versatile", "claude-sonnet-4-6"
     bot_name:          Optional[str] = ""
     store_type:        Optional[str] = None  # "printing" | "general" — gates printing features
+    # WhatsApp Cloud API (Meta) — per-store channel config
+    whatsapp_token:    Optional[str] = None  # access token (write-only; "" keeps existing)
+    whatsapp_phone_id: Optional[str] = None  # Phone Number ID
+    whatsapp_enabled:  Optional[bool] = None
 
 
 class PasswordChangeRequest(BaseModel):
@@ -776,6 +780,9 @@ async def get_ai_settings(store_id: str):
     if not store_type:
         store_type = "printing" if cfg.get("pricing_config") else "general"
 
+    # WhatsApp channel status + the values the merchant pastes into Meta.
+    import whatsapp as _wa
+    base = os.getenv("BASE_URL", "").rstrip("/")
     return {
         "groq_api_key":      "••••" if groq_set      else "",
         "anthropic_api_key": "••••" if anthropic_set else "",
@@ -784,6 +791,11 @@ async def get_ai_settings(store_id: str):
         "bot_name":          cfg.get("bot_name",  ""),
         "provider":          provider,
         "store_type":        store_type,
+        "whatsapp_enabled":   bool(cfg.get("whatsapp_enabled")),
+        "whatsapp_phone_id":  cfg.get("whatsapp_phone_id", ""),
+        "whatsapp_token":     "••••" if cfg.get("whatsapp_token") else "",
+        "whatsapp_webhook":   (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
+        "whatsapp_verify_token": _wa.VERIFY_TOKEN,
     }
 
 
@@ -816,6 +828,15 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
         st = req.store_type.strip().lower()
         if st in ("printing", "general"):
             config["store_type"] = st
+
+    # WhatsApp channel — only overwrite fields the frontend explicitly sends.
+    # Empty token string keeps the existing one (masked value round-trip).
+    if req.whatsapp_phone_id is not None:
+        config["whatsapp_phone_id"] = req.whatsapp_phone_id.strip()
+    if req.whatsapp_enabled is not None:
+        config["whatsapp_enabled"] = bool(req.whatsapp_enabled)
+    if req.whatsapp_token is not None and req.whatsapp_token.strip():
+        config["whatsapp_token"] = req.whatsapp_token.strip()
 
     # When a specific provider key is explicitly set, clear the other two
     # so only one provider is active at a time
@@ -1710,6 +1731,15 @@ async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyReque
     # so it never slows the reply.
     import bot_learning
     asyncio.create_task(bot_learning.capture_admin_correction(store_id, session_id, text))
+
+    # If this is a WhatsApp thread, also deliver the admin's reply to WhatsApp.
+    if session_id.startswith("wa:"):
+        import whatsapp as wa
+        cfg = sm.get_ai_config(store_id) or {}
+        token, phone_id = (cfg.get("whatsapp_token") or "").strip(), (cfg.get("whatsapp_phone_id") or "").strip()
+        if token and phone_id:
+            asyncio.create_task(wa.send_text(token, phone_id, session_id[3:], text))
+
     return {"status": "sent", "message": msg}
 
 
@@ -2691,6 +2721,87 @@ async def chat_poll(session_id: str):
     pending = cs.pop_pending_for_widget(session_id)
     bot_on  = cs.is_bot_enabled(session_id)
     return {"messages": pending, "bot_enabled": bot_on}
+
+
+# ── WhatsApp Cloud API webhook ─────────────────────────────────────────────────
+@app.get("/whatsapp/webhook")
+async def whatsapp_verify(request: Request):
+    """Meta webhook verification handshake (GET with hub.* query params)."""
+    import whatsapp as wa
+    qp        = request.query_params
+    challenge = wa.verify_challenge(
+        qp.get("hub.mode", ""), qp.get("hub.verify_token", ""), qp.get("hub.challenge", ""))
+    if challenge is not None:
+        # Meta expects the raw challenge as text/plain
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(challenge)
+    raise HTTPException(403, "verify token mismatch")
+
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_incoming(request: Request):
+    """
+    Receive WhatsApp messages, route each to the right store's bot, and reply.
+    Returns 200 immediately (Meta requires a fast ack) and processes the bot
+    reply in the background.
+    """
+    import whatsapp as wa
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored"}
+    for msg in wa.extract_messages(payload):
+        asyncio.create_task(_handle_whatsapp_message(msg))
+    return {"status": "received"}
+
+
+async def _handle_whatsapp_message(msg: dict):
+    """Route one inbound WhatsApp message → bot → send reply. Never raises."""
+    import whatsapp as wa
+    try:
+        phone_id = msg.get("phone_id", "")
+        sender   = msg.get("from", "")
+        text     = msg.get("text", "")
+        if not (phone_id and sender and text):
+            return
+
+        store_id = sm.find_store_by_whatsapp_phone_id(phone_id)
+        if not store_id:
+            print(f"[whatsapp] no store for phone_id={phone_id!r} — ignoring")
+            return
+
+        cfg   = sm.get_ai_config(store_id) or {}
+        token = (cfg.get("whatsapp_token") or "").strip()
+        if not cfg.get("whatsapp_enabled") or not token:
+            return
+
+        # Stable per-customer session keyed by phone, so the thread persists and
+        # shows in the admin inbox just like a widget chat.
+        session_id = f"wa:{sender}"
+        await cs.restore_to_memory(session_id)
+        cs.get_or_create(session_id, store_id)
+        # Record the customer's WhatsApp identity (name + phone) once.
+        info = cs.get_customer_info(session_id) or {}
+        if not info.get("phone"):
+            cs.set_customer_info(session_id, {
+                "name":  msg.get("name", "") or info.get("name", ""),
+                "phone": sender,
+                "channel": "whatsapp",
+            })
+
+        if not cs.is_bot_enabled(session_id):
+            # Admin took this thread over — just record the message, don't auto-reply.
+            await cs.add_message(session_id, "user", text, store_id)
+            return
+
+        agent = sm.get_agent(store_id)
+        if agent is None:
+            return
+        reply = await agent.chat(message=text, session_id=session_id)
+        await wa.send_text(token, phone_id, sender, reply)
+        print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
+    except Exception as exc:
+        print(f"[whatsapp] handle error: {exc}")
 
 
 @app.get("/chat/history")

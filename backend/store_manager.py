@@ -359,6 +359,22 @@ def get_ai_config(store_id: str) -> dict:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("ai_config", {})
 
 
+def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
+    """
+    Reverse-lookup the store that owns a given WhatsApp Phone Number ID, so an
+    incoming webhook message is routed to the right store's bot. Returns "" if
+    no store has that phone_id configured.
+    """
+    pid = str(phone_id or "").strip()
+    if not pid:
+        return ""
+    for sid, entry in _registry.items():
+        cfg = (entry.get("tokens", {}) or {}).get("ai_config", {}) or {}
+        if str(cfg.get("whatsapp_phone_id", "")).strip() == pid:
+            return str(sid)
+    return ""
+
+
 def set_ai_config(store_id: str, config: dict):
     """Save AI settings for a store and reset its agent."""
     store_id = str(store_id)
