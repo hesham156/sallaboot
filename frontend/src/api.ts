@@ -123,6 +123,8 @@ export const api = {
     get<ConversationInsights>(`/admin/${storeId}/analytics/insights`),
   roi: (storeId: string, days = 30) =>
     get<ROIData>(`/admin/${storeId}/analytics/roi?days=${days}`),
+  weekly: (storeId: string) =>
+    get<WeeklyReport>(`/admin/${storeId}/analytics/weekly`),
 
   // AI settings
   getAI: (storeId: string) =>
