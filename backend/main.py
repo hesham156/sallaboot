@@ -280,6 +280,17 @@ _PROTECTED_RE = _re.compile(
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
+# Paths that an "agent" employee MUST NOT reach (manager + owner only).
+# Conversations / orders / abandoned-carts / info / bot status stay open
+# because that's the customer-service work they're hired to do.
+_MANAGER_ONLY_RE = _re.compile(
+    r"^/admin/(?!stores$|auth/)[^/]+/(settings|analytics|sync|products|debug|webhooks|training|brain|pricing)"
+)
+# Owner-only paths (blocks BOTH agents and managers).
+_OWNER_ONLY_RE = _re.compile(
+    r"^/admin/(?!stores$|auth/)[^/]+/(employees|settings/password)"
+)
+
 
 @app.middleware("http")
 async def admin_auth_middleware(request: Request, call_next):
@@ -295,6 +306,21 @@ async def admin_auth_middleware(request: Request, call_next):
             return JSONResponse({"detail": "يرجى تسجيل الدخول"}, status_code=401)
         if not claims.get("su") and claims.get("s") != store_id:
             return JSONResponse({"detail": "غير مصرح لك بالوصول"}, status_code=403)
+
+        # Role-based gating (super always passes). The store owner has no
+        # "eid" claim; managers have eid+er=manager; agents have eid+er=agent.
+        if not claims.get("su") and "eid" in claims:
+            role = claims.get("er", "agent")
+            # Owner-only paths block everyone except the store owner
+            if _OWNER_ONLY_RE.match(path):
+                return JSONResponse(
+                    {"detail": "هذا الإجراء مخصّص لمالك المتجر"}, status_code=403,
+                )
+            # Manager-only paths block agents
+            if role == "agent" and _MANAGER_ONLY_RE.match(path):
+                return JSONResponse(
+                    {"detail": "صلاحيتك لا تسمح بهذا الإجراء"}, status_code=403,
+                )
 
     # Super admin: protect store list
     elif _SUPER_PROTECTED_RE.match(path):
@@ -1973,6 +1999,22 @@ def _require_store_owner(request: Request, store_id: str):
         return
     if "eid" in claims:
         raise HTTPException(403, "هذا الإجراء مخصّص لمالك المتجر")
+
+
+def _require_manager_or_owner(request: Request):
+    """Allow super, store owner (no eid), or manager-role employees.
+    Rejects agent-role employees so they can't reach settings / training /
+    AI brain / analytics endpoints by hitting the API directly.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if claims.get("su"):
+        return
+    if "eid" not in claims:
+        return  # store owner
+    role = claims.get("er", "agent")
+    if role != "manager":
+        raise HTTPException(403, "صلاحيتك لا تسمح بهذا الإجراء")
 
 
 @app.get("/admin/{store_id}/employees")

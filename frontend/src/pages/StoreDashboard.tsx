@@ -1,7 +1,7 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { useNavigate, useParams, Routes, Route, useLocation } from 'react-router-dom'
 import { Avatar, Spinner } from '@heroui/react'
-import { api, StoreInfo, clearAuth, getIsSuper } from '../api'
+import { api, StoreInfo, clearAuth, getIsSuper, getEmployee } from '../api'
 
 // Lazy-load each page so the initial bundle stays small. Heavy deps like
 // recharts (Analytics/Overview) only download when that page is opened.
@@ -33,7 +33,23 @@ function Icon({ paths, size = 16, className = '' }: {
   )
 }
 
-const NAV_ITEMS = [
+// Role-based access:
+//   owner   = store owner (no employee in token)
+//   manager = employee with role='manager'
+//   agent   = employee with role='agent'  → customer-service only
+// `roles` lists who can see/access the item. Omit → everyone.
+type Role = 'owner' | 'manager' | 'agent'
+
+const NAV_ITEMS: Array<{
+  key: string
+  label: string
+  icon: string[]
+  activeColor: string
+  activeBg: string
+  activeBorder: string
+  printingOnly?: boolean
+  roles?: Role[]
+}> = [
   {
     key: '',
     label: 'نظرة عامة',
@@ -57,6 +73,7 @@ const NAV_ITEMS = [
     activeColor: 'text-emerald-400',
     activeBg: 'bg-emerald-500/10',
     activeBorder: 'border-r-emerald-500',
+    roles: ['owner', 'manager'],
   },
   {
     key: 'orders',
@@ -81,6 +98,7 @@ const NAV_ITEMS = [
     activeColor: 'text-pink-400',
     activeBg: 'bg-pink-500/10',
     activeBorder: 'border-r-pink-500',
+    roles: ['owner', 'manager'],
   },
   {
     key: 'pricing',
@@ -89,7 +107,8 @@ const NAV_ITEMS = [
     activeColor: 'text-cyan-400',
     activeBg: 'bg-cyan-500/10',
     activeBorder: 'border-r-cyan-500',
-    printingOnly: true,   // hidden for non-printing stores
+    printingOnly: true,
+    roles: ['owner', 'manager'],
   },
   {
     key: 'brain',
@@ -98,6 +117,7 @@ const NAV_ITEMS = [
     activeColor: 'text-purple-400',
     activeBg: 'bg-purple-500/10',
     activeBorder: 'border-r-purple-500',
+    roles: ['owner', 'manager'],
   },
   {
     key: 'employees',
@@ -106,6 +126,7 @@ const NAV_ITEMS = [
     activeColor: 'text-amber-400',
     activeBg: 'bg-amber-500/10',
     activeBorder: 'border-r-amber-500',
+    roles: ['owner'],
   },
   {
     key: 'training',
@@ -114,6 +135,7 @@ const NAV_ITEMS = [
     activeColor: 'text-fuchsia-400',
     activeBg: 'bg-fuchsia-500/10',
     activeBorder: 'border-r-fuchsia-500',
+    roles: ['owner', 'manager'],
   },
   {
     key: 'settings',
@@ -122,8 +144,33 @@ const NAV_ITEMS = [
     activeColor: 'text-slate-600',
     activeBg: 'bg-slate-500/10',
     activeBorder: 'border-r-slate-400',
+    roles: ['owner'],
   },
 ]
+
+/** Resolve the current user's role from the persisted session token. */
+function getCurrentRole(): Role {
+  const emp = getEmployee()
+  if (!emp) return 'owner'
+  return emp.role === 'manager' ? 'manager' : 'agent'
+}
+
+/** Shown when a user opens a route their role can't access. */
+function Forbidden() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6" dir="rtl">
+      <div className="w-16 h-16 rounded-3xl bg-red-500/10 text-red-500 flex items-center justify-center mb-4">
+        <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+          <path d="M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z" />
+        </svg>
+      </div>
+      <p className="text-base font-semibold text-foreground">صلاحيتك لا تسمح بفتح هذه الصفحة</p>
+      <p className="text-xs text-slate-500 mt-1">تواصل مع مالك المتجر لو احتجت وصولاً إضافياً.</p>
+    </div>
+  )
+}
 
 export default function StoreDashboard() {
   const { storeId = '' } = useParams<{ storeId: string }>()
@@ -138,6 +185,10 @@ export default function StoreDashboard() {
   const basePath     = `/store/${storeId}`
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
   const activeKey    = NAV_ITEMS.find(n => n.key === relativePath)?.key ?? ''
+  const employee     = getEmployee()
+  const role         = getCurrentRole()
+  const canSee = (item: { roles?: Role[] }) =>
+    !item.roles || item.roles.includes(role)
 
   useEffect(() => { loadStore() }, [storeId])
 
@@ -226,11 +277,28 @@ export default function StoreDashboard() {
               <p className="text-xs text-default-400 font-mono truncate">{store.store_id}</p>
             </div>
           </div>
+          {/* Employee identity badge — only shown when logged in as an employee */}
+          {employee && (
+            <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                {employee.name.trim().charAt(0) || '?'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-amber-700 truncate leading-tight">{employee.name}</p>
+                <p className="text-[10px] text-amber-600/80">
+                  {role === 'manager' ? 'مدير' : 'موظف خدمة عملاء'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Navigation ── */}
         <nav className="flex-1 py-2 overflow-y-auto">
-          {NAV_ITEMS.filter(item => !('printingOnly' in item) || storeType === 'printing').map(item => {
+          {NAV_ITEMS
+            .filter(item => !item.printingOnly || storeType === 'printing')
+            .filter(canSee)
+            .map(item => {
             const isActive = activeKey === item.key
             return (
               <button
@@ -322,15 +390,26 @@ export default function StoreDashboard() {
           <Routes>
             <Route index element={<Overview storeId={storeId} store={store} />} />
             <Route path="conversations/*" element={<Conversations storeId={storeId} />} />
-            <Route path="products"        element={<Products storeId={storeId} />} />
             <Route path="orders"          element={<Orders storeId={storeId} />} />
             <Route path="carts"           element={<AbandonedCarts storeId={storeId} />} />
-            <Route path="analytics"       element={<Analytics storeId={storeId} />} />
-            <Route path="pricing"         element={<Pricing storeId={storeId} />} />
-            <Route path="brain"           element={<Brain storeId={storeId} />} />
-            <Route path="training"        element={<Training storeId={storeId} />} />
-            <Route path="employees"       element={<Employees storeId={storeId} />} />
-            <Route path="settings"        element={<Settings storeId={storeId} />} />
+
+            {/* Manager + owner only */}
+            {(role === 'owner' || role === 'manager') && <>
+              <Route path="products"  element={<Products  storeId={storeId} />} />
+              <Route path="analytics" element={<Analytics storeId={storeId} />} />
+              <Route path="pricing"   element={<Pricing   storeId={storeId} />} />
+              <Route path="brain"     element={<Brain     storeId={storeId} />} />
+              <Route path="training"  element={<Training  storeId={storeId} />} />
+            </>}
+
+            {/* Owner only */}
+            {role === 'owner' && <>
+              <Route path="employees" element={<Employees storeId={storeId} />} />
+              <Route path="settings"  element={<Settings  storeId={storeId} />} />
+            </>}
+
+            {/* Catch-all: redirect forbidden paths back to the dashboard root */}
+            <Route path="*" element={<Forbidden />} />
           </Routes>
         </Suspense>
       </main>
