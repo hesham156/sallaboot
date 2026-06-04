@@ -292,6 +292,9 @@ export const api = {
   listEmployees: (storeId: string) =>
     get<{ employees: Employee[]; count: number }>(`/admin/${storeId}/employees`),
 
+  employeesRatings: (storeId: string) =>
+    get<EmployeesRatingsResponse>(`/admin/${storeId}/employees/ratings`),
+
   createEmployee: (storeId: string, payload: EmployeeCreateInput) =>
     post<{ id: number; name: string; email: string; role: string }>(
       `/admin/${storeId}/employees`, payload,
@@ -380,6 +383,38 @@ export interface EmployeeUpdateInput {
   password?: string
   role?: string
   active?: boolean
+}
+
+export interface EmployeeRatingEntry {
+  session_id:    string
+  rating:        number
+  comment:       string
+  rated_at:      string
+  customer_name: string
+}
+
+export interface EmployeeRatingStats {
+  employee_id:  number
+  name:         string
+  email:        string
+  role:         string
+  active:       boolean
+  count:        number
+  avg:          number
+  distribution: number[]   // length 5: index 0 = rating 1, … 4 = rating 5
+  recent:       EmployeeRatingEntry[]
+}
+
+export interface UnattributedRatings {
+  count:        number
+  avg:          number
+  distribution: number[]
+  recent:       EmployeeRatingEntry[]
+}
+
+export interface EmployeesRatingsResponse {
+  employees:    EmployeeRatingStats[]
+  unattributed: UnattributedRatings
 }
 
 export interface Conversation extends ConvSummary {

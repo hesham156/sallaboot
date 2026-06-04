@@ -3,7 +3,10 @@ import {
   Button, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
   Select, SelectItem, Spinner, Switch, useDisclosure,
 } from '@heroui/react'
-import { api, Employee, EmployeeCreateInput, getEmployee } from '../../api'
+import {
+  api, Employee, EmployeeCreateInput, EmployeeRatingStats,
+  UnattributedRatings, getEmployee,
+} from '../../api'
 
 interface Props { storeId: string }
 
@@ -36,11 +39,31 @@ const ROLE_OPTIONS = [
   { key: 'manager', label: 'مدير' },
 ]
 
+function formatRatedAt(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleString('ar-SA', {
+    day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function ratingColor(avg: number): string {
+  if (avg >= 4.5) return 'text-emerald-500'
+  if (avg >= 3.5) return 'text-teal-500'
+  if (avg >= 2.5) return 'text-amber-500'
+  if (avg > 0)    return 'text-red-500'
+  return 'text-slate-400'
+}
+
 export default function Employees({ storeId }: Props) {
   const [items, setItems]     = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr]         = useState('')
   const [editing, setEditing] = useState<Employee | null>(null)
+  const [ratings, setRatings] = useState<Record<number, EmployeeRatingStats>>({})
+  const [unattributed, setUnattributed] = useState<UnattributedRatings | null>(null)
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
 
   // Form state shared by create + edit
   const [form, setForm] = useState<EmployeeCreateInput>({
@@ -58,8 +81,17 @@ export default function Employees({ storeId }: Props) {
   async function load() {
     setLoading(true); setErr('')
     try {
-      const res = await api.listEmployees(storeId)
-      setItems(res.employees)
+      const [empRes, rateRes] = await Promise.all([
+        api.listEmployees(storeId),
+        api.employeesRatings(storeId).catch(() => null),
+      ])
+      setItems(empRes.employees)
+      if (rateRes) {
+        const map: Record<number, EmployeeRatingStats> = {}
+        rateRes.employees.forEach(r => { map[r.employee_id] = r })
+        setRatings(map)
+        setUnattributed(rateRes.unattributed)
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'تعذر تحميل قائمة الموظفين')
     } finally { setLoading(false) }
@@ -199,40 +231,127 @@ export default function Employees({ storeId }: Props) {
           )}
         </div>
       ) : (
+        <>
         <div className="grid gap-3 md:grid-cols-2">
-          {items.map(emp => (
-            <div
-              key={emp.id}
-              className={`bg-content1 border rounded-2xl p-4 flex items-start gap-3 transition-all ${
-                emp.active ? 'border-divider hover:border-amber-500/40'
-                           : 'border-divider opacity-60'
-              }`}
-            >
-              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold flex items-center justify-center flex-shrink-0">
-                {emp.name.trim().charAt(0) || '?'}
-              </div>
+          {items.map(emp => {
+            const stats = ratings[emp.id]
+            const isExpanded = !!expanded[emp.id]
+            return (
+              <div
+                key={emp.id}
+                className={`bg-content1 border rounded-2xl p-4 transition-all ${
+                  emp.active ? 'border-divider hover:border-amber-500/40'
+                             : 'border-divider opacity-60'
+                }`}
+              >
+                {/* Top row: avatar + identity + actions */}
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold flex items-center justify-center flex-shrink-0">
+                    {emp.name.trim().charAt(0) || '?'}
+                  </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                  <p className="text-sm font-bold text-foreground truncate">{emp.name}</p>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                    emp.role === 'manager'
-                      ? 'bg-violet-500/15 text-violet-500'
-                      : 'bg-blue-500/15 text-blue-500'
-                  }`}>
-                    {emp.role === 'manager' ? 'مدير' : 'موظف'}
-                  </span>
-                  {!emp.active && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-slate-500/15 text-slate-500">
-                      موقوف
-                    </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                      <p className="text-sm font-bold text-foreground truncate">{emp.name}</p>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                        emp.role === 'manager'
+                          ? 'bg-violet-500/15 text-violet-500'
+                          : 'bg-blue-500/15 text-blue-500'
+                      }`}>
+                        {emp.role === 'manager' ? 'مدير' : 'موظف'}
+                      </span>
+                      {!emp.active && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-slate-500/15 text-slate-500">
+                          موقوف
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 truncate" dir="ltr">{emp.email}</p>
+                    <p className="text-[10px] text-slate-600 mt-1">أُضيف {relTime(emp.created_at)}</p>
+                  </div>
+                </div>
+
+                {/* Ratings strip */}
+                <div className="mt-3 border-t border-divider pt-3">
+                  {stats && stats.count > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className={`text-2xl font-black ${ratingColor(stats.avg)}`}>
+                            {stats.avg.toFixed(1)}
+                          </span>
+                          <span className="text-xs text-slate-500">/ 5</span>
+                          <span className="text-[11px] text-slate-500 mr-2">
+                            ({stats.count} تقييم)
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setExpanded({ ...expanded, [emp.id]: !isExpanded })}
+                          className="text-[11px] font-bold text-amber-600 hover:text-amber-500"
+                        >
+                          {isExpanded ? 'إخفاء' : 'التفاصيل'}
+                        </button>
+                      </div>
+
+                      {/* Tiny histogram bar — 5 stars left → 1 right */}
+                      <div className="flex items-center gap-1 h-6">
+                        {[5, 4, 3, 2, 1].map(star => {
+                          const n = stats.distribution[star - 1] || 0
+                          const pct = stats.count ? (n / stats.count) * 100 : 0
+                          const barClass =
+                            star >= 4 ? 'bg-emerald-500' :
+                            star === 3 ? 'bg-amber-500' :
+                                          'bg-red-500'
+                          return (
+                            <div
+                              key={star}
+                              className="flex-1 flex flex-col items-center gap-0.5"
+                              title={`${star} نجوم — ${n} تقييم`}
+                            >
+                              <div className="w-full h-3 rounded-sm bg-content2 overflow-hidden relative">
+                                <div
+                                  className={`absolute inset-y-0 right-0 ${barClass}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="text-[9px] text-slate-500">{star}★</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Recent ratings details */}
+                      {isExpanded && stats.recent.length > 0 && (
+                        <div className="mt-3 space-y-2 max-h-56 overflow-y-auto">
+                          {stats.recent.map(r => (
+                            <div
+                              key={r.session_id + r.rated_at}
+                              className="bg-content2/60 rounded-xl px-3 py-2 text-xs"
+                            >
+                              <div className="flex items-center justify-between gap-2 mb-0.5">
+                                <span className="font-bold text-amber-500">
+                                  {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
+                                </span>
+                                <span className="text-[10px] text-slate-500">{formatRatedAt(r.rated_at)}</span>
+                              </div>
+                              {r.customer_name && (
+                                <p className="text-[11px] text-slate-500">من: {r.customer_name}</p>
+                              )}
+                              {r.comment && r.comment !== `CSAT: ${stats.name}` && r.comment !== 'CSAT' && (
+                                <p className="text-[11px] text-foreground mt-1">{r.comment}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-slate-500">لا توجد تقييمات لهذا الموظف بعد.</p>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 truncate" dir="ltr">{emp.email}</p>
-                <p className="text-[10px] text-slate-600 mt-1">أُضيف {relTime(emp.created_at)}</p>
 
                 {isOwner && (
-                  <div className="flex items-center gap-1.5 mt-3">
+                  <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-divider">
                     <Button
                       size="sm" variant="flat"
                       onPress={() => openEdit(emp)}
@@ -259,9 +378,27 @@ export default function Employees({ storeId }: Props) {
                   </div>
                 )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
+
+        {/* Unattributed ratings summary (legacy rating-bar or pre-flow ratings) */}
+        {unattributed && unattributed.count > 0 && (
+          <div className="mt-6 bg-content2/40 border border-divider rounded-2xl p-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-sm font-bold text-foreground">
+                تقييمات غير منسوبة لموظف
+              </p>
+              <span className="text-xs text-slate-500">
+                {unattributed.count} تقييم · متوسط {unattributed.avg.toFixed(1)}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              هذه تقييمات وصلت قبل إضافة نظام الموظفين أو من شريط التقييم العام في الويدجت.
+            </p>
+          </div>
+        )}
+        </>
       )}
 
       {/* Create/edit modal */}

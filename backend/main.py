@@ -2025,6 +2025,94 @@ async def list_store_employees(store_id: str):
     return {"employees": rows, "count": len(rows)}
 
 
+@app.get("/admin/{store_id}/employees/ratings")
+async def store_employees_ratings(store_id: str):
+    """
+    Per-employee CSAT aggregation. Walks every conversation in the store,
+    groups ratings by `rating_employee_id` (stamped at /chat/rate time
+    from the CSAT message meta), and returns avg + count + the histogram
+    + last 10 detailed ratings for each employee.
+
+    Ratings on conversations that don't carry an employee id (legacy
+    rating bar, or rated before the CSAT flow) land in `unattributed`.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    employees = await db.list_employees(store_id)
+    stats: dict = {}
+    for e in employees:
+        stats[int(e["id"])] = {
+            "employee_id":  int(e["id"]),
+            "name":         e["name"],
+            "email":        e["email"],
+            "role":         e.get("role", "agent"),
+            "active":       bool(e["active"]),
+            "count":        0,
+            "_sum":         0,
+            "avg":          0.0,
+            "distribution": [0, 0, 0, 0, 0],  # buckets for 1..5
+            "recent":       [],
+        }
+
+    unattributed = {
+        "count": 0, "_sum": 0, "avg": 0.0,
+        "distribution": [0, 0, 0, 0, 0],
+        "recent": [],
+    }
+
+    convs = await cs.get_all_conversations_for_store(store_id)
+    for sid, conv in convs.items():
+        rating = conv.get("rating")
+        try:
+            r = int(rating) if rating is not None else 0
+        except (TypeError, ValueError):
+            r = 0
+        if not (1 <= r <= 5):
+            continue
+
+        eid = conv.get("rating_employee_id")
+        cust = conv.get("customer_info") or {}
+        entry = {
+            "session_id":    sid,
+            "rating":        r,
+            "comment":       conv.get("rating_comment", "") or "",
+            "rated_at":      conv.get("rated_at", conv.get("last_activity", "")),
+            "customer_name": cust.get("name", ""),
+        }
+
+        bucket = stats.get(int(eid)) if eid else None
+        if bucket:
+            bucket["count"]               += 1
+            bucket["_sum"]                += r
+            bucket["distribution"][r - 1] += 1
+            bucket["recent"].append(entry)
+        else:
+            unattributed["count"]               += 1
+            unattributed["_sum"]                += r
+            unattributed["distribution"][r - 1] += 1
+            unattributed["recent"].append(entry)
+
+    for s in stats.values():
+        s["avg"] = round(s["_sum"] / s["count"], 2) if s["count"] else 0.0
+        s["recent"].sort(key=lambda x: x["rated_at"], reverse=True)
+        s["recent"] = s["recent"][:10]
+        del s["_sum"]
+
+    unattributed["avg"] = (
+        round(unattributed["_sum"] / unattributed["count"], 2)
+        if unattributed["count"] else 0.0
+    )
+    unattributed["recent"].sort(key=lambda x: x["rated_at"], reverse=True)
+    unattributed["recent"] = unattributed["recent"][:10]
+    del unattributed["_sum"]
+
+    return {
+        "employees":    sorted(stats.values(), key=lambda x: x["count"], reverse=True),
+        "unattributed": unattributed,
+    }
+
+
 @app.post("/admin/{store_id}/employees")
 async def create_store_employee(
     store_id: str,
@@ -3046,11 +3134,31 @@ async def chat(req: ChatRequest):
 
 @app.post("/chat/rate")
 async def chat_rate(req: RateRequest):
-    """Customer rates a conversation 1-5 stars."""
+    """Customer rates a conversation 1-5 stars.
+
+    If the rating answers a CSAT survey we posted at end-of-chat, stamp the
+    target employee's id/name onto the conversation so the per-agent
+    ratings dashboard can attribute it. Scans the last CSAT message in the
+    transcript (added by /end) and lifts target_agent_id from its meta.
+    """
     if not 1 <= req.rating <= 5:
         raise HTTPException(400, "التقييم يجب أن يكون بين 1 و 5")
     await cs.restore_to_memory(req.session_id)
     await cs.set_rating(req.session_id, req.rating, req.comment)
+
+    conv = cs.all_conversations().get(req.session_id)
+    if conv:
+        # Walk newest → oldest for the most-recent CSAT prompt
+        for m in reversed(conv.get("messages", [])):
+            meta = m.get("meta") if isinstance(m, dict) else None
+            if isinstance(meta, dict) and meta.get("kind") == "csat":
+                conv["rating_employee_id"]   = meta.get("target_agent_id")
+                conv["rating_employee_name"] = meta.get("target_agent_name", "")
+                conv["rated_at"]             = _dt.datetime.utcnow().isoformat()
+                cs.mark_dirty(req.session_id)
+                await cs.flush(req.session_id)
+                break
+
     return {"status": "ok", "message": "شكراً لتقييمك! 😊"}
 
 
