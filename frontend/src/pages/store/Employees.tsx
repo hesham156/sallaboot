@@ -277,45 +277,54 @@ export default function Employees({ storeId }: Props) {
                   {editing ? 'اترك كلمة المرور فارغة إذا لم ترد تغييرها' : 'سيستخدم البريد وكلمة المرور لتسجيل الدخول'}
                 </span>
               </ModalHeader>
-              <ModalBody className="space-y-3" dir="rtl">
+              <ModalBody className="space-y-4 pt-2" dir="rtl">
                 <Input
                   label="الاسم"
+                  labelPlacement="outside"
                   placeholder="مثلاً: شروق"
                   value={form.name}
                   onValueChange={v => setForm({ ...form, name: v })}
                   variant="bordered"
+                  classNames={{ label: 'text-xs font-semibold text-slate-600' }}
                 />
                 <Input
                   label="البريد الإلكتروني"
+                  labelPlacement="outside"
                   type="email"
                   placeholder="agent@store.com"
                   value={form.email}
                   onValueChange={v => setForm({ ...form, email: v })}
                   variant="bordered"
+                  classNames={{ label: 'text-xs font-semibold text-slate-600', input: 'text-left', inputWrapper: 'text-left' }}
                 />
                 <Input
                   label={editing ? 'كلمة مرور جديدة (اختياري)' : 'كلمة المرور'}
+                  labelPlacement="outside"
                   type="password"
                   placeholder="6 أحرف فأكثر"
                   value={form.password}
                   onValueChange={v => setForm({ ...form, password: v })}
                   variant="bordered"
+                  classNames={{ label: 'text-xs font-semibold text-slate-600' }}
                 />
                 <Select
                   label="الدور"
+                  labelPlacement="outside"
+                  placeholder="اختر الدور"
                   selectedKeys={[form.role || 'agent']}
                   onSelectionChange={keys => {
                     const v = Array.from(keys)[0] as string
                     setForm({ ...form, role: v })
                   }}
                   variant="bordered"
+                  classNames={{ label: 'text-xs font-semibold text-slate-600' }}
                 >
                   {ROLE_OPTIONS.map(opt => (
                     <SelectItem key={opt.key}>{opt.label}</SelectItem>
                   ))}
                 </Select>
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-sm">مفعّل</span>
+                <div className="flex items-center justify-between px-1 pt-1">
+                  <span className="text-sm font-semibold text-slate-700">حساب مفعّل</span>
                   <Switch
                     isSelected={form.active !== false}
                     onValueChange={v => setForm({ ...form, active: v })}
