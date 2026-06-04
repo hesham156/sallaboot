@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Spinner, Progress, Avatar, Chip } from '@heroui/react'
-import { api, Analytics, ROIData, StoreInfo } from '../../api'
+import { api, Analytics, ROIData, WeeklyReport, StoreInfo } from '../../api'
 
 interface Props { storeId: string; store: StoreInfo }
 
@@ -49,6 +49,8 @@ function StatCard({ label, value, sub, icon, color }: {
 export default function Overview({ storeId, store }: Props) {
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
   const [roi, setRoi]             = useState<ROIData | null>(null)
+  const [weekly, setWeekly]       = useState<WeeklyReport | null>(null)
+  const [copied, setCopied]       = useState(false)
   const [syncing, setSyncing]     = useState(false)
   const [syncMsg, setSyncMsg]     = useState('')
   const [loading, setLoading]     = useState(true)
@@ -58,15 +60,34 @@ export default function Overview({ storeId, store }: Props) {
   async function loadAnalytics() {
     setLoading(true)
     try {
-      const [a, r] = await Promise.all([
+      const [a, r, w] = await Promise.all([
         api.analytics(storeId),
         api.roi(storeId, 30).catch(() => null),
+        api.weekly(storeId).catch(() => null),
       ])
       setAnalytics(a)
       setRoi(r)
+      setWeekly(w)
     }
     catch (e) { console.error(e) }
     finally { setLoading(false) }
+  }
+
+  function copyWeekly() {
+    if (!weekly) return
+    const cur = weekly.currency === 'SAR' ? 'ريال' : weekly.currency
+    const d = (n: number) => (n > 0 ? `▲${n}%` : n < 0 ? `▼${Math.abs(n)}%` : '—')
+    const report =
+      `📊 تقرير سلّابوت الأسبوعي — ${store.store_name}\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `💰 المبيعات: ${weekly.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${cur} (${d(weekly.revenue_delta)})\n` +
+      `📦 الطلبات: ${weekly.orders} (${d(weekly.orders_delta)})\n` +
+      `💬 المحادثات: ${weekly.conversations} (${d(weekly.conv_delta)})\n` +
+      (weekly.avg_rating ? `⭐ رضا العملاء: ${weekly.avg_rating}/5\n` : '') +
+      (weekly.top_topic ? `🔎 أكثر موضوع: ${weekly.top_topic}\n` : '') +
+      `━━━━━━━━━━━━━━━━━━\nبواسطة سلّابوت 🤖`
+    navigator.clipboard.writeText(report)
+    setCopied(true); setTimeout(() => setCopied(false), 1800)
   }
 
   async function handleSync() {
@@ -189,6 +210,49 @@ export default function Overview({ storeId, store }: Props) {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── Weekly report (week-over-week) ── */}
+          {weekly && (
+            <div className="rounded-3xl bg-content1 border border-divider p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
+                    <Icon paths="M9 17V7m4 10V11m4 6V9M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" size={18} />
+                  </span>
+                  <div>
+                    <h2 className="font-bold text-base text-foreground">تقرير الأسبوع</h2>
+                    <p className="text-xs text-default-500">مقارنة بالأسبوع اللي فات</p>
+                  </div>
+                </div>
+                <button onClick={copyWeekly}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-600 bg-teal-50 border border-teal-200 rounded-full px-4 py-2 hover:bg-teal-100 transition-colors">
+                  <Icon paths={['M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2', 'M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3']} size={14} />
+                  {copied ? 'تم النسخ ✓' : 'نسخ للمشاركة'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { l: 'المبيعات', v: `${weekly.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}`, sub: weekly.currency === 'SAR' ? 'ريال' : weekly.currency, d: weekly.revenue_delta },
+                  { l: 'الطلبات', v: weekly.orders, sub: 'طلب', d: weekly.orders_delta },
+                  { l: 'المحادثات', v: weekly.conversations, sub: 'محادثة', d: weekly.conv_delta },
+                  { l: 'رضا العملاء', v: weekly.avg_rating || '—', sub: weekly.avg_rating ? 'من 5 ⭐' : 'لا تقييمات', d: null as number | null },
+                ].map((s) => (
+                  <div key={s.l} className="bg-content2 rounded-2xl p-4 border border-divider">
+                    <p className="text-xs font-semibold text-default-500 mb-1.5">{s.l}</p>
+                    <p className="text-2xl font-black text-foreground leading-none">{s.v}<span className="text-xs font-semibold text-default-400 mr-1">{s.sub}</span></p>
+                    {s.d !== null && (
+                      <p className={`text-xs font-bold mt-2 ${s.d > 0 ? 'text-emerald-600' : s.d < 0 ? 'text-red-500' : 'text-default-400'}`}>
+                        {s.d > 0 ? `▲ ${s.d}%` : s.d < 0 ? `▼ ${Math.abs(s.d)}%` : '— ثابت'}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {weekly.top_topic && (
+                <p className="text-xs text-default-500 mt-4">🔎 أكثر موضوع سأل عنه العملاء هذا الأسبوع: <b className="text-foreground">{weekly.top_topic}</b></p>
+              )}
             </div>
           )}
 

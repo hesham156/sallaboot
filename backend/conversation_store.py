@@ -257,8 +257,14 @@ async def add_message(session_id: str, role: str, content: str, store_id: str = 
     conv["messages"].append(msg)
     conv["last_activity"] = _now()
     if role == "admin":
-        # Queue for widget polling
-        conv["pending_for_widget"].append({"content": content, "ts": msg["ts"]})
+        # Queue for widget polling — keep the legacy {content, ts} keys so
+        # the existing widget code keeps working, plus include role so a
+        # newer widget can branch on it.
+        conv["pending_for_widget"].append({
+            "role":    "admin",
+            "content": content,
+            "ts":      msg["ts"],
+        })
 
     # AWAIT the DB write — guarantees persistence before returning to caller
     try:

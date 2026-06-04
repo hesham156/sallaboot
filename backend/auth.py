@@ -55,13 +55,28 @@ def check_password(password: str, stored: str) -> bool:
 
 # ── Token creation / verification ─────────────────────────────────────────────
 
-def create_token(store_id: str, is_super: bool = False) -> str:
-    """Create a signed token for the given store."""
-    payload = {
+def create_token(
+    store_id: str,
+    is_super: bool = False,
+    employee_id: Optional[int] = None,
+    employee_name: str = "",
+    employee_role: str = "",
+) -> str:
+    """Create a signed token for the given store.
+
+    When `employee_id` is set, the token represents an employee logged in
+    under a store. The store-level routes still authorise (same store_id),
+    but admin replies and audit trails carry the employee's name.
+    """
+    payload: dict = {
         "s":   store_id,
         "su":  is_super,
         "exp": int(time.time()) + TOKEN_EXPIRY_SECONDS,
     }
+    if employee_id is not None:
+        payload["eid"] = int(employee_id)
+        payload["en"]  = employee_name
+        payload["er"]  = employee_role or "agent"
     # URL-safe base64 of JSON payload
     data = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode()
@@ -101,3 +116,15 @@ def token_store_id(token: str) -> Optional[str]:
 def token_is_super(token: str) -> bool:
     p = verify_token(token)
     return bool(p and p.get("su"))
+
+
+def token_employee(token: str) -> Optional[dict]:
+    """Return {id, name, role} when the token belongs to an employee, else None."""
+    p = verify_token(token)
+    if not p or "eid" not in p:
+        return None
+    return {
+        "id":   int(p.get("eid", 0)),
+        "name": str(p.get("en", "")),
+        "role": str(p.get("er", "agent")),
+    }

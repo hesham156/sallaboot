@@ -276,7 +276,7 @@ def _serve_react_or_legacy() -> HTMLResponse:
 # ── Auth middleware ────────────────────────────────────────────────────────────
 # Protects all per-store admin API routes (not the HTML pages or auth endpoints).
 _PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees)"
 )
 _SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
 
@@ -391,6 +391,32 @@ class RateRequest(BaseModel):
     store_id:   str = "default"
     rating:     int          # 1 – 5
     comment:    str = ""
+
+
+class EmployeeCreateRequest(BaseModel):
+    name:     str
+    email:    str
+    password: str
+    role:     Optional[str] = "agent"     # 'agent' | 'manager'
+    active:   Optional[bool] = True
+
+
+class EmployeeUpdateRequest(BaseModel):
+    name:     Optional[str]  = None
+    email:    Optional[str]  = None
+    password: Optional[str]  = None       # set to a new value to change it
+    role:     Optional[str]  = None
+    active:   Optional[bool] = None
+
+
+class EmployeeLoginRequest(BaseModel):
+    email:    str
+    password: str
+
+
+class EndConversationRequest(BaseModel):
+    farewell:  Optional[str] = ""        # employee farewell text
+    skip_csat: Optional[bool] = False    # if true, don't post the CSAT survey
 
 
 # ── Utility endpoints ──────────────────────────────────────────────────────────
@@ -728,6 +754,45 @@ async def store_login(store_id: str, req: LoginRequest, request: Request):
     }
 
 
+# ── Auth: Employee login (per-store agent) ────────────────────────────────────
+@app.post("/admin/{store_id}/auth/employee-login")
+async def employee_login(store_id: str, req: EmployeeLoginRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+
+    if await _is_rate_limited(f"{store_id}:emp:{ip}"):
+        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
+
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    emp = await db.get_employee_by_email(store_id, (req.email or "").strip())
+    if not emp or not emp.get("active"):
+        print(f"[auth] ❌ Employee login miss for {store_id!r}/{req.email!r} from {ip}")
+        raise HTTPException(401, "بريد إلكتروني أو كلمة مرور غير صحيحة")
+    if not _auth.check_password(req.password, emp.get("password_hash", "")):
+        print(f"[auth] ❌ Employee bad password for {store_id!r}/{req.email!r}")
+        raise HTTPException(401, "بريد إلكتروني أو كلمة مرور غير صحيحة")
+
+    token = _auth.create_token(
+        store_id,
+        employee_id=emp["id"],
+        employee_name=emp["name"],
+        employee_role=emp.get("role", "agent"),
+    )
+    info = sm.get_store_info(store_id)
+    print(f"[auth] ✅ Employee login {emp['email']!r} for store {store_id!r}")
+    return {
+        "token":      token,
+        "store_id":   store_id,
+        "store_name": info.get("store_name", f"متجر {store_id}"),
+        "employee":   {
+            "id":   emp["id"],
+            "name": emp["name"],
+            "role": emp.get("role", "agent"),
+        },
+    }
+
+
 # ── Auth: Token verify (lightweight — for client-side checkAuth) ──────────────
 @app.get("/admin/{store_id}/auth/verify")
 async def verify_store_token(store_id: str, request: Request):
@@ -742,7 +807,19 @@ async def verify_store_token(store_id: str, request: Request):
         raise HTTPException(401, "توكن منتهي أو غير صحيح")
     if not claims.get("su") and claims.get("s") != store_id:
         raise HTTPException(403, "غير مصرح")
-    return {"ok": True, "store_id": store_id, "is_super": claims.get("su", False)}
+    emp = None
+    if "eid" in claims:
+        emp = {
+            "id":   int(claims.get("eid", 0)),
+            "name": claims.get("en", ""),
+            "role": claims.get("er", "agent"),
+        }
+    return {
+        "ok":       True,
+        "store_id": store_id,
+        "is_super": claims.get("su", False),
+        "employee": emp,
+    }
 
 
 # ── Store info (for store owner — no super token needed) ─────────────────────
@@ -1719,12 +1796,32 @@ async def store_conversation_detail(store_id: str, session_id: str):
 
 
 @app.post("/admin/{store_id}/conversations/{session_id}/reply")
-async def store_admin_reply(store_id: str, session_id: str, req: AdminReplyRequest):
+async def store_admin_reply(
+    store_id: str,
+    session_id: str,
+    req: AdminReplyRequest,
+    request: Request,
+):
     if not req.message.strip():
         raise HTTPException(400, "الرسالة فارغة")
     await cs.restore_to_memory(session_id)
     text = req.message.strip()
     msg = await cs.add_message(session_id, "admin", text, store_id)
+
+    # Stamp the employee identity onto the message so the customer-facing
+    # widget and admin inbox can show "Shurog" instead of a generic "إدارة".
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    emp = _auth.token_employee(token)
+    if emp and emp.get("name"):
+        conv = cs.all_conversations().get(session_id)
+        if conv and conv.get("messages"):
+            conv["messages"][-1]["employee_name"] = emp["name"]
+            conv["messages"][-1]["employee_id"]   = emp["id"]
+            msg["employee_name"] = emp["name"]
+            msg["employee_id"]   = emp["id"]
+            cs.mark_dirty(session_id)
+            await cs.flush(session_id)
+
     cs.mark_admin_read(session_id)
     # Learn from this correction in the background: the admin's answer is the
     # right response, captured as a pending lesson for review. Fire-and-forget
@@ -1761,6 +1858,207 @@ async def store_handback(store_id: str, session_id: str):
                    "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
                    store_id)
     return {"status": "ok", "bot_enabled": True, "session_id": session_id}
+
+
+# ── End a conversation: farewell from agent → bot thanks → CSAT survey ───────
+@app.post("/admin/{store_id}/conversations/{session_id}/end")
+async def store_end_conversation(
+    store_id: str,
+    session_id: str,
+    req: EndConversationRequest,
+    request: Request,
+):
+    """
+    Close out a conversation with the same flow large brands use (e.g. Kiabi):
+      1. The agent's farewell line is posted as an admin message (with the
+         employee's name when an employee token was used).
+      2. The virtual assistant follows up with a thank-you line.
+      3. A CSAT survey ("How satisfied are you with the agent?") is posted as
+         an assistant message tagged so widget + admin UI render rating
+         buttons inline instead of a normal bubble.
+      4. The bot is re-enabled so any later message from the customer goes
+         back through the assistant.
+    """
+    await cs.restore_to_memory(session_id)
+    conv = cs.all_conversations().get(session_id)
+    if not conv:
+        raise HTTPException(404, "المحادثة غير موجودة")
+
+    token   = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    emp     = _auth.token_employee(token)
+    agent_name = (emp or {}).get("name", "") if emp else ""
+
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "فريق الدعم")
+    cfg        = sm.get_ai_config(store_id) or {}
+    bot_name   = cfg.get("bot_name") or f"مساعد {store_name}"
+
+    # 1. Agent farewell
+    farewell_default = (
+        "شكراً لتواصلكم معنا 🌷\n"
+        "إذا كان لديكم أي استفسار آخر لا تترددوا بالتواصل معنا.\n"
+        "نتمنى لكم يوماً سعيداً."
+    )
+    farewell = (req.farewell or "").strip() or farewell_default
+    await cs.add_message(session_id, "admin", farewell, store_id)
+    # Stamp the employee name on the message we just appended so the UI
+    # can display "Shurog" or whoever ended the chat.
+    if agent_name and conv.get("messages"):
+        conv["messages"][-1]["employee_name"] = agent_name
+        if emp:
+            conv["messages"][-1]["employee_id"] = emp.get("id")
+        # Also tag the pending-for-widget entry that add_message just queued
+        if conv.get("pending_for_widget"):
+            conv["pending_for_widget"][-1]["employee_name"] = agent_name
+
+    # 2. Bot thank-you handoff
+    thanks_line = f"شكراً لتواصلكم مع {store_name} — {bot_name} هنا إذا احتجتم أي مساعدة لاحقاً."
+    await cs.add_message(session_id, "assistant", thanks_line, store_id)
+    # add_message only queues admin role for the widget — manually queue this
+    # bot follow-up so the widget polls it and renders it immediately.
+    conv["pending_for_widget"].append({
+        "role":    "bot",
+        "content": thanks_line,
+        "ts":      conv["messages"][-1]["ts"],
+    })
+
+    # 3. CSAT survey as an assistant message tagged so widget/admin UI render
+    #    rating buttons inline. The agent_name is included so the question is
+    #    "How satisfied with <agent_name>?" — like the Kiabi flow.
+    if not req.skip_csat:
+        target = agent_name or "ممثل خدمة العملاء"
+        question = f"كيف كانت تجربتك مع {target}؟"
+        await cs.add_message(session_id, "assistant", question, store_id)
+        csat_meta = {
+            "kind": "csat",
+            "target_agent_id":   (emp or {}).get("id") if emp else None,
+            "target_agent_name": agent_name,
+            "question":          question,
+            "options": [
+                {"value": 5, "label": "راضٍ تماماً"},
+                {"value": 4, "label": "راضٍ"},
+                {"value": 3, "label": "محايد"},
+                {"value": 2, "label": "غير راضٍ"},
+                {"value": 1, "label": "غير راضٍ تماماً"},
+            ],
+        }
+        # Add meta to the persisted message
+        conv["messages"][-1]["meta"] = csat_meta
+        # And queue for widget polling
+        conv["pending_for_widget"].append({
+            "role":    "bot",
+            "content": question,
+            "ts":      conv["messages"][-1]["ts"],
+            "meta":    csat_meta,
+        })
+
+    # 4. Hand back to the bot so the next customer message is auto-handled.
+    cs.set_session_bot(session_id, True)
+    conv["ended_at"] = _dt.datetime.utcnow().isoformat()
+    if agent_name:
+        conv["ended_by"] = {"id": (emp or {}).get("id"), "name": agent_name}
+    cs.mark_dirty(session_id)
+    await cs.flush(session_id)
+    return {"status": "ok", "session_id": session_id, "messages": conv.get("messages", [])[-3:]}
+
+
+# ── Employees CRUD ──────────────────────────────────────────────────────────
+def _require_store_owner(request: Request, store_id: str):
+    """Reject employee-token callers so only the store owner (or super) can
+    manage employees. The middleware already verified the token belongs to
+    this store — here we just block employees from managing themselves."""
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if claims.get("su"):
+        return
+    if "eid" in claims:
+        raise HTTPException(403, "هذا الإجراء مخصّص لمالك المتجر")
+
+
+@app.get("/admin/{store_id}/employees")
+async def list_store_employees(store_id: str):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    rows = await db.list_employees(store_id)
+    return {"employees": rows, "count": len(rows)}
+
+
+@app.post("/admin/{store_id}/employees")
+async def create_store_employee(
+    store_id: str,
+    req: EmployeeCreateRequest,
+    request: Request,
+):
+    _require_store_owner(request, store_id)
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    name  = (req.name or "").strip()
+    email = (req.email or "").strip().lower()
+    if not name or not email or not req.password:
+        raise HTTPException(400, "الاسم والبريد وكلمة المرور مطلوبة")
+    if len(req.password) < 6:
+        raise HTTPException(400, "كلمة المرور قصيرة جداً (6 أحرف على الأقل)")
+    existing = await db.get_employee_by_email(store_id, email)
+    if existing:
+        raise HTTPException(409, "هذا البريد مسجّل لموظف آخر بالفعل")
+
+    emp_id = await db.add_employee(
+        store_id, name, email, _auth.hash_password(req.password),
+        role=(req.role or "agent"),
+        active=bool(req.active if req.active is not None else True),
+    )
+    if not emp_id:
+        raise HTTPException(500, "تعذّر حفظ الموظف — تحقق من اتصال قاعدة البيانات")
+    return {"id": emp_id, "name": name, "email": email, "role": req.role or "agent"}
+
+
+@app.patch("/admin/{store_id}/employees/{employee_id}")
+async def update_store_employee(
+    store_id: str,
+    employee_id: int,
+    req: EmployeeUpdateRequest,
+    request: Request,
+):
+    _require_store_owner(request, store_id)
+    emp = await db.get_employee(employee_id)
+    if not emp or emp["store_id"] != store_id:
+        raise HTTPException(404, "الموظف غير موجود")
+
+    new_password_hash = None
+    if req.password:
+        if len(req.password) < 6:
+            raise HTTPException(400, "كلمة المرور قصيرة جداً (6 أحرف على الأقل)")
+        new_password_hash = _auth.hash_password(req.password)
+
+    new_email = req.email.strip().lower() if req.email else None
+    if new_email and new_email != emp["email"]:
+        collision = await db.get_employee_by_email(store_id, new_email)
+        if collision and collision["id"] != employee_id:
+            raise HTTPException(409, "هذا البريد مسجّل لموظف آخر")
+
+    ok = await db.update_employee(
+        employee_id,
+        name=(req.name.strip() if req.name else None),
+        email=new_email,
+        password_hash=new_password_hash,
+        role=req.role,
+        active=req.active,
+    )
+    if not ok:
+        raise HTTPException(500, "تعذّر تحديث بيانات الموظف")
+    return {"status": "ok"}
+
+
+@app.delete("/admin/{store_id}/employees/{employee_id}")
+async def delete_store_employee(store_id: str, employee_id: int, request: Request):
+    _require_store_owner(request, store_id)
+    emp = await db.get_employee(employee_id)
+    if not emp or emp["store_id"] != store_id:
+        raise HTTPException(404, "الموظف غير موجود")
+    ok = await db.delete_employee(employee_id)
+    if not ok:
+        raise HTTPException(500, "تعذّر حذف الموظف")
+    return {"status": "ok"}
 
 
 # ── Backward-compat admin aliases (for single-store setups) ───────────────────
@@ -2831,11 +3129,25 @@ async def chat_history(session_id: str):
         role = m.get("role")
         if role not in ("user", "assistant", "admin"):
             continue
-        out.append({
-            "role":    "user" if role == "user" else "bot",
+        # Map to the widget's three visual roles. "admin" stays so the widget
+        # can show the employee caption ("Shurog") and the right bubble style;
+        # "assistant" becomes "bot".
+        if role == "user":
+            ui_role = "user"
+        elif role == "admin":
+            ui_role = "admin"
+        else:
+            ui_role = "bot"
+        entry = {
+            "role":    ui_role,
             "content": m.get("content", ""),
             "ts":      m.get("ts", ""),
-        })
+        }
+        if m.get("employee_name"):
+            entry["employee_name"] = m["employee_name"]
+        if isinstance(m.get("meta"), dict):
+            entry["meta"] = m["meta"]
+        out.append(entry)
     return {"messages": out, "bot_enabled": cs.is_bot_enabled(session_id)}
 
 

@@ -188,6 +188,23 @@ async def _create_tables():
             CREATE INDEX IF NOT EXISTS idx_train_store_ts
                 ON bot_training (store_id, created_at DESC);
 
+            -- Per-store employees (agents). Used when the store owner wants to
+            -- give a colleague their own login so admin replies show the
+            -- agent's name and CSAT surveys can rate each agent individually.
+            CREATE TABLE IF NOT EXISTS employees (
+                id            BIGSERIAL PRIMARY KEY,
+                store_id      TEXT NOT NULL,
+                name          TEXT NOT NULL,
+                email         TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role          TEXT NOT NULL DEFAULT 'agent',  -- 'agent' | 'manager'
+                active        BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at    TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (store_id, email)
+            );
+            CREATE INDEX IF NOT EXISTS idx_employees_store
+                ON employees (store_id);
+
             -- Orders the BOT created (checkout / quote→order). Powers the ROI
             -- dashboard ("how much did the bot make you"). One row per order.
             CREATE TABLE IF NOT EXISTS bot_orders (
@@ -303,6 +320,165 @@ async def delete_training(training_id: int) -> tuple[bool, str | None]:
     except Exception as e:
         print(f"[db] delete_training error: {e}")
         return False, None
+
+
+# ── Employees ───────────────────────────────────────────────────────────────
+
+async def list_employees(store_id: str) -> list[dict]:
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, store_id, name, email, role, active, created_at
+                FROM employees
+                WHERE store_id = $1
+                ORDER BY created_at DESC
+                """,
+                store_id,
+            )
+        return [
+            {
+                "id":         int(r["id"]),
+                "store_id":   r["store_id"],
+                "name":       r["name"],
+                "email":      r["email"],
+                "role":       r["role"] or "agent",
+                "active":     bool(r["active"]),
+                "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else "",
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] list_employees error: {e}")
+        return []
+
+
+async def add_employee(store_id: str, name: str, email: str,
+                       password_hash: str, role: str = "agent",
+                       active: bool = True) -> int | None:
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO employees (store_id, name, email, password_hash, role, active)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
+                """,
+                store_id, name, email.lower(), password_hash,
+                role or "agent", bool(active),
+            )
+        return int(row["id"]) if row else None
+    except Exception as e:
+        print(f"[db] add_employee error: {e}")
+        return None
+
+
+async def get_employee(emp_id: int) -> dict | None:
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, store_id, name, email, password_hash, role, active, created_at
+                FROM employees WHERE id = $1
+                """,
+                int(emp_id),
+            )
+        if not row:
+            return None
+        return {
+            "id":            int(row["id"]),
+            "store_id":      row["store_id"],
+            "name":          row["name"],
+            "email":         row["email"],
+            "password_hash": row["password_hash"],
+            "role":          row["role"] or "agent",
+            "active":        bool(row["active"]),
+            "created_at":    row["created_at"].isoformat() + "Z" if row["created_at"] else "",
+        }
+    except Exception as e:
+        print(f"[db] get_employee error: {e}")
+        return None
+
+
+async def get_employee_by_email(store_id: str, email: str) -> dict | None:
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, store_id, name, email, password_hash, role, active, created_at
+                FROM employees WHERE store_id = $1 AND email = $2
+                """,
+                store_id, email.lower(),
+            )
+        if not row:
+            return None
+        return {
+            "id":            int(row["id"]),
+            "store_id":      row["store_id"],
+            "name":          row["name"],
+            "email":         row["email"],
+            "password_hash": row["password_hash"],
+            "role":          row["role"] or "agent",
+            "active":        bool(row["active"]),
+            "created_at":    row["created_at"].isoformat() + "Z" if row["created_at"] else "",
+        }
+    except Exception as e:
+        print(f"[db] get_employee_by_email error: {e}")
+        return None
+
+
+async def update_employee(emp_id: int, *, name: str | None = None,
+                          email: str | None = None,
+                          password_hash: str | None = None,
+                          role: str | None = None,
+                          active: bool | None = None) -> bool:
+    if not _pool:
+        return False
+    sets: list[str] = []
+    args: list = []
+    if name is not None:
+        sets.append(f"name = ${len(args)+1}"); args.append(name)
+    if email is not None:
+        sets.append(f"email = ${len(args)+1}"); args.append(email.lower())
+    if password_hash is not None:
+        sets.append(f"password_hash = ${len(args)+1}"); args.append(password_hash)
+    if role is not None:
+        sets.append(f"role = ${len(args)+1}"); args.append(role)
+    if active is not None:
+        sets.append(f"active = ${len(args)+1}"); args.append(bool(active))
+    if not sets:
+        return True
+    args.append(int(emp_id))
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                f"UPDATE employees SET {', '.join(sets)} WHERE id = ${len(args)}",
+                *args,
+            )
+        return True
+    except Exception as e:
+        print(f"[db] update_employee error: {e}")
+        return False
+
+
+async def delete_employee(emp_id: int) -> bool:
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("DELETE FROM employees WHERE id = $1", int(emp_id))
+        return True
+    except Exception as e:
+        print(f"[db] delete_employee error: {e}")
+        return False
 
 
 # ── Bot ROI: orders the bot generated ───────────────────────────────────────
@@ -978,6 +1154,7 @@ async def purge_store(store_id: str) -> dict:
         ("uploads",         "store_id"),
         ("bot_training",    "store_id"),
         ("webhook_log",     "store_id"),
+        ("employees",       "store_id"),
     ]
     try:
         async with _pool.acquire() as conn:

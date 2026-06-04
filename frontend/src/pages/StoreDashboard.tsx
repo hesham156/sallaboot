@@ -15,6 +15,7 @@ const AbandonedCarts = lazy(() => import('./store/AbandonedCarts'))
 const Pricing        = lazy(() => import('./store/Pricing'))
 const Brain          = lazy(() => import('./store/Brain'))
 const Training       = lazy(() => import('./store/Training'))
+const Employees      = lazy(() => import('./store/Employees'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -97,6 +98,14 @@ const NAV_ITEMS = [
     activeColor: 'text-purple-400',
     activeBg: 'bg-purple-500/10',
     activeBorder: 'border-r-purple-500',
+  },
+  {
+    key: 'employees',
+    label: 'الموظفون',
+    icon: ['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z'],
+    activeColor: 'text-amber-400',
+    activeBg: 'bg-amber-500/10',
+    activeBorder: 'border-r-amber-500',
   },
   {
     key: 'training',
@@ -320,6 +329,7 @@ export default function StoreDashboard() {
             <Route path="pricing"         element={<Pricing storeId={storeId} />} />
             <Route path="brain"           element={<Brain storeId={storeId} />} />
             <Route path="training"        element={<Training storeId={storeId} />} />
+            <Route path="employees"       element={<Employees storeId={storeId} />} />
             <Route path="settings"        element={<Settings storeId={storeId} />} />
           </Routes>
         </Suspense>

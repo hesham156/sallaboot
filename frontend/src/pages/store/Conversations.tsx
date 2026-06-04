@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import {
   Button, Input, Spinner, Textarea, Avatar,
+  Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
 } from '@heroui/react'
-import { api, ConvSummary, Conversation } from '../../api'
+import { api, ConvSummary, Conversation, Message } from '../../api'
 
 interface Props { storeId: string }
 
@@ -121,6 +122,14 @@ export default function Conversations({ storeId }: Props) {
   const [search, setSearch] = useState('')
   const messagesRef = useRef<HTMLDivElement>(null)
 
+  // End-conversation modal
+  const DEFAULT_FAREWELL =
+    'شكراً لتواصلكم معنا 🌷\nإذا كان لديكم أي استفسار آخر لا تترددوا بالتواصل معنا.\nنتمنى لكم يوماً سعيداً.'
+  const [endOpen, setEndOpen]         = useState(false)
+  const [farewell, setFarewell]       = useState(DEFAULT_FAREWELL)
+  const [skipCsat, setSkipCsat]       = useState(false)
+  const [endingChat, setEndingChat]   = useState(false)
+
   useEffect(() => { loadConversations() }, [storeId])
   useEffect(() => {
     if (messagesRef.current) {
@@ -173,6 +182,29 @@ export default function Conversations({ storeId }: Props) {
     const updated = await api.getConversation(storeId, selected.session_id)
     setSelected(updated)
     loadConversations()
+  }
+
+  function openEndModal() {
+    setFarewell(DEFAULT_FAREWELL)
+    setSkipCsat(false)
+    setEndOpen(true)
+  }
+
+  async function confirmEndChat() {
+    if (!selected) return
+    setEndingChat(true)
+    try {
+      await api.endConversation(storeId, selected.session_id, {
+        farewell:  farewell.trim() || undefined,
+        skip_csat: skipCsat,
+      })
+      const updated = await api.getConversation(storeId, selected.session_id)
+      setSelected(updated)
+      loadConversations()
+      setEndOpen(false)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'تعذر إنهاء المحادثة')
+    } finally { setEndingChat(false) }
   }
 
   const filtered = search
@@ -371,7 +403,7 @@ export default function Conversations({ storeId }: Props) {
                   </div>
                 </div>
 
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
                   {selected.bot_enabled ? (
                     <Button
                       size="sm" color="warning" variant="flat"
@@ -389,6 +421,16 @@ export default function Conversations({ storeId }: Props) {
                       إعادة للبوت
                     </Button>
                   )}
+                  {!selected.bot_enabled && (
+                    <Button
+                      size="sm" variant="flat"
+                      onPress={openEndModal}
+                      startContent={<Icon paths={['M5 13l4 4L19 7']} size={13} />}
+                      className="bg-teal-500/15 text-teal-500 hover:bg-teal-500/25"
+                    >
+                      إنهاء + تقييم
+                    </Button>
+                  )}
                 </div>
               </div>
             </header>
@@ -403,9 +445,11 @@ export default function Conversations({ storeId }: Props) {
                   <p className="text-sm text-slate-500">لا توجد رسائل بعد</p>
                 </div>
               ) : (
-                selected.messages?.map((msg, i) => {
+                selected.messages?.map((msg: Message, i: number) => {
                   const isUser  = msg.role === 'user'
                   const isAdmin = msg.role === 'admin'
+                  const isCsat  = msg.meta?.kind === 'csat'
+                  const empName = msg.employee_name
                   return (
                     <div
                       key={i}
@@ -416,9 +460,12 @@ export default function Conversations({ storeId }: Props) {
                         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                           isAdmin
                             ? 'bg-amber-500/20 text-amber-400'
+                            : isCsat
+                            ? 'bg-teal-500/20 text-teal-400'
                             : 'bg-blue-500/20 text-blue-400'
                         }`}>
-                          {isAdmin ? '👨‍💼' : '🤖'}
+                          {isAdmin ? (empName ? empName.trim().charAt(0) : '👨‍💼')
+                                   : isCsat ? '⭐' : '🤖'}
                         </div>
                       )}
 
@@ -428,15 +475,36 @@ export default function Conversations({ storeId }: Props) {
                           ? 'bg-gradient-to-br from-teal-600 to-cyan-700 text-white rounded-tr-sm'
                           : isAdmin
                           ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-tl-sm'
+                          : isCsat
+                          ? 'bg-teal-500/10 text-teal-900 border border-teal-500/30 rounded-tl-sm'
                           : 'bg-content1 text-foreground border border-divider rounded-tl-sm'
                         }
                       `}>
                         {isAdmin && (
-                          <p className="text-[10px] text-amber-600 mb-1 font-bold">الإدارة</p>
+                          <p className="text-[10px] text-amber-600 mb-1 font-bold">
+                            {empName ? `${empName} · موظف` : 'الإدارة'}
+                          </p>
+                        )}
+                        {isCsat && (
+                          <p className="text-[10px] text-teal-600 mb-1 font-bold">
+                            استطلاع رضا
+                          </p>
                         )}
                         <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                           {renderMessageBody(msg.content)}
                         </div>
+                        {isCsat && msg.meta?.options && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {msg.meta.options.map(opt => (
+                              <span
+                                key={opt.value}
+                                className="text-[11px] px-2 py-1 rounded-full bg-white/70 border border-teal-500/30 text-teal-700"
+                              >
+                                {opt.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <p className={`text-[10px] mt-1 ${
                           isUser ? 'text-white/70' : 'text-slate-500'
                         }`}>
@@ -505,6 +573,66 @@ export default function Conversations({ storeId }: Props) {
           </>
         )}
       </main>
+
+      {/* ════════════════ END-CONVERSATION MODAL ════════════════ */}
+      <Modal
+        isOpen={endOpen}
+        onOpenChange={setEndOpen}
+        placement="center"
+        backdrop="blur"
+        size="md"
+      >
+        <ModalContent>
+          {() => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                <span className="text-base font-bold">إنهاء المحادثة</span>
+                <span className="text-xs text-slate-500 font-normal">
+                  هنرسل وداع باسمك، رسالة شكر من المساعد، ثم استطلاع تقييم للعميل.
+                </span>
+              </ModalHeader>
+              <ModalBody className="space-y-3" dir="rtl">
+                <Textarea
+                  label="رسالة الوداع"
+                  value={farewell}
+                  onValueChange={setFarewell}
+                  variant="bordered"
+                  minRows={3}
+                  maxRows={6}
+                />
+                <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={skipCsat}
+                    onChange={e => setSkipCsat(e.target.checked)}
+                  />
+                  لا ترسل استطلاع التقييم بعد الوداع
+                </label>
+                <div className="text-[11px] text-slate-500 bg-content2 rounded-xl p-3 leading-relaxed">
+                  بعد الإنهاء سيتلقى العميل:
+                  <ol className="list-decimal mr-5 mt-1 space-y-0.5">
+                    <li>رسالتك أعلاه (تظهر باسمك إن كنت موظفاً)</li>
+                    <li>رسالة شكر من المساعد الذكي</li>
+                    {!skipCsat && <li>أزرار تقييم (راضٍ تماماً / راضٍ / محايد / غير راضٍ …)</li>}
+                  </ol>
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={() => setEndOpen(false)}>إلغاء</Button>
+                <Button
+                  color="primary"
+                  isLoading={endingChat}
+                  onPress={confirmEndChat}
+                  className="bg-gradient-to-br from-teal-600 to-cyan-700 text-white font-bold"
+                  startContent={<Icon paths={['M5 13l4 4L19 7']} size={13} />}
+                >
+                  إنهاء وإرسال
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </div>
   )
 }

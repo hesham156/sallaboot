@@ -18,10 +18,28 @@ export function getIsSuper(): boolean {
 export function setIsSuper(v: boolean) {
   localStorage.setItem('admin_is_super', String(v))
 }
+
+// Employee identity carried in the token, when the user logged in as an employee
+export interface SessionEmployee {
+  id:   number
+  name: string
+  role: string
+}
+export function getEmployee(): SessionEmployee | null {
+  const raw = localStorage.getItem('admin_employee')
+  if (!raw) return null
+  try { return JSON.parse(raw) as SessionEmployee } catch { return null }
+}
+export function setEmployee(e: SessionEmployee | null) {
+  if (e) localStorage.setItem('admin_employee', JSON.stringify(e))
+  else   localStorage.removeItem('admin_employee')
+}
+
 export function clearAuth() {
   localStorage.removeItem('admin_token')
   localStorage.removeItem('admin_store_id')
   localStorage.removeItem('admin_is_super')
+  localStorage.removeItem('admin_employee')
 }
 
 // ── Core fetch wrapper ─────────────────────────────────────────────────────────
@@ -261,6 +279,36 @@ export const api = {
   // Super-admin: reset store password
   resetPassword: (storeId: string) =>
     put(`/admin/stores/${storeId}/reset-password`),
+
+  // ── Employees (per-store agents) ─────────────────────────────────────────
+  employeeLogin: (storeId: string, email: string, password: string) =>
+    post<{
+      token: string
+      store_id: string
+      store_name: string
+      employee: SessionEmployee
+    }>(`/admin/${storeId}/auth/employee-login`, { email, password }),
+
+  listEmployees: (storeId: string) =>
+    get<{ employees: Employee[]; count: number }>(`/admin/${storeId}/employees`),
+
+  createEmployee: (storeId: string, payload: EmployeeCreateInput) =>
+    post<{ id: number; name: string; email: string; role: string }>(
+      `/admin/${storeId}/employees`, payload,
+    ),
+
+  updateEmployee: (storeId: string, employeeId: number, payload: EmployeeUpdateInput) =>
+    req<{ status: string }>('PATCH', `/admin/${storeId}/employees/${employeeId}`, payload),
+
+  deleteEmployee: (storeId: string, employeeId: number) =>
+    req<{ status: string }>('DELETE', `/admin/${storeId}/employees/${employeeId}`),
+
+  // End a conversation with farewell + CSAT survey
+  endConversation: (storeId: string, sessionId: string, payload?: { farewell?: string; skip_csat?: boolean }) =>
+    post<{ status: string; session_id: string; messages: Message[] }>(
+      `/admin/${storeId}/conversations/${sessionId}/end`,
+      payload || {},
+    ),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -291,10 +339,47 @@ export interface ConvSummary {
   rating?: number
 }
 
+export interface CsatOption { value: number; label: string }
+export interface MessageMeta {
+  kind?: 'csat'
+  target_agent_id?: number | null
+  target_agent_name?: string
+  question?: string
+  options?: CsatOption[]
+}
 export interface Message {
   role: 'user' | 'assistant' | 'admin'
   content: string
   ts: string
+  employee_name?: string
+  employee_id?: number
+  meta?: MessageMeta
+}
+
+export interface Employee {
+  id: number
+  store_id: string
+  name: string
+  email: string
+  role: string             // 'agent' | 'manager'
+  active: boolean
+  created_at: string
+}
+
+export interface EmployeeCreateInput {
+  name: string
+  email: string
+  password: string
+  role?: string
+  active?: boolean
+}
+
+export interface EmployeeUpdateInput {
+  name?: string
+  email?: string
+  password?: string
+  role?: string
+  active?: boolean
 }
 
 export interface Conversation extends ConvSummary {

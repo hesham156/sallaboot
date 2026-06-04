@@ -359,6 +359,37 @@
     }
     .checkout-fallback .cf-title { font-size: 13px; font-weight: 700; color: #92400e; }
     .checkout-fallback a { color: ${CONFIG.primaryColor}; font-size: 12px; }
+    /* ── Agent name caption (above admin bubble) ─────────────── */
+    .chat-msg.admin { flex-direction: column; align-items: flex-end; }
+    .chat-msg.admin .agent-caption {
+      font-size: 10.5px; font-weight: 700; color: #92400e;
+      margin: 0 4px 2px; opacity: 0.85; text-align: right;
+    }
+    /* ── CSAT survey card ────────────────────────────────────── */
+    .csat-card {
+      background: white; border: 1px solid #99f6e4; border-radius: 14px;
+      padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+      width: 100%; box-shadow: 0 2px 10px rgba(13, 148, 136, 0.08);
+    }
+    .csat-card .csat-title {
+      font-size: 12px; font-weight: 700; color: #0f766e; text-align: center;
+    }
+    .csat-options {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .csat-options.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .csat-btn {
+      padding: 8px 6px; border-radius: 10px; cursor: pointer;
+      font-size: 12px; font-weight: 700; font-family: inherit;
+      border: 1.5px solid #99f6e4; background: #f0fdfa; color: #0f766e;
+      transition: transform 0.12s, background 0.12s, border-color 0.12s;
+    }
+    .csat-btn:hover { background: #ccfbf1; border-color: #2dd4bf; transform: translateY(-1px); }
+    .csat-btn.picked { background: #14b8a6; color: white; border-color: #14b8a6; }
+    .csat-thanks {
+      font-size: 12px; font-weight: 700; color: #0f766e; text-align: center;
+      padding: 6px 0;
+    }
     /* ── Rating bar ──────────────────────────────────────────── */
     #salla-rating-bar {
       padding: 10px 16px 8px; text-align: center; border-top: 1px solid #e8efff;
@@ -460,14 +491,33 @@
   }
 
   // ── Message Rendering ─────────────────────────────────────────────────────────
-  function appendMessage(role, text) {
+  function appendMessage(role, text, extra) {
+    extra = extra || {};
     var container = document.getElementById("salla-chat-messages");
+
+    // CSAT survey is rendered as a special bubble instead of plain text.
+    if (extra.meta && extra.meta.kind === "csat") {
+      renderCsat(extra.meta);
+      return;
+    }
+
     var msg = document.createElement("div");
     msg.className = "chat-msg " + role;
+
+    // For admin messages, render a small caption above the bubble showing
+    // which employee replied — matches the "Shurog" caption in the Kiabi
+    // screenshot the user referenced.
+    if (role === "admin" && extra.employee_name) {
+      var cap = document.createElement("div");
+      cap.className = "agent-caption";
+      cap.textContent = extra.employee_name;
+      msg.appendChild(cap);
+    }
+
     var bubble = document.createElement("div");
     bubble.className = "bubble";
     // Basic markdown bold support + XSS protection
-    bubble.innerHTML = text
+    bubble.innerHTML = String(text || "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
@@ -475,6 +525,71 @@
     container.appendChild(msg);
     container.scrollTop = container.scrollHeight;
     return msg;
+  }
+
+  // ── CSAT survey (post-conversation rating prompt) ─────────────────────────────
+  function renderCsat(meta) {
+    var container = document.getElementById("salla-chat-messages");
+    var wrap = document.createElement("div");
+    wrap.className = "chat-msg bot";
+    var card = document.createElement("div");
+    card.className = "csat-card";
+
+    var title = document.createElement("div");
+    title.className = "csat-title";
+    title.textContent = meta.question || "كيف كانت تجربتك معنا؟";
+    card.appendChild(title);
+
+    var opts = (meta.options && meta.options.length) ? meta.options : [
+      { value: 5, label: "راضٍ تماماً" },
+      { value: 4, label: "راضٍ" },
+      { value: 3, label: "محايد" },
+      { value: 2, label: "غير راضٍ" },
+      { value: 1, label: "غير راضٍ تماماً" },
+    ];
+
+    var grid = document.createElement("div");
+    grid.className = "csat-options" + (opts.length === 3 ? " cols-3" : "");
+    opts.forEach(function (opt) {
+      var b = document.createElement("button");
+      b.className = "csat-btn";
+      b.type = "button";
+      b.setAttribute("data-v", String(opt.value));
+      b.textContent = opt.label;
+      b.addEventListener("click", function () {
+        // Disable all buttons + highlight the picked one
+        grid.querySelectorAll("button").forEach(function (el) {
+          el.disabled = true;
+          if (el === b) el.classList.add("picked");
+        });
+        submitCsat(opt.value, meta);
+        setTimeout(function () {
+          card.innerHTML = '<div class="csat-thanks">شكراً لتقييمك 🌷</div>';
+        }, 600);
+      });
+      grid.appendChild(b);
+    });
+    card.appendChild(grid);
+    wrap.appendChild(card);
+    container.appendChild(wrap);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function submitCsat(value, meta) {
+    try {
+      await fetch(CONFIG.apiUrl + "/chat/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          store_id:   CONFIG.storeId,
+          rating:     value,
+          comment:    meta && meta.target_agent_name
+                       ? ("CSAT: " + meta.target_agent_name)
+                       : "CSAT",
+        }),
+      });
+    } catch (e) { /* non-critical */ }
   }
 
   function showTyping() {
@@ -846,7 +961,13 @@
       var container = document.getElementById("salla-chat-messages");
       if (container) container.innerHTML = "";   // clear stray welcome/quick-actions
       msgs.forEach(function (m) {
-        appendMessage(m.role === "user" ? "user" : "bot", m.content || "");
+        var role = m.role === "user" ? "user"
+                 : m.role === "admin" || m.employee_name ? "admin"
+                 : "bot";
+        appendMessage(role, m.content || "", {
+          employee_name: m.employee_name,
+          meta:          m.meta,
+        });
       });
 
       // Sync bot/human mode so the input + banner match the live state.
@@ -869,10 +990,17 @@
       if (!res.ok) return;
       var data = await res.json();
 
-      // Render any admin messages
+      // Render any admin / bot follow-up messages queued for the widget.
+      // After the agent ends the conversation, the server also queues the
+      // bot's thank-you line and the CSAT survey here so the widget shows
+      // the full farewell flow without needing a page refresh.
       if (data.messages && data.messages.length > 0) {
         data.messages.forEach(function (m) {
-          appendMessage("admin", m.content);
+          var role = m.role === "bot" ? "bot" : "admin";
+          appendMessage(role, m.content || "", {
+            employee_name: m.employee_name,
+            meta:          m.meta,
+          });
         });
         // Flash badge on chat button if panel is closed
         if (!isOpen) {
