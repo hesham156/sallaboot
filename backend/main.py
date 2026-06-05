@@ -700,6 +700,18 @@ async def landing_page():
 async def login_page():
     return _serve_react_or_legacy()
 
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page():
+    return _serve_react_or_legacy()
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page():
+    return _serve_react_or_legacy()
+
+@app.get("/data-deletion", response_class=HTMLResponse)
+async def data_deletion_page():
+    return _serve_react_or_legacy()
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_index():
     return _serve_react_or_legacy()
