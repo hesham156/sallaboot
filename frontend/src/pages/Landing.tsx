@@ -358,9 +358,12 @@ export default function Landing() {
             </span>
             <span className="font-black text-slate-900">سلّابوت</span>
           </div>
-          <div className="flex items-center gap-6 text-sm font-semibold text-slate-500">
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-semibold text-slate-500">
             <a href="#features" className="hover:text-teal-600 transition-colors">المميزات</a>
             <a href="#how" className="hover:text-teal-600 transition-colors">كيف يعمل</a>
+            <button onClick={() => navigate('/privacy')} className="hover:text-teal-600 transition-colors">سياسة الخصوصية</button>
+            <button onClick={() => navigate('/terms')} className="hover:text-teal-600 transition-colors">شروط الخدمة</button>
+            <button onClick={() => navigate('/data-deletion')} className="hover:text-teal-600 transition-colors">حذف البيانات</button>
             <button onClick={() => navigate('/login')} className="hover:text-teal-600 transition-colors">تسجيل الدخول</button>
           </div>
           <p className="text-xs text-slate-400">© {new Date().getFullYear()} سلّابوت — المساعد الذكي لمتاجر سلة</p>

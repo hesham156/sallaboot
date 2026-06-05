@@ -7,6 +7,9 @@ import Landing from './pages/Landing'
 // Lazy-load the authenticated app shells so the login screen loads fast.
 const StoresList     = lazy(() => import('./pages/StoresList'))
 const StoreDashboard = lazy(() => import('./pages/StoreDashboard'))
+const PrivacyPolicy  = lazy(() => import('./pages/PrivacyPolicy'))
+const TermsOfService = lazy(() => import('./pages/TermsOfService'))
+const DataDeletion   = lazy(() => import('./pages/DataDeletion'))
 
 
 function RequireSuper({ children }: { children: JSX.Element }) {
@@ -39,6 +42,11 @@ export default function App() {
         <Route path="/landing" element={<Landing />} />
 
         <Route path="/login" element={<Login />} />
+
+        {/* Public Policy Pages */}
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfService />} />
+        <Route path="/data-deletion" element={<DataDeletion />} />
 
         {/* Super-admin: all stores */}
         <Route
