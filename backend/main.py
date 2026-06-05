@@ -1155,6 +1155,70 @@ async def delete_training_entry(store_id: str, training_id: int):
     return {"status": "ok", "deleted_file_id": deleted_file_id}
 
 
+# ── Settings: Notifications (email + webhook) ─────────────────────────────────
+import notifications as _notif
+
+
+@app.get("/admin/{store_id}/settings/notifications")
+async def get_notification_settings(store_id: str):
+    """Return current notification settings for the store."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    return _notif.get_settings(store_id)
+
+
+class NotificationSettingsRequest(BaseModel):
+    email_enabled:       bool  = False
+    email_address:       str   = ""
+    webhook_url:         str   = ""
+    on_new_conversation: bool  = True
+    on_abandoned_cart:   bool  = True
+    on_low_rating:       bool  = True
+    quiet_hours_enabled: bool  = False
+    quiet_hours_start:   int   = 22
+    quiet_hours_end:     int   = 8
+
+
+@app.put("/admin/{store_id}/settings/notifications")
+async def update_notification_settings(store_id: str, req: NotificationSettingsRequest):
+    """Save notification settings for the store."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    settings = {
+        "email_enabled":       req.email_enabled,
+        "email_address":       (req.email_address or "").strip(),
+        "webhook_url":         (req.webhook_url   or "").strip(),
+        "on_new_conversation": req.on_new_conversation,
+        "on_abandoned_cart":   req.on_abandoned_cart,
+        "on_low_rating":       req.on_low_rating,
+        "quiet_hours_enabled": req.quiet_hours_enabled,
+        "quiet_hours_start":   max(0, min(23, req.quiet_hours_start)),
+        "quiet_hours_end":     max(0, min(23, req.quiet_hours_end)),
+    }
+    _notif.save_settings(store_id, settings)
+    # Persist to DB
+    tokens = sm.get_store_info(store_id)
+    await db.save_store(store_id, tokens)
+    await db.save_ai_config(store_id, sm.get_ai_config(store_id))
+    return {"status": "ok", "message": "تم حفظ إعدادات الإشعارات ✅"}
+
+
+@app.post("/admin/{store_id}/settings/notifications/test")
+async def test_notification(store_id: str):
+    """Send a test email/webhook to verify the configuration works."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    n = _notif.get_settings(store_id)
+    if not n["email_enabled"] and not n["webhook_url"]:
+        raise HTTPException(400, "فعّل البريد الإلكتروني أو الـ Webhook أولاً")
+    await _notif.notify(store_id, "new_conversation", {
+        "customer_name": "عميل تجريبي",
+        "session_id":    "test-session",
+        "first_message": "هذه رسالة تجريبية للتأكد من أن الإشعارات تعمل ✅",
+    })
+    return {"status": "ok", "message": "تم إرسال إشعار تجريبي ✅"}
+
+
 # ── Settings: Pricing config (for the printing calculator) ───────────────────
 
 @app.get("/admin/{store_id}/settings/pricing")
@@ -2489,6 +2553,12 @@ async def _handle_abandoned_cart(merchant_id: str, data: dict):
         f"store={store_id!r}"
     )
 
+    # ── Fire notification to store owner ──────────────────────────────────────
+    asyncio.create_task(_notif.notify(store_id, "abandoned_cart", {
+        "customer_name": notification["customer_name"],
+        "cart_total":    f"{notification['total']} {notification['currency']}",
+    }))
+
 
 # ── Salla Webhook endpoint ─────────────────────────────────────────────────────
 @app.post("/webhook/salla")
@@ -3123,6 +3193,17 @@ async def chat(req: ChatRequest):
     component  = cs.pop_last_component(session_id)
     cart_count = len(cs.get_cart(session_id))
 
+    # ── Fire new-conversation notification (first message only) ──────────────
+    conv_msgs = cs.all_conversations().get(session_id, {}).get("messages", [])
+    if len(conv_msgs) == 1:  # exactly 1 message = brand new session
+        conv_data = cs.all_conversations().get(session_id, {})
+        cust_name = conv_data.get("customer_name") or ""
+        asyncio.create_task(_notif.notify(store_id, "new_conversation", {
+            "customer_name": cust_name,
+            "session_id":    session_id,
+            "first_message": req.message[:200],
+        }))
+
     return ChatResponse(
         reply      = reply,
         session_id = session_id,
@@ -3158,6 +3239,15 @@ async def chat_rate(req: RateRequest):
                 cs.mark_dirty(req.session_id)
                 await cs.flush(req.session_id)
                 break
+
+    # ── Fire low-rating notification ─────────────────────────────────────────
+    if req.rating <= 2 and conv:
+        cust_name = conv.get("customer_name") or conv.get("customer", {}).get("name", "")
+        asyncio.create_task(_notif.notify(req.store_id, "low_rating", {
+            "customer_name": cust_name,
+            "rating":        req.rating,
+            "comment":       req.comment or "",
+        }))
 
     return {"status": "ok", "message": "شكراً لتقييمك! 😊"}
 

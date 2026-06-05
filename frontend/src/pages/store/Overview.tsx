@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Spinner, Progress, Avatar, Chip } from '@heroui/react'
 import { api, Analytics, ROIData, WeeklyReport, StoreInfo } from '../../api'
+import Setup from './Setup'
 
 interface Props { storeId: string; store: StoreInfo }
 
@@ -106,6 +107,9 @@ export default function Overview({ storeId, store }: Props) {
 
   return (
     <div className="p-6 space-y-6" dir="rtl">
+
+      {/* ── Onboarding setup wizard (hides when dismissed or complete) ── */}
+      <Setup storeId={storeId} store={store} />
 
       {/* ── Premium Greeting Banner (Purity teal) ── */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-teal-500 to-cyan-500 p-6 sm:p-8 shadow-soft-lg">

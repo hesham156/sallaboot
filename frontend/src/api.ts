@@ -198,6 +198,14 @@ export const api = {
   deleteTraining: (storeId: string, id: number) =>
     req<{ status: string }>('DELETE', `/admin/${storeId}/settings/training/${id}`),
 
+  // Notifications
+  getNotifications: (storeId: string) =>
+    get<NotificationSettings>(`/admin/${storeId}/settings/notifications`),
+  setNotifications: (storeId: string, s: NotificationSettings) =>
+    put<{ status: string; message: string }>(`/admin/${storeId}/settings/notifications`, s),
+  testNotification: (storeId: string) =>
+    post<{ status: string; message: string }>(`/admin/${storeId}/settings/notifications/test`),
+
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
@@ -497,6 +505,18 @@ export interface ConversationInsights {
     without_checkout: number
     conversion_rate: number
   }
+}
+
+export interface NotificationSettings {
+  email_enabled:        boolean
+  email_address:        string
+  webhook_url:          string
+  on_new_conversation:  boolean
+  on_abandoned_cart:    boolean
+  on_low_rating:        boolean
+  quiet_hours_enabled:  boolean
+  quiet_hours_start:    number
+  quiet_hours_end:      number
 }
 
 export interface WeeklyReport {

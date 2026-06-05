@@ -4,7 +4,7 @@ import {
   Button, Switch,
   Divider, Chip, Spinner,
 } from '@heroui/react'
-import { api, AIConfig, TokenStatus } from '../../api'
+import { api, AIConfig, TokenStatus, NotificationSettings } from '../../api'
 import { TextField } from '../../components/ui'
 
 /* copy-to-clipboard helper */
@@ -86,14 +86,26 @@ export default function Settings({ storeId }: Props) {
   const [refreshing, setRefreshing] = useState(false)
   const [tokenMsg, setTokenMsg] = useState('')
 
+  // Notifications
+  const defaultNotif: NotificationSettings = {
+    email_enabled: false, email_address: '', webhook_url: '',
+    on_new_conversation: true, on_abandoned_cart: true, on_low_rating: true,
+    quiet_hours_enabled: false, quiet_hours_start: 22, quiet_hours_end: 8,
+  }
+  const [notif, setNotif]         = useState<NotificationSettings>(defaultNotif)
+  const [notifSaving, setNotifSaving] = useState(false)
+  const [notifTesting, setNotifTesting] = useState(false)
+  const [notifMsg, setNotifMsg]   = useState('')
+
   useEffect(() => { loadSettings() }, [storeId])
 
   async function loadSettings() {
     setAiLoading(true)
     try {
-      const [ai, tok] = await Promise.all([
+      const [ai, tok, notifData] = await Promise.all([
         api.getAI(storeId),
         api.tokenStatus(storeId),
+        api.getNotifications(storeId).catch(() => defaultNotif),
       ])
       setCfg(ai)
       setProvider((ai.provider !== 'env' ? ai.provider : 'groq') as ProviderKey)
@@ -103,8 +115,29 @@ export default function Settings({ storeId }: Props) {
       setWaEnabled(!!ai.whatsapp_enabled)
       setWaPhoneId(ai.whatsapp_phone_id || '')
       setTokenStatus(tok)
+      setNotif(notifData)
     } catch (e) { console.error(e) }
     finally { setAiLoading(false) }
+  }
+
+  async function saveNotifications() {
+    setNotifSaving(true); setNotifMsg('')
+    try {
+      const res = await api.setNotifications(storeId, notif)
+      setNotifMsg(res.message || '✅ تم الحفظ')
+    } catch (e: unknown) {
+      setNotifMsg(e instanceof Error ? e.message : 'خطأ في الحفظ')
+    } finally { setNotifSaving(false) }
+  }
+
+  async function testNotification() {
+    setNotifTesting(true); setNotifMsg('')
+    try {
+      const res = await api.testNotification(storeId)
+      setNotifMsg(res.message || '✅ تم الإرسال')
+    } catch (e: unknown) {
+      setNotifMsg(e instanceof Error ? e.message : 'خطأ في الإرسال')
+    } finally { setNotifTesting(false) }
   }
 
   async function saveWhatsApp() {
@@ -543,6 +576,98 @@ export default function Settings({ storeId }: Props) {
           >
             {passLoading ? '' : 'تغيير كلمة المرور'}
           </Button>
+        </CardBody>
+      </Card>
+
+      {/* ════════════ Notifications ════════════ */}
+      <Card className="bg-content1 border border-divider shadow-sm">
+        <CardHeader className="px-5 py-4 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-cyan-400" />
+          <h2 className="font-bold text-sm">الإشعارات</h2>
+        </CardHeader>
+        <Divider />
+        <CardBody className="px-5 py-5 space-y-5">
+
+          {/* Email toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">إشعارات البريد الإلكتروني</p>
+              <p className="text-xs text-default-400 mt-0.5">استقبل إشعاراً عند كل حدث مهم</p>
+            </div>
+            <Switch isSelected={notif.email_enabled}
+              onValueChange={v => setNotif(n => ({ ...n, email_enabled: v }))} color="primary" />
+          </div>
+
+          {notif.email_enabled && (
+            <TextField
+              label="البريد الإلكتروني للإشعارات"
+              value={notif.email_address}
+              onChange={v => setNotif(n => ({ ...n, email_address: v }))}
+              placeholder="owner@mystore.com"
+              type="email"
+            />
+          )}
+
+          <Divider />
+
+          {/* Trigger checkboxes */}
+          <p className="text-xs font-bold text-default-400 uppercase tracking-wider">أرسل إشعاراً عند:</p>
+          <div className="space-y-3">
+            {[
+              { key: 'on_new_conversation' as const, label: 'محادثة جديدة من عميل', icon: '💬' },
+              { key: 'on_abandoned_cart'   as const, label: 'سلة متروكة',            icon: '🛒' },
+              { key: 'on_low_rating'       as const, label: 'تقييم منخفض (≤ 2 نجوم)', icon: '⭐' },
+            ].map(item => (
+              <div key={item.key} className="flex items-center justify-between py-1">
+                <span className="text-sm text-foreground">{item.icon} {item.label}</span>
+                <Switch size="sm"
+                  isSelected={notif[item.key]}
+                  onValueChange={v => setNotif(n => ({ ...n, [item.key]: v }))}
+                  color="success" />
+              </div>
+            ))}
+          </div>
+
+          <Divider />
+
+          {/* Webhook */}
+          <div>
+            <p className="text-xs font-semibold text-default-400 mb-1.5">Webhook URL (اختياري — Slack / Zapier)</p>
+            <TextField
+              label="" value={notif.webhook_url}
+              onChange={v => setNotif(n => ({ ...n, webhook_url: v }))}
+              placeholder="https://hooks.slack.com/services/..."
+            />
+          </div>
+
+          {/* Quiet hours */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">ساعات الهدوء</p>
+              <p className="text-xs text-default-400 mt-0.5">
+                بدون إشعارات من {notif.quiet_hours_start}:00 حتى {notif.quiet_hours_end}:00
+              </p>
+            </div>
+            <Switch isSelected={notif.quiet_hours_enabled}
+              onValueChange={v => setNotif(n => ({ ...n, quiet_hours_enabled: v }))} color="default" />
+          </div>
+
+          {notifMsg && (
+            <div className={`rounded-lg p-3 text-sm border ${
+              notifMsg.startsWith('✅') ? 'bg-success/10 border-success/20 text-success' : 'bg-danger/10 border-danger/20 text-danger'
+            }`}>{notifMsg}</div>
+          )}
+
+          <div className="flex gap-2">
+            <Button variant="flat" color="default" isLoading={notifTesting} onPress={testNotification}
+              className="flex-1 font-semibold h-11">
+              {notifTesting ? '' : '🧪 اختبار الإشعار'}
+            </Button>
+            <Button color="primary" isLoading={notifSaving} onPress={saveNotifications}
+              className="flex-1 font-bold h-11 bg-gradient-to-r from-cyan-500 to-teal-600 text-white">
+              {notifSaving ? '' : 'حفظ الإشعارات'}
+            </Button>
+          </div>
         </CardBody>
       </Card>
     </div>
