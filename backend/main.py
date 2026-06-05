@@ -3300,17 +3300,29 @@ async def _handle_whatsapp_message(msg: dict):
         phone_id = msg.get("phone_id", "")
         sender   = msg.get("from", "")
         text     = msg.get("text", "")
+
+        print(f"[whatsapp] 📨 incoming: phone_id={phone_id!r} from={sender!r} text={text[:60]!r}")
+
         if not (phone_id and sender and text):
+            print(f"[whatsapp] ⚠️ missing required fields — dropped")
             return
 
         store_id = sm.find_store_by_whatsapp_phone_id(phone_id)
         if not store_id:
-            print(f"[whatsapp] no store for phone_id={phone_id!r} — ignoring")
+            # Log all registered phone IDs to help diagnose mismatch
+            registered = [
+                (sid, (sm.get_ai_config(sid) or {}).get("whatsapp_phone_id", "—"))
+                for sid in [s["store_id"] for s in sm.list_stores()]
+            ]
+            print(f"[whatsapp] ❌ no store for phone_id={phone_id!r}")
+            print(f"[whatsapp]    registered phone IDs: {registered}")
             return
 
         cfg   = sm.get_ai_config(store_id) or {}
         token = (cfg.get("whatsapp_token") or "").strip()
+        print(f"[whatsapp] ✅ store={store_id!r} enabled={cfg.get('whatsapp_enabled')} token={'✓' if token else '✗'}")
         if not cfg.get("whatsapp_enabled") or not token:
+            print(f"[whatsapp] ⛔ disabled or no token — skipping")
             return
 
         # Stable per-customer session keyed by phone, so the thread persists and
@@ -3340,6 +3352,33 @@ async def _handle_whatsapp_message(msg: dict):
         print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
     except Exception as exc:
         print(f"[whatsapp] handle error: {exc}")
+
+
+@app.get("/whatsapp/debug")
+async def whatsapp_debug(request: Request):
+    """
+    Super-admin diagnostic: shows WhatsApp config for all stores.
+    Masks the token — only shows if it's set or not.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    result = []
+    for s in sm.list_stores():
+        sid = s["store_id"]
+        cfg = sm.get_ai_config(sid) or {}
+        result.append({
+            "store_id":       sid,
+            "store_name":     s.get("store_name", ""),
+            "wa_enabled":     bool(cfg.get("whatsapp_enabled")),
+            "wa_phone_id":    cfg.get("whatsapp_phone_id", ""),
+            "wa_token_set":   bool(cfg.get("whatsapp_token", "").strip()),
+            "wa_verify_token": os.getenv("WHATSAPP_VERIFY_TOKEN", "sallabot-wa"),
+            "webhook_url":    f"{os.getenv('BASE_URL','')}/whatsapp/webhook",
+        })
+    return {"stores": result}
 
 
 @app.get("/chat/history")
