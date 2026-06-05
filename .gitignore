@@ -36,3 +36,8 @@ Thumbs.db
 
 # Frontend node_modules (never commit)
 frontend/node_modules/
+
+# Playwright MCP temp files (logs, snapshots, screenshots)
+.playwright-mcp/
+finex-*.png
+page-*.png
