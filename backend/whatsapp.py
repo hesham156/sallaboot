@@ -62,23 +62,31 @@ def extract_messages(payload: dict) -> list[dict]:
                 for m in value.get("messages", []) or []:
                     sender = str(m.get("from", "") or "")
                     mtype  = m.get("type", "")
+                    interactive_id = ""
                     if mtype == "text":
                         text = ((m.get("text") or {}).get("body") or "").strip()
                     elif mtype in ("image", "document", "audio", "video"):
                         text = "📎 (أرسل العميل مرفقاً عبر واتساب)"
                     elif mtype == "interactive":
                         inter = m.get("interactive") or {}
-                        text = (((inter.get("button_reply") or inter.get("list_reply")) or {}).get("title") or "").strip()
+                        reply = inter.get("button_reply") or inter.get("list_reply") or {}
+                        text = (reply.get("title") or "").strip()
+                        # When we sent a list/buttons, each row's id carries the
+                        # rating value (e.g. "csat:5") — surfacing it lets the
+                        # CSAT handler distinguish a rating reply from a normal
+                        # text response.
+                        interactive_id = (reply.get("id") or "").strip()
                     else:
                         text = ""
-                    if not text:
+                    if not text and not interactive_id:
                         continue
                     out.append({
-                        "phone_id": phone_id,
-                        "from":     sender,
-                        "text":     text,
-                        "msg_id":   str(m.get("id", "") or ""),
-                        "name":     names.get(sender, ""),
+                        "phone_id":       phone_id,
+                        "from":           sender,
+                        "text":           text or interactive_id,
+                        "msg_id":         str(m.get("id", "") or ""),
+                        "name":           names.get(sender, ""),
+                        "interactive_id": interactive_id,
                     })
     except Exception as exc:
         print(f"[whatsapp] extract_messages error: {exc}")
@@ -116,6 +124,72 @@ async def send_text(token: str, phone_id: str, to: str, text: str) -> bool:
         print(f"[whatsapp] send_text error: {exc}")
         return False
     return ok
+
+
+async def send_list(
+    token: str,
+    phone_id: str,
+    to: str,
+    body: str,
+    button: str,
+    rows: list[dict],
+    header: str = "",
+    footer: str = "",
+) -> bool:
+    """
+    Send an interactive **list** message (one section, up to 10 rows).
+    Used for the post-conversation CSAT survey where 5 buttons wouldn't
+    fit WhatsApp's 3-button interactive cap.
+
+    Each row must be {"id": "csat:5", "title": "راضٍ تماماً"} — title is
+    capped at 24 chars by Meta. Returns True on success; never raises.
+    """
+    if not (token and phone_id and to and body and rows):
+        return False
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{phone_id}/messages"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    interactive: dict = {
+        "type": "list",
+        "body": {"text": body[:1024]},
+        "action": {
+            "button": (button or "اختر")[:20],
+            "sections": [{
+                "title": "التقييم"[:24],
+                "rows": [
+                    {
+                        "id":    str(r.get("id", ""))[:200],
+                        "title": str(r.get("title", ""))[:24],
+                        "description": str(r.get("description", ""))[:72],
+                    }
+                    for r in rows[:10]
+                    if r.get("id") and r.get("title")
+                ],
+            }],
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header[:60]}
+    if footer:
+        interactive["footer"] = {"text": footer[:60]}
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type":    "individual",
+        "to":                to,
+        "type":              "interactive",
+        "interactive":       interactive,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            if r.status_code >= 400:
+                print(f"[whatsapp] send_list failed {r.status_code}: {r.text[:300]}")
+                return False
+    except Exception as exc:
+        print(f"[whatsapp] send_list error: {exc}")
+        return False
+    return True
 
 
 def _split(text: str, limit: int) -> list[str]:

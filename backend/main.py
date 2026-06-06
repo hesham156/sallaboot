@@ -2123,6 +2123,57 @@ async def store_end_conversation(
         conv["ended_by"] = {"id": (emp or {}).get("id"), "name": agent_name}
     cs.mark_dirty(session_id)
     await cs.flush(session_id)
+
+    # 5. WhatsApp delivery — for wa: sessions push the same three messages
+    #    over the Cloud API so the customer actually receives them. The
+    #    admin dashboard already has them in the transcript (steps 1-3);
+    #    this just bridges them to the real chat.
+    if session_id.startswith("wa:"):
+        import whatsapp as wa
+        cfg = sm.get_ai_config(store_id) or {}
+        wa_token    = (cfg.get("whatsapp_token") or "").strip()
+        wa_phone_id = (cfg.get("whatsapp_phone_id") or "").strip()
+        to          = session_id[3:]
+        if wa_token and wa_phone_id and to:
+            async def _deliver_to_whatsapp():
+                try:
+                    await wa.send_text(wa_token, wa_phone_id, to, farewell)
+                    await wa.send_text(wa_token, wa_phone_id, to, thanks_line)
+                    if not req.skip_csat:
+                        target = agent_name or "ممثل خدمة العملاء"
+                        question_wa = f"كيف كانت تجربتك مع {target}؟"
+                        # Try the interactive list first (renders as nice
+                        # buttons in WhatsApp). Fall back to numbered text
+                        # so the question still arrives even if the list
+                        # API call is blocked by Meta for this phone.
+                        ok = await wa.send_list(
+                            wa_token, wa_phone_id, to,
+                            body=question_wa,
+                            button="اختر تقييماً",
+                            header="استطلاع رضا",
+                            rows=[
+                                {"id": "csat:5", "title": "راضٍ تماماً"},
+                                {"id": "csat:4", "title": "راضٍ"},
+                                {"id": "csat:3", "title": "محايد"},
+                                {"id": "csat:2", "title": "غير راضٍ"},
+                                {"id": "csat:1", "title": "غير راضٍ تماماً"},
+                            ],
+                        )
+                        if not ok:
+                            fallback = (
+                                f"{question_wa}\n\n"
+                                "ردّ بالرقم المناسب:\n"
+                                "1️⃣ غير راضٍ تماماً\n"
+                                "2️⃣ غير راضٍ\n"
+                                "3️⃣ محايد\n"
+                                "4️⃣ راضٍ\n"
+                                "5️⃣ راضٍ تماماً"
+                            )
+                            await wa.send_text(wa_token, wa_phone_id, to, fallback)
+                except Exception as exc:
+                    print(f"[end-conversation] WhatsApp delivery error: {exc}")
+            asyncio.create_task(_deliver_to_whatsapp())
+
     return {"status": "ok", "session_id": session_id, "messages": conv.get("messages", [])[-3:]}
 
 
@@ -3413,6 +3464,37 @@ async def _handle_whatsapp_message(msg: dict):
                 "channel": "whatsapp",
             })
 
+        # ── CSAT response intercept ────────────────────────────────────────
+        # If the most recent bot message was a CSAT survey, treat any reply
+        # to it as a rating instead of routing back through the agent — the
+        # bot would otherwise reply with something unrelated to the rating.
+        conv_now   = cs.all_conversations().get(session_id) or {}
+        msgs_now   = conv_now.get("messages", [])
+        csat_msg   = None
+        for prev in reversed(msgs_now):
+            role = prev.get("role")
+            if role == "user":
+                break  # newer user msg means CSAT was already answered
+            if role == "assistant" and (prev.get("meta") or {}).get("kind") == "csat":
+                csat_msg = prev
+                break
+        if csat_msg:
+            interactive_id = msg.get("interactive_id", "") or ""
+            rating = _parse_csat_reply(interactive_id, text)
+            if rating:
+                await cs.add_message(session_id, "user", text or interactive_id, store_id)
+                await cs.set_rating(session_id, rating, f"CSAT WhatsApp: {text or interactive_id}")
+                # Attribute to the agent the survey was about
+                csat_meta = csat_msg.get("meta") or {}
+                conv_now["rating_employee_id"]   = csat_meta.get("target_agent_id")
+                conv_now["rating_employee_name"] = csat_meta.get("target_agent_name", "")
+                conv_now["rated_at"]             = _dt.datetime.utcnow().isoformat()
+                cs.mark_dirty(session_id)
+                await cs.flush(session_id)
+                await wa.send_text(token, phone_id, sender, "شكراً لتقييمك 🌷")
+                print(f"[whatsapp] ⭐ CSAT recorded: {rating} for store {store_id}")
+                return
+
         if not cs.is_bot_enabled(session_id):
             # Admin took this thread over — just record the message, don't auto-reply.
             await cs.add_message(session_id, "user", text, store_id)
@@ -3426,6 +3508,41 @@ async def _handle_whatsapp_message(msg: dict):
         print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
     except Exception as exc:
         print(f"[whatsapp] handle error: {exc}")
+
+
+def _parse_csat_reply(interactive_id: str, text: str) -> int:
+    """
+    Decode a WhatsApp CSAT reply to its 1-5 rating, or 0 if it doesn't look
+    like one. Accepts:
+      - interactive list reply id "csat:N"
+      - the literal Arabic label ("راضٍ تماماً" → 5, …)
+      - a plain number 1-5
+    """
+    if interactive_id and interactive_id.startswith("csat:"):
+        try:
+            n = int(interactive_id.split(":", 1)[1])
+            return n if 1 <= n <= 5 else 0
+        except (ValueError, IndexError):
+            return 0
+    t = (text or "").strip()
+    if not t:
+        return 0
+    # Plain digit
+    if t.isdigit():
+        n = int(t)
+        return n if 1 <= n <= 5 else 0
+    # Arabic label match
+    label_map = {
+        "راضٍ تماماً":     5, "راض تماما":      5, "راضٍ تماما":  5,
+        "راضٍ":            4, "راض":           4,
+        "محايد":          3,
+        "غير راضٍ":        2, "غير راض":       2,
+        "غير راضٍ تماماً": 1, "غير راض تماما": 1, "غير راضٍ تماما": 1,
+    }
+    for k, v in label_map.items():
+        if k in t:
+            return v
+    return 0
 
 
 @app.get("/whatsapp/debug")
