@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  Card, CardBody, CardHeader, Spinner, Divider, Chip, Tooltip,
+  Button, Card, CardBody, CardHeader, Spinner, Divider, Chip, Tooltip,
 } from '@heroui/react'
 import {
   api,
@@ -83,11 +84,28 @@ function SentimentDot({ mood, count, total }: { mood: string; count: number; tot
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
+// Convert a phone number to the wa.me canonical form (no +, no leading 0,
+// no spaces / dashes). Falls back to the cleaned digits when we can't
+// detect a country code.
+function whatsappUrl(rawPhone: string, prefilledMessage: string): string {
+  const digits = (rawPhone || '').replace(/[^\d]/g, '')
+  let normalized = digits
+  if (normalized.startsWith('00')) normalized = normalized.slice(2)
+  if (normalized.startsWith('0'))  normalized = '966' + normalized.slice(1) // assume Saudi by default
+  const text = encodeURIComponent(prefilledMessage)
+  return `https://wa.me/${normalized}?text=${text}`
+}
+
 export default function Analytics({ storeId }: Props) {
+  const navigate = useNavigate()
   const [data,     setData]     = useState<AnalyticsData | null>(null)
   const [insights, setInsights] = useState<ConversationInsights | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [channel,  setChannel]  = useState<Channel>('total')
+
+  function openConv(sessionId: string) {
+    navigate(`/store/${storeId}/conversations?session=${encodeURIComponent(sessionId)}`)
+  }
 
   useEffect(() => {
     Promise.all([
@@ -416,37 +434,81 @@ export default function Analytics({ storeId }: Props) {
           </CardHeader>
           <Divider />
           <CardBody className="px-5 py-4 space-y-3">
-            {insights.at_risk_customers.slice(0, 10).map((cust: AtRiskCustomer) => (
-              <div
-                key={cust.session_id}
-                className="p-3 rounded-xl bg-danger/5 border border-danger/20 space-y-1.5"
-              >
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-foreground">
-                      {cust.customer_name !== '—' ? cust.customer_name : 'عميل مجهول'}
-                    </span>
-                    {cust.customer_phone !== '—' && (
-                      <span className="text-xs text-default-400">{cust.customer_phone}</span>
-                    )}
+            {insights.at_risk_customers.slice(0, 10).map((cust: AtRiskCustomer) => {
+              const hasPhone = cust.customer_phone && cust.customer_phone !== '—'
+              const customerName = cust.customer_name && cust.customer_name !== '—'
+                ? cust.customer_name : 'عزيزي العميل'
+              const apology =
+                `أهلاً ${customerName}،\n\n` +
+                'لاحظنا أن تجربتك معنا لم تكن بالمستوى المتوقع ونعتذر بشدة عن ذلك. ' +
+                'يسعدنا تعويضك ومتابعة طلبك شخصياً. هل يمكننا مساعدتك الآن؟'
+              return (
+                <div
+                  key={cust.session_id}
+                  className="p-3 rounded-xl bg-danger/5 border border-danger/20 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">
+                        {cust.customer_name !== '—' ? cust.customer_name : 'عميل مجهول'}
+                      </span>
+                      {cust.customer_phone !== '—' && (
+                        <span className="text-xs text-default-400" dir="ltr">{cust.customer_phone}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {cust.rating && (
+                        <Chip size="sm" color="danger" variant="flat">★ {cust.rating}</Chip>
+                      )}
+                      <Chip size="sm" color="warning" variant="flat">{cust.signal}</Chip>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {cust.rating && (
-                      <Chip size="sm" color="danger" variant="flat">★ {cust.rating}</Chip>
-                    )}
-                    <Chip size="sm" color="warning" variant="flat">{cust.signal}</Chip>
+                  {cust.last_message && (
+                    <p className="text-xs text-default-500 leading-relaxed line-clamp-2 bg-content2 px-2.5 py-1.5 rounded-lg">
+                      «{cust.last_message}»
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                    <p className="text-xs text-default-400">
+                      {new Date(cust.ts).toLocaleString('ar-SA', { dateStyle: 'short', timeStyle: 'short' })}
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm" color="danger" variant="flat"
+                        onPress={() => openConv(cust.session_id)}
+                        startContent={
+                          <svg width={13} height={13} viewBox="0 0 24 24" fill="none"
+                               stroke="currentColor" strokeWidth={2}
+                               strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                        }
+                        className="text-xs font-bold"
+                      >
+                        فتح المحادثة
+                      </Button>
+                      {hasPhone && (
+                        <Button
+                          size="sm" variant="flat"
+                          as="a"
+                          href={whatsappUrl(cust.customer_phone, apology)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          startContent={
+                            <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413"/>
+                            </svg>
+                          }
+                          className="text-xs font-bold bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"
+                        >
+                          واتساب
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
-                {cust.last_message && (
-                  <p className="text-xs text-default-500 leading-relaxed line-clamp-2 bg-content2 px-2.5 py-1.5 rounded-lg">
-                    «{cust.last_message}»
-                  </p>
-                )}
-                <p className="text-xs text-default-400">
-                  {new Date(cust.ts).toLocaleString('ar-SA', { dateStyle: 'short', timeStyle: 'short' })}
-                </p>
-              </div>
-            ))}
+              )
+            })}
             {insights.at_risk_customers.length > 10 && (
               <p className="text-xs text-default-400 text-center pt-1">
                 + {insights.at_risk_customers.length - 10} عميل آخر — راجع المحادثات للتفاصيل الكاملة

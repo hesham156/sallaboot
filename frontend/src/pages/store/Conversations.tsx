@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Button, Input, Spinner, Textarea, Avatar,
   Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
@@ -130,12 +131,43 @@ export default function Conversations({ storeId }: Props) {
   const [skipCsat, setSkipCsat]       = useState(false)
   const [endingChat, setEndingChat]   = useState(false)
 
+  // Deep-link support: when arriving from Analytics → "Open conversation"
+  // the page is loaded with ?session=<id> in the URL. We auto-open that
+  // session once the list finishes loading so the admin lands directly
+  // on the right transcript instead of having to search for it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSession = searchParams.get('session')
+
   useEffect(() => { loadConversations() }, [storeId])
   useEffect(() => {
     if (messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight
     }
   }, [selected?.messages])
+
+  // Auto-open the requested session after the list loads.
+  useEffect(() => {
+    if (!requestedSession || loading) return
+    if (selectedId === requestedSession) return
+    const match = convs.find(c => c.session_id === requestedSession)
+    if (match) {
+      openConversation(match)
+    } else {
+      // Conversation not in the visible list (older / different page) —
+      // fall back to fetching by id directly.
+      setSelectedId(requestedSession)
+      setDetailLoading(true)
+      api.getConversation(storeId, requestedSession)
+        .then(setSelected)
+        .catch(console.error)
+        .finally(() => setDetailLoading(false))
+    }
+    // Drop the query param so a refresh doesn't keep re-triggering.
+    const next = new URLSearchParams(searchParams)
+    next.delete('session')
+    setSearchParams(next, { replace: true })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedSession, loading, convs])
 
   async function loadConversations() {
     setLoading(true)
