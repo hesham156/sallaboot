@@ -1,15 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Card, CardBody, CardHeader, Spinner, Divider, Chip, Tooltip,
 } from '@heroui/react'
 import {
   api,
   Analytics as AnalyticsData,
+  ChannelStats,
   ConversationInsights,
   TopicItem,
   NonPurchaseItem,
   AtRiskCustomer,
 } from '../../api'
+
+type Channel = 'total' | 'widget' | 'whatsapp'
+
+const CHANNEL_LABELS: Record<Channel, { label: string; emoji: string; color: string }> = {
+  total:    { label: 'الإجمالي',  emoji: '📊', color: 'text-foreground' },
+  widget:   { label: 'متجر (ويدجت)', emoji: '🛍️', color: 'text-teal-500' },
+  whatsapp: { label: 'واتساب',     emoji: '🟢', color: 'text-emerald-500' },
+}
 
 interface Props { storeId: string }
 
@@ -78,6 +87,7 @@ export default function Analytics({ storeId }: Props) {
   const [data,     setData]     = useState<AnalyticsData | null>(null)
   const [insights, setInsights] = useState<ConversationInsights | null>(null)
   const [loading,  setLoading]  = useState(true)
+  const [channel,  setChannel]  = useState<Channel>('total')
 
   useEffect(() => {
     Promise.all([
@@ -89,6 +99,19 @@ export default function Analytics({ storeId }: Props) {
       .finally(() => setLoading(false))
   }, [storeId])
 
+  // Pick the slice for the chosen channel. Falls back to the top-level
+  // legacy fields if the backend hasn't been redeployed yet.
+  const slice: ChannelStats | null = useMemo(() => {
+    if (!data) return null
+    const bc = data.by_channel
+    if (bc && bc[channel]) return bc[channel]
+    return {
+      conversations: data.conversations,
+      messages:      data.messages,
+      ratings:       data.ratings,
+    }
+  }, [data, channel])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -97,12 +120,13 @@ export default function Analytics({ storeId }: Props) {
     )
   }
 
-  if (!data) return null
+  if (!data || !slice) return null
 
-  const c  = data.conversations
-  const m  = data.messages
-  const ac = data.abandoned_carts
-  const r  = data.ratings
+  const c  = slice.conversations
+  const m  = slice.messages
+  const ac = data.abandoned_carts   // not split by channel
+  const r  = slice.ratings
+  const bc = data.by_channel
 
   const HOURS  = Array.from({ length: 24 }, (_, i) => `${i}:00`)
   const maxHour = Math.max(...c.hourly_distribution, 1)
@@ -119,7 +143,90 @@ export default function Analytics({ storeId }: Props) {
 
   return (
     <div className="p-6 space-y-6" dir="rtl">
-      <h1 className="text-xl font-bold text-foreground">التحليلات</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-bold text-foreground">التحليلات</h1>
+
+        {/* Channel switcher — shown only when the backend supports by_channel */}
+        {bc && (
+          <div className="flex items-center gap-1.5 bg-content2 p-1 rounded-2xl">
+            {(['total', 'widget', 'whatsapp'] as Channel[]).map(ch => {
+              const cfg    = CHANNEL_LABELS[ch]
+              const slice2 = bc[ch]
+              const count  = slice2?.conversations.total ?? 0
+              const active = channel === ch
+              return (
+                <button
+                  key={ch}
+                  onClick={() => setChannel(ch)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    active
+                      ? 'bg-content1 shadow-sm ' + cfg.color
+                      : 'text-default-500 hover:text-foreground'
+                  }`}
+                >
+                  <span>{cfg.emoji}</span>
+                  <span>{cfg.label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                    active ? 'bg-content2' : 'bg-content1'
+                  }`}>{count}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Channel split overview — at-a-glance per-channel summary */}
+      {bc && channel === 'total' && (bc.whatsapp.conversations.total > 0 || bc.widget.conversations.total > 0) && (
+        <Card className="bg-content1 border border-divider">
+          <CardHeader className="px-5 py-4">
+            <h2 className="font-bold text-sm">التوزيع حسب القناة</h2>
+          </CardHeader>
+          <Divider />
+          <CardBody className="px-5 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(['widget', 'whatsapp'] as const).map(ch => {
+                const s    = bc[ch]
+                const cfg  = CHANNEL_LABELS[ch]
+                const all  = bc.total.conversations.total
+                const pct  = all ? Math.round((s.conversations.total / all) * 100) : 0
+                return (
+                  <button
+                    key={ch}
+                    onClick={() => setChannel(ch)}
+                    className="text-right p-4 rounded-2xl bg-content2 hover:bg-content2/70 border border-divider transition-all"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-sm font-bold flex items-center gap-1.5 ${cfg.color}`}>
+                        <span>{cfg.emoji}</span>{cfg.label}
+                      </span>
+                      <span className="text-[11px] text-default-500">{pct}%</span>
+                    </div>
+                    <div className="flex items-baseline gap-2 mb-2">
+                      <span className="text-2xl font-black text-foreground">{s.conversations.total}</span>
+                      <span className="text-xs text-default-500">محادثة</span>
+                    </div>
+                    <div className="h-2 bg-content1 rounded-full overflow-hidden mb-2">
+                      <div
+                        className={`h-full rounded-full ${
+                          ch === 'whatsapp' ? 'bg-emerald-500' : 'bg-teal-500'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-default-500">
+                      <span>👤 {s.messages.user}</span>
+                      <span>🤖 {s.messages.bot}</span>
+                      <span>👨‍💼 {s.messages.admin}</span>
+                      {s.ratings.count > 0 && <span>★ {s.ratings.avg}</span>}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

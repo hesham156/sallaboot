@@ -447,21 +447,48 @@ export interface Product {
   description?: string
 }
 
+export interface ConversationStats {
+  total: number
+  today: number
+  this_week: number
+  bot_handled: number
+  admin_takeover: number
+  avg_messages: number
+  daily_counts: { date: string; count: number }[]
+  hourly_distribution: number[]
+}
+
+export interface MessageStats {
+  total: number
+  user: number
+  bot: number
+  admin: number
+}
+
+export interface RatingStats {
+  count: number
+  avg: number
+  distribution: number[]
+}
+
+export interface ChannelStats {
+  conversations: ConversationStats
+  messages:      MessageStats
+  ratings:       RatingStats
+}
+
 export interface Analytics {
-  conversations: {
-    total: number
-    today: number
-    this_week: number
-    bot_handled: number
-    admin_takeover: number
-    avg_messages: number
-    daily_counts: { date: string; count: number }[]
-    hourly_distribution: number[]
-  }
-  messages: { total: number; user: number; bot: number; admin: number }
+  conversations:   ConversationStats
+  messages:        MessageStats
+  ratings:         RatingStats
   abandoned_carts: { total: number; recovered: number; pending: number; recovery_rate: number }
-  products: { count: number; last_sync: string }
-  ratings: { count: number; avg: number; distribution: number[] }
+  products:        { count: number; last_sync: string }
+  /** New: same shape as the legacy top-level fields, split per channel. */
+  by_channel?: {
+    widget:   ChannelStats
+    whatsapp: ChannelStats
+    total:    ChannelStats
+  }
 }
 
 // ── Conversation Insights ─────────────────────────────────────────────────

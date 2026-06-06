@@ -1558,77 +1558,143 @@ async def store_debug(store_id: str):
 
 # ── Analytics ──────────────────────────────────────────────────────────────────
 
-@app.get("/admin/{store_id}/analytics")
-async def store_analytics(store_id: str):
+def _conv_channel(session_id: str, conv: dict) -> str:
+    """Classify a conversation by its inbound channel.
+
+    `wa:` prefix on the session_id is the canonical WhatsApp marker (set
+    when /whatsapp/webhook creates the session). Fall back to the
+    customer_info.channel field for safety.
     """
-    Return aggregated analytics for a store.
-    Computed from in-memory conversation_store + store_manager cache.
-    """
+    if session_id.startswith("wa:"):
+        return "whatsapp"
+    ch = ((conv.get("customer_info") or {}).get("channel") or "").lower()
+    if ch == "whatsapp":
+        return "whatsapp"
+    return "widget"
+
+
+def _empty_channel_stats(now_utc) -> dict:
     import datetime as _dtt
-
-    now_utc = _dtt.datetime.utcnow()
-
-    # ── Conversations ──────────────────────────────────────────────────────────
-    all_convs = await cs.get_all_conversations_for_store(store_id)
-
-    total_convs   = len(all_convs)
-    today_convs   = 0
-    week_convs    = 0
-    bot_handled   = 0
-    admin_takeover = 0
-    total_msgs    = 0
-    user_msgs     = 0
-    bot_msgs      = 0
-    admin_msgs    = 0
-
-    # Daily counts: last 14 days  {date_str: count}
     daily: dict = {}
     for i in range(14):
         d = (now_utc - _dtt.timedelta(days=i)).strftime("%Y-%m-%d")
         daily[d] = 0
+    return {
+        "_daily": daily,
+        "conversations": {
+            "total": 0, "today": 0, "this_week": 0,
+            "bot_handled": 0, "admin_takeover": 0,
+            "avg_messages": 0,
+            "daily_counts": [],
+            "hourly_distribution": [0] * 24,
+        },
+        "messages": {"total": 0, "user": 0, "bot": 0, "admin": 0},
+        "ratings": {"count": 0, "avg": 0, "distribution": [0, 0, 0, 0, 0], "_sum": 0},
+    }
 
-    # Hourly distribution: 24-slot list  [count_at_hour_0, ..., count_at_hour_23]
-    hourly = [0] * 24
 
-    for conv in all_convs.values():
-        created_str = conv.get("created_at", "")
-        try:
-            created = _dtt.datetime.fromisoformat(created_str)
-            delta   = now_utc - created
-            if delta.days == 0:
-                today_convs += 1
-            if delta.days < 7:
-                week_convs += 1
-            date_key = created.strftime("%Y-%m-%d")
-            if date_key in daily:
-                daily[date_key] += 1
-            hourly[created.hour] += 1
-        except Exception:
-            pass
+def _accumulate_conv(stats: dict, conv: dict, now_utc) -> None:
+    """Fold one conversation into a channel-stats bucket (mutates `stats`)."""
+    import datetime as _dtt
 
-        if not conv.get("bot_enabled", True):
-            admin_takeover += 1
-        else:
-            bot_handled += 1
+    c = stats["conversations"]
+    c["total"] += 1
 
-        for m in conv.get("messages", []):
-            total_msgs += 1
-            role = m.get("role", "")
-            if role == "user":
-                user_msgs += 1
-            elif role == "assistant":
-                bot_msgs += 1
-            elif role == "admin":
-                admin_msgs += 1
+    created_str = conv.get("created_at", "")
+    try:
+        created = _dtt.datetime.fromisoformat(created_str)
+        delta   = now_utc - created
+        if delta.days == 0:
+            c["today"] += 1
+        if delta.days < 7:
+            c["this_week"] += 1
+        date_key = created.strftime("%Y-%m-%d")
+        if date_key in stats["_daily"]:
+            stats["_daily"][date_key] += 1
+        c["hourly_distribution"][created.hour] += 1
+    except Exception:
+        pass
 
-    avg_msgs = round(total_msgs / total_convs, 1) if total_convs else 0
+    if not conv.get("bot_enabled", True):
+        c["admin_takeover"] += 1
+    else:
+        c["bot_handled"] += 1
 
-    daily_counts = [
-        {"date": d, "count": daily[d]}
-        for d in sorted(daily.keys())
+    m = stats["messages"]
+    for msg in conv.get("messages", []):
+        m["total"] += 1
+        role = msg.get("role", "")
+        if role == "user":
+            m["user"] += 1
+        elif role == "assistant":
+            m["bot"] += 1
+        elif role == "admin":
+            m["admin"] += 1
+
+    # Rating
+    try:
+        r = int(conv.get("rating") or 0)
+    except (TypeError, ValueError):
+        r = 0
+    if 1 <= r <= 5:
+        stats["ratings"]["count"]               += 1
+        stats["ratings"]["_sum"]                += r
+        stats["ratings"]["distribution"][r - 1] += 1
+
+
+def _finalise_channel_stats(stats: dict) -> dict:
+    """Compute derived fields (avg, daily list) and drop helper keys."""
+    c = stats["conversations"]
+    m = stats["messages"]
+    r = stats["ratings"]
+
+    c["avg_messages"] = round(m["total"] / c["total"], 1) if c["total"] else 0
+    c["daily_counts"] = [
+        {"date": d, "count": stats["_daily"][d]}
+        for d in sorted(stats["_daily"].keys())
     ]
+    r["avg"] = round(r["_sum"] / r["count"], 1) if r["count"] else 0
+
+    # Remove internal-only keys
+    stats.pop("_daily", None)
+    r.pop("_sum", None)
+    return stats
+
+
+@app.get("/admin/{store_id}/analytics")
+async def store_analytics(store_id: str):
+    """
+    Return aggregated analytics for a store, split by channel.
+
+    Top-level fields (conversations / messages / ratings) reflect the
+    grand total so existing callers keep working unchanged. A new
+    `by_channel` dict carries the same shape, computed separately for
+    widget chats and WhatsApp threads, so the dashboard can show each
+    channel on its own.
+    """
+    import datetime as _dtt
+    now_utc = _dtt.datetime.utcnow()
+
+    all_convs = await cs.get_all_conversations_for_store(store_id)
+
+    # Three accumulators: widget / whatsapp / total
+    buckets = {
+        "widget":   _empty_channel_stats(now_utc),
+        "whatsapp": _empty_channel_stats(now_utc),
+        "total":    _empty_channel_stats(now_utc),
+    }
+
+    for sid, conv in all_convs.items():
+        channel = _conv_channel(sid, conv)
+        _accumulate_conv(buckets[channel], conv, now_utc)
+        _accumulate_conv(buckets["total"], conv, now_utc)
+
+    for k in buckets:
+        _finalise_channel_stats(buckets[k])
 
     # ── Abandoned carts ────────────────────────────────────────────────────────
+    # Carts come from Salla webhooks and aren't tagged by channel, so they
+    # only live at the top level.
     carts_list = list(_abandoned_carts.get(store_id, []))
     if not carts_list and db.available():
         carts_list = await db.load_abandoned_carts(store_id)
@@ -1638,32 +1704,15 @@ async def store_analytics(store_id: str):
     pending_carts  = total_carts - recovered_carts
     recovery_rate  = round(recovered_carts / total_carts * 100, 1) if total_carts else 0
 
-    # ── Products / store cache ─────────────────────────────────────────────────
     cache = sm.get_cache(store_id)
 
-    # ── Ratings ────────────────────────────────────────────────────────────────
-    rated_vals   = [c.get("rating") for c in all_convs.values() if c.get("rating")]
-    rated_count  = len(rated_vals)
-    avg_rating   = round(sum(rated_vals) / rated_count, 1) if rated_count else 0
-    distribution = [sum(1 for r in rated_vals if r == i) for i in range(1, 6)]
-
+    total = buckets["total"]
     return {
-        "conversations": {
-            "total":          total_convs,
-            "today":          today_convs,
-            "this_week":      week_convs,
-            "bot_handled":    bot_handled,
-            "admin_takeover": admin_takeover,
-            "avg_messages":   avg_msgs,
-            "daily_counts":   daily_counts,
-            "hourly_distribution": hourly,
-        },
-        "messages": {
-            "total":     total_msgs,
-            "user":      user_msgs,
-            "bot":       bot_msgs,
-            "admin":     admin_msgs,
-        },
+        # Legacy top-level fields — equal to `by_channel.total` so existing
+        # frontend code keeps reading from `.conversations`, `.messages`, etc.
+        "conversations":   total["conversations"],
+        "messages":        total["messages"],
+        "ratings":         total["ratings"],
         "abandoned_carts": {
             "total":         total_carts,
             "recovered":     recovered_carts,
@@ -1674,10 +1723,23 @@ async def store_analytics(store_id: str):
             "count":     cache.get("products_count", 0),
             "last_sync": cache.get("last_sync", "never"),
         },
-        "ratings": {
-            "count":        rated_count,
-            "avg":          avg_rating,
-            "distribution": distribution,   # [1★,2★,3★,4★,5★]
+        # New per-channel breakdown
+        "by_channel": {
+            "widget":   {
+                "conversations": buckets["widget"]["conversations"],
+                "messages":      buckets["widget"]["messages"],
+                "ratings":       buckets["widget"]["ratings"],
+            },
+            "whatsapp": {
+                "conversations": buckets["whatsapp"]["conversations"],
+                "messages":      buckets["whatsapp"]["messages"],
+                "ratings":       buckets["whatsapp"]["ratings"],
+            },
+            "total":    {
+                "conversations": total["conversations"],
+                "messages":      total["messages"],
+                "ratings":       total["ratings"],
+            },
         },
     }
 
