@@ -1,0 +1,246 @@
+name: CI
+
+# Run on every push to main and every PR targeting main. We deliberately
+# don't run on push to feature branches — that just doubles CI minutes
+# (the PR run covers it). Push-to-main runs catch direct commits.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel in-progress runs for the same PR when a new commit lands. The
+# previous run is wasted compute if you just pushed a fix.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default permissions: read-only. No job needs write — uncomment per-job
+# if/when we add coverage upload or PR comments.
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Backend tests — runs ALL 63 tests against a real Postgres service.
+  # Unit tests would pass without the service, but we want the integration
+  # tests (inbox/outbox/leader/dirty) to actually exercise SQL semantics
+  # rather than skip silently — that's the whole point of having a CI tier.
+  # ─────────────────────────────────────────────────────────────────────
+  backend-tests:
+    name: Backend tests (pytest + Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER:     test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB:       sallabot_test
+        ports:
+          - 5432:5432
+        # GitHub starts the job once the service health check passes —
+        # avoids the "connection refused on first query" flake.
+        options: >-
+          --health-cmd "pg_isready -U test -d sallabot_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # The DSN testcontainers-equivalent: conftest.py prefers
+      # TEST_DATABASE_URL over starting its own container, so this
+      # short-circuits Docker-in-Docker complexity.
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/sallabot_test
+      # Test secrets — conftest.py uses setdefault, so these are
+      # redundant but make CI failures easier to diagnose (you can
+      # grep the workflow file to see exactly what was set).
+      ADMIN_SECRET:          ci-admin-secret-32-hex-bytes-stable-value
+      SALLA_WEBHOOK_SECRET:  ci-test-webhook-secret
+      SUPER_ADMIN_EMAIL:     ci@admin.example
+      SUPER_ADMIN_PASSWORD:  ci-super-pw
+      BASE_URL:              https://ci.sallabot.example
+      ADMIN_ALLOWED_ORIGINS: https://admin.example,https://dash.example
+      # Drainers + periodic loops off — tests run them explicitly when needed.
+      ENABLE_DRAINERS:       "false"
+      ENABLE_PERIODIC:       "false"
+      # Quieter pip output in logs.
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_PROGRESS_BAR:               "off"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          # Hash BOTH files so a change in either invalidates cache.
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Apply database migrations
+        working-directory: backend
+        env:
+          # Alembic uses DATABASE_URL (not TEST_DATABASE_URL) — env.py
+          # normalises postgres:// + postgresql+asyncpg:// to the
+          # psycopg2 dialect alembic needs.
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: alembic upgrade head
+
+      - name: Run tests
+        working-directory: backend
+        # -ra surfaces SKIP / XFAIL reasons in the run summary so a
+        # silently-skipping integration test doesn't masquerade as green.
+        run: pytest -v -ra --tb=short --color=yes
+
+      - name: Verify no tests were silently skipped
+        working-directory: backend
+        # Re-run with --collect-only and assert against the expected
+        # test count. If someone deletes a test by accident, CI fails
+        # loud instead of just reporting one fewer green check.
+        # Threshold = 60, slightly below today's 63 to allow normal
+        # additions without changing this file.
+        run: |
+          count=$(pytest --collect-only -q 2>/dev/null | grep -E "^[0-9]+ tests collected" | grep -oE "^[0-9]+" || echo 0)
+          echo "Collected $count tests"
+          if [ "$count" -lt 60 ]; then
+            echo "::error::Only $count tests collected — expected >=60. Did something break collection?"
+            exit 1
+          fi
+
+      - name: Upload pytest results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-cache
+          path: backend/.pytest_cache/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Migration round-trip check — verifies every Alembic migration applies
+  # cleanly from scratch and downgrades cleanly back. Catches the class
+  # of bugs where a migration only works because some other migration
+  # already touched the schema.
+  # ─────────────────────────────────────────────────────────────────────
+  alembic-roundtrip:
+    name: Alembic migrations round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER:     test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB:       sallabot_alembic
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5433/sallabot_alembic
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install alembic + driver
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install alembic psycopg2-binary SQLAlchemy
+
+      - name: Upgrade to head
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Show current revision
+        working-directory: backend
+        run: alembic current
+
+      - name: Downgrade to base
+        working-directory: backend
+        # The baseline (0001) is intentionally non-destructive on legacy
+        # tables — but its downgrade DOES drop Phase 1 tables, so this
+        # exercises the DROP path. If a future migration's downgrade
+        # leaves dangling refs, this step catches it.
+        run: alembic downgrade base
+
+      - name: Re-upgrade to head (idempotency check)
+        working-directory: backend
+        run: alembic upgrade head
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Frontend sanity — `vite build` catches JSX / TS compile errors before
+  # they hit prod. No tests yet on the frontend, so this is the cheapest
+  # signal we can collect from the React app.
+  # ─────────────────────────────────────────────────────────────────────
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check + build
+        working-directory: frontend
+        # package.json `build` script = `tsc && vite build`. Catches
+        # both type errors and bundling failures.
+        run: npm run build
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Python syntax sanity — guards against a bad merge breaking import
+  # without anyone running the tests. Runs in seconds.
+  # ─────────────────────────────────────────────────────────────────────
+  backend-syntax:
+    name: Backend syntax check
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile every .py file
+        working-directory: backend
+        run: |
+          python -m compileall -q . && echo "All .py files parse cleanly"

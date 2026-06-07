@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -19,8 +18,22 @@ from typing import Optional
 import hmac
 import hashlib
 
+# All request/response schemas live in models.py — re-export the names
+# main.py historically defined so any external code that imported them
+# from `main` keeps working during the Phase 2 migration.
+from models import (
+    ChatRequest, ChatResponse, RateRequest,
+    AdminReplyRequest, BotToggleRequest, EndConversationRequest,
+    LoginRequest, EmployeeLoginRequest, PasswordChangeRequest,
+    AIConfigRequest, CustomKnowledgeRequest, TrainingTextRequest,
+    NotificationSettingsRequest,
+    EmployeeCreateRequest, EmployeeUpdateRequest,
+    ManualRegisterRequest,
+)
+
 import re as _re
 import time as _time
+import socket as _socket
 import collections as _collections
 import store_manager as sm
 import auth as _auth
@@ -31,16 +44,30 @@ import conversation_store as cs
 import pricing_calculator as pc
 import store_brain as brain
 import smart_router
+import realtime
 
-# ── Rate limiter for login endpoints (DB-backed, survives restarts) ──────────
+# ── Process identity ─────────────────────────────────────────────────────────
+# Stable identifier for this process. Used as:
+#   • the `claimed_by` value when draining webhook_inbox / outbox rows
+#   • the `holder` value when acquiring leader_locks (so we see which
+#     instance is currently running periodic jobs from SELECT * FROM
+#     leader_locks)
+# Format: <role>:<hostname>:<pid> — role distinguishes web from worker
+# when both run in the same Railway project. Worker process overrides
+# the role via the WORKER_ROLE env var.
+_WORKER_ID = f"{os.getenv('WORKER_ROLE', 'web')}:{_socket.gethostname()}:{os.getpid()}"
+
+# ── Rate limiter (DB-backed, survives restarts) ─────────────────────────────
+# Used by login endpoints AND by /chat. The login_attempts table is a
+# generic (attempt_key, created_at) log — we reuse it as a sliding-window
+# counter for any rate-limit purpose by namespacing the key prefix.
 
 async def _is_rate_limited(attempt_key: str, max_attempts: int = 5, window: int = 300) -> bool:
     """
-    Return True if `attempt_key` has exceeded `max_attempts` login attempts in
-    the last `window` seconds. Persists to PostgreSQL so a server restart
-    doesn't reset an attacker's counter.
-
-    Records the new attempt as a side effect — call once per login try.
+    Return True if `attempt_key` has exceeded `max_attempts` events in the
+    last `window` seconds. Persists to PostgreSQL so a server restart doesn't
+    reset an attacker's counter. Records the new attempt as a side effect —
+    call once per event.
     """
     if db.available():
         count = await db.count_recent_login_attempts(attempt_key, window)
@@ -53,8 +80,51 @@ async def _is_rate_limited(attempt_key: str, max_attempts: int = 5, window: int 
     # when the DB is down would brick the admin panel.
     return False
 
+
+# Public /chat rate-limit budgets — tuned for an attentive human, not a bot.
+# These are intentionally loose: the goal is to prevent LLM-cost abuse from a
+# scripted hammer, NOT to throttle real shoppers. If a real user trips this,
+# the limits are too low.
+CHAT_RL_PER_SESSION = (40, 60)    # 40 msgs / 60s per session (typing fast is fine)
+CHAT_RL_PER_IP      = (200, 60)   # 200 msgs / 60s per IP (multi-tab / shared NAT)
+CHAT_RL_PER_STORE   = (2000, 60)  # 2000 msgs / 60s per store (high — protects spend)
+
+
+async def _chat_rate_limited(store_id: str, session_id: str, ip: str) -> str | None:
+    """
+    Multi-axis rate limit for the public /chat endpoint. Returns a string
+    naming the axis that tripped (for logs / response detail), or None if
+    the request may proceed.
+
+    Skipped when the DB isn't connected — fail-open like the login limiter.
+    """
+    if not db.available():
+        return None
+
+    sess_max, sess_win = CHAT_RL_PER_SESSION
+    ip_max,   ip_win   = CHAT_RL_PER_IP
+    str_max,  str_win  = CHAT_RL_PER_STORE
+
+    if await _is_rate_limited(f"chat:s:{session_id}", sess_max, sess_win):
+        return "session"
+    if await _is_rate_limited(f"chat:i:{ip}",         ip_max,   ip_win):
+        return "ip"
+    if await _is_rate_limited(f"chat:t:{store_id}",   str_max,  str_win):
+        return "store"
+    return None
+
 # Store IDs that are reserved and must never be used as real Salla merchant IDs
 _RESERVED_IDS = {"super", "admin", "stores", "auth", "default"}
+
+
+def _enable_drainers() -> bool:
+    """True unless the deploy explicitly turned inbox/outbox drainers off."""
+    return os.getenv("ENABLE_DRAINERS", "true").lower() != "false"
+
+
+def _enable_periodic() -> bool:
+    """True unless the deploy explicitly turned periodic loops off."""
+    return os.getenv("ENABLE_PERIODIC", "true").lower() != "false"
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
@@ -69,186 +139,85 @@ ALLOWED_EXTENSIONS = {
 app = FastAPI(title="Salla Printing Chatbot — Multi-tenant", version="2.0.0")
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Load all registered stores and trigger background sync for each."""
-    # 1. Connect to PostgreSQL (no-op if DATABASE_URL not set)
-    await db.init()
-
-    # 2. Load stores: JSON files first (fallback), then DB overwrites
-    sm.load_all_stores()
-    await sm.load_from_db()
-
-    # 3. Restore recent conversations from DB
-    await cs.load_conversations_from_db()
-
-    # 4. Restore global app-level settings (e.g. bot_globally_enabled)
-    await cs.load_globals_from_db()
-
-    # Always register env-var token as "default" store — survives Railway restarts
-    env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
-    if env_token and not sm.is_registered("default"):
-        sm.register_store(
-            "default", env_token,
-            os.getenv("SALLA_REFRESH_TOKEN", ""),
-            {"name": "المتجر الافتراضي"},
-        )
-        print("[startup] Registered 'default' store from SALLA_ACCESS_TOKEN env var")
-
-    for store in sm.list_stores():
-        token = sm.get_access_token(store["store_id"])
-        if token:
-            asyncio.create_task(_sync_task(store["store_id"], token))
-
-    # Start background proactive token refresh (checks every hour)
-    asyncio.create_task(_token_refresh_loop())
-    print("[startup] 🔄 Token auto-refresh loop started")
-
-    # Start periodic flush loop (safety net: saves dirty sessions every 5 min)
-    asyncio.create_task(_periodic_flush_loop())
-    print("[startup] 💾 Periodic conversation flush loop started (every 5 min)")
-
-    # Start periodic cleanup loop (prunes old webhook_seen / login_attempts / webhook_log)
-    asyncio.create_task(_periodic_cleanup_loop())
-    print("[startup] 🧹 Periodic DB cleanup loop started (every 6 hours)")
-
-    # ── Critical warning if DB is not connected ────────────────────────────────
-    db_st = db.get_status()
-    if not db_st["connected"]:
-        if not db_st["database_url"]:
-            print("=" * 60)
-            print("⛔  WARNING: DATABASE_URL is NOT set!")
-            print("    Store data (tokens, AI config, passwords) will be")
-            print("    DELETED on every Railway deploy / restart.")
-            print("    Fix: Add a PostgreSQL service in Railway and link it.")
-            print("=" * 60)
-        else:
-            print("=" * 60)
-            print("⛔  WARNING: DATABASE_URL is set but connection FAILED!")
-            print("    Store data will NOT be persisted between deploys.")
-            print("=" * 60)
-    else:
-        print(f"[startup] 💾 DB connected — {len(sm.list_stores())} stores persisted")
+# ── Lifecycle (startup / shutdown / background loops) ────────────────────
+# All of it lives in lifecycle.py now. register() wires the FastAPI
+# startup + shutdown hooks. The drainer loops + periodic loops live there
+# too — worker.py imports them directly so the worker process runs the
+# same code without the FastAPI app.
+import lifecycle as _lc
+_lc.register(app)
+# Backward-compat aliases — worker.py and tests still reach into
+# main._WORKER_ID / main._token_refresh_loop / etc.
+_WORKER_ID                 = _lc.WORKER_ID
+_enable_drainers           = _lc.enable_drainers
+_enable_periodic           = _lc.enable_periodic
+_sync_task                 = _lc.sync_task
+_check_expiring_tokens     = _lc.check_expiring_tokens
+_token_refresh_loop        = _lc.token_refresh_loop
+_periodic_flush_loop       = _lc.periodic_flush_loop
+_periodic_cleanup_loop     = _lc.periodic_cleanup_loop
+_inbox_drain_loop          = _lc.inbox_drain_loop
+_outbox_drain_loop         = _lc.outbox_drain_loop
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
+# ── Inbox / outbox dispatchers ───────────────────────────────────────────
+# Called by lifecycle.inbox_drain_loop / outbox_drain_loop via late
+# import. Kept in main.py for now because they reference webhook handlers
+# (_process_salla_event, _handle_whatsapp_message) that move to
+# routers/webhooks.py in P2-6.
+
+async def _process_inbox_row(row: dict) -> None:
     """
-    Flush ALL in-memory conversation state to PostgreSQL before the server stops.
-    Railway sends SIGTERM and waits ~10 s for graceful shutdown — this makes
-    sure no cart items, customer info, or messages are lost on every deploy.
+    Dispatch one inbox row to its source-specific handler. Raises on failure
+    so the drainer can mark the row failed/dead with the right backoff.
     """
-    if not db.available():
+    source = row["source"]
+    payload = row["payload"] or {}
+    if source == "salla":
+        event = row.get("event_type") or payload.get("event", "")
+        merchant_id = row.get("store_id") or str(payload.get("merchant", ""))
+        data = payload.get("data") or {}
+        await _process_salla_event(event, merchant_id, data)
         return
-    print("[shutdown] 💾 Flushing all conversations to DB …")
-    saved = await cs.flush_all()
-    print(f"[shutdown] ✅ Flushed {saved} conversation(s) to PostgreSQL")
+    if source == "whatsapp":
+        await _handle_whatsapp_message(payload)
+        return
+    raise ValueError(f"unknown inbox source: {source!r}")
 
 
-async def _periodic_flush_loop():
+async def _deliver_outbox_row(row: dict) -> None:
     """
-    Background safety-net: persist any sessions marked dirty every 5 minutes.
-    This catches state that was mutated but not yet explicitly flushed —
-    e.g. if a tool call crashed between the mutation and the explicit flush().
+    Dispatch one outbox row to its kind-specific sender. Raises on failure
+    so the drainer applies the configured backoff (or DLQ after MAX_ATTEMPTS).
     """
-    await asyncio.sleep(60)   # let startup finish first
-    while True:
-        try:
-            saved = await cs.flush_dirty()
-            if saved:
-                print(f"[periodic_flush] 💾 Flushed {saved} dirty session(s)")
-        except Exception as exc:
-            print(f"[periodic_flush] ❌ Error: {exc}")
-        await asyncio.sleep(300)  # every 5 minutes
+    kind = row["kind"]
+    payload = row["payload"] or {}
+    store_id = row.get("store_id") or ""
 
+    if kind == "notify_event":
+        import notifications as _notif_mod
+        await _notif_mod.deliver_outbox_row(store_id, payload)
+        return
 
-async def _periodic_cleanup_loop():
-    """
-    Background DB hygiene — runs every 6 hours:
-      • webhook_seen: drop dedup keys older than 24h (Salla retries cap at 15 min)
-      • login_attempts: drop attempts older than 24h (rate-limit window is 5 min)
-      • webhook_log: drop log rows older than 30 days
-    Without this the small tables grow forever and slow down queries.
-    """
-    await asyncio.sleep(300)   # wait 5 min after startup
-    while True:
-        try:
-            seen   = await db.prune_webhook_seen(keep_last_hours=24)
-            logins = await db.prune_login_attempts(keep_last_hours=24)
-            wlog   = await db.prune_webhook_log(keep_last_days=30)
-            if seen or logins or wlog:
-                print(
-                    f"[periodic_cleanup] 🧹 Pruned: webhook_seen={seen}, "
-                    f"login_attempts={logins}, webhook_log={wlog}"
-                )
-        except Exception as exc:
-            print(f"[periodic_cleanup] ❌ Error: {exc}")
-        await asyncio.sleep(6 * 3600)  # every 6 hours
+    if kind == "whatsapp_send":
+        import whatsapp as wa
+        cfg = sm.get_ai_config(store_id) or {}
+        token = (cfg.get("whatsapp_token") or "").strip()
+        phone_id = payload.get("phone_id") or (cfg.get("whatsapp_phone_id") or "")
+        to       = payload.get("to", "")
+        text     = payload.get("text", "")
+        if not (token and phone_id and to and text):
+            print(f"[outbox] whatsapp_send skipped (store={store_id}): missing config")
+            return
+        ok = await wa.send_text(token, phone_id, to, text)
+        if not ok:
+            raise RuntimeError("whatsapp send failed (see whatsapp.py log)")
+        return
 
-
-async def _sync_task(store_id: str, token: str):
-    try:
-        await sync_store(token, store_id)
-        print(f"✅ Store sync completed for {store_id!r}")
-    except Exception as e:
-        print(f"⚠️ Store sync failed for {store_id!r}: {e}")
+    raise ValueError(f"unknown outbox kind: {kind!r}")
 
 
 # ── Proactive token refresh ────────────────────────────────────────────────────
-
-async def _check_expiring_tokens():
-    """
-    Proactively refresh any store token that expires within 2 days.
-    Called by _token_refresh_loop() every hour and can also be triggered manually.
-    """
-    from salla_oauth import refresh_access_token
-
-    now       = _dt.datetime.utcnow()
-    threshold = now + _dt.timedelta(days=2)
-    refreshed = 0
-
-    for store in sm.list_stores():
-        sid            = store["store_id"]
-        expires_at_str = sm.get_token_expires_at(sid)
-        if not expires_at_str:
-            continue  # no expiry data yet — rely on reactive 401 refresh
-        try:
-            expires_at = _dt.datetime.fromisoformat(expires_at_str)
-        except Exception:
-            continue
-        if expires_at <= threshold:
-            days_left = max(0, (expires_at - now).days)
-            print(f"[token_refresh] 🔄 Store {sid!r} expires in {days_left}d — proactive refresh …")
-            try:
-                await refresh_access_token(sid)
-                print(f"[token_refresh] ✅ Proactive refresh OK for {sid!r}")
-                refreshed += 1
-            except Exception as exc:
-                print(f"[token_refresh] ❌ Proactive refresh FAILED for {sid!r}: {exc}")
-
-    if refreshed:
-        print(f"[token_refresh] {refreshed} store(s) refreshed proactively")
-
-
-async def _token_refresh_loop():
-    """
-    Background task: check for expiring tokens every hour.
-    Waits 2 minutes after startup to let the app fully initialise first.
-    """
-    await asyncio.sleep(120)          # let startup settle
-    while True:
-        try:
-            await _check_expiring_tokens()
-        except Exception as exc:
-            print(f"[token_refresh] Unexpected loop error: {exc}")
-        await asyncio.sleep(3_600)    # re-check every hour
-
-
-# CORS middleware is registered LAST (below admin_auth_middleware) so it ends
-# up as the OUTERMOST layer — this guarantees that even error responses (500,
-# 502, auth rejections) include Access-Control-Allow-Origin so the browser
-# doesn't show a misleading "blocked by CORS" instead of the real error.
-# See the CORS block further down in this file.
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
@@ -267,597 +236,53 @@ if _ADMIN_DIST_DIR.exists():
 
 
 def _serve_react_or_legacy() -> HTMLResponse:
-    """Serve the new React app if built; fall back to legacy admin.html."""
+    """
+    Legacy helper kept for any in-file callers (none after Phase 2.4
+    — but importable). The canonical version lives in
+    routers/public.py and is what the SPA endpoints actually use.
+    """
     if _ADMIN_DIST_IDX.exists():
         return HTMLResponse(_ADMIN_DIST_IDX.read_text(encoding="utf-8"))
     return HTMLResponse(_ADMIN_HTML.read_text(encoding="utf-8"))
 
 
-# ── Auth middleware ────────────────────────────────────────────────────────────
-# Protects all per-store admin API routes (not the HTML pages or auth endpoints).
-_PROTECTED_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees)"
-)
-_SUPER_PROTECTED_RE = _re.compile(r"^/admin/stores$")
+# Public router — landing pages, /health, /env-check, /widget.js,
+# /snippet, /test-widget, /admin/stores list, super-admin force-sync.
+from routers import public as _public_router
+app.include_router(_public_router.router)
 
-# Paths that an "agent" employee MUST NOT reach (manager + owner only).
-# Conversations / orders / abandoned-carts / info / bot status stay open
-# because that's the customer-service work they're hired to do.
-_MANAGER_ONLY_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)[^/]+/(settings|analytics|sync|products|debug|webhooks|training|brain|pricing)"
-)
-# Owner-only paths (blocks BOTH agents and managers).
-_OWNER_ONLY_RE = _re.compile(
-    r"^/admin/(?!stores$|auth/)[^/]+/(employees|settings/password)"
-)
+# Auth router — super/store/employee login + token verify.
+from routers import auth as _auth_router
+app.include_router(_auth_router.router)
 
-
-@app.middleware("http")
-async def admin_auth_middleware(request: Request, call_next):
-    path = request.url.path
-
-    # Per-store API routes
-    m = _PROTECTED_RE.match(path)
-    if m:
-        store_id = m.group(1)
-        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-        claims = _auth.verify_token(token)
-        if not claims:
-            return JSONResponse({"detail": "يرجى تسجيل الدخول"}, status_code=401)
-        if not claims.get("su") and claims.get("s") != store_id:
-            return JSONResponse({"detail": "غير مصرح لك بالوصول"}, status_code=403)
-
-        # Role-based gating (super always passes). The store owner has no
-        # "eid" claim; managers have eid+er=manager; agents have eid+er=agent.
-        if not claims.get("su") and "eid" in claims:
-            role = claims.get("er", "agent")
-            # Owner-only paths block everyone except the store owner
-            if _OWNER_ONLY_RE.match(path):
-                return JSONResponse(
-                    {"detail": "هذا الإجراء مخصّص لمالك المتجر"}, status_code=403,
-                )
-            # Manager-only paths block agents
-            if role == "agent" and _MANAGER_ONLY_RE.match(path):
-                return JSONResponse(
-                    {"detail": "صلاحيتك لا تسمح بهذا الإجراء"}, status_code=403,
-                )
-
-    # Super admin: protect store list
-    elif _SUPER_PROTECTED_RE.match(path):
-        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-        claims = _auth.verify_token(token)
-        if not claims or not claims.get("su"):
-            return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
-
-    response = await call_next(request)
-
-    # ── Security hardening headers (defense-in-depth) ─────────────────────────
-    # nosniff + a sane referrer policy are safe everywhere. Clickjacking
-    # protection is applied only to the admin dashboard pages — never the
-    # script-injected widget or the /chat API, so embedding still works.
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    if path == "/admin" or path.startswith("/admin/"):
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-    return response
+# Webhook router — Salla + WhatsApp ingest + per-store webhook log +
+# super-admin diagnostics. Also exposes process_salla_event() and
+# handle_whatsapp_message() so the inbox drainer can dispatch into them.
+from routers import webhooks as _webhooks_router
+app.include_router(_webhooks_router.router)
+# Backward-compat aliases — the drainer dispatchers + tests reference
+# these names. Phase 2 keeps the legacy underscored names alive.
+_process_salla_event      = _webhooks_router.process_salla_event
+_handle_whatsapp_message  = _webhooks_router.handle_whatsapp_message
+_verify_signature         = _webhooks_router._verify_signature
+_log_event                = _webhooks_router._log_event
 
 
-# CORS registered AFTER admin_auth_middleware so it becomes the outermost
-# layer of the middleware chain (Starlette wraps in reverse order). Putting
-# CORS outermost means every response — including 401s from auth and 500s
-# from route handlers — carries the right Access-Control-Allow-* headers,
-# so the browser shows the actual status code instead of a misleading
-# "blocked by CORS" message.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,
-)
+# ── Middleware moved to middleware.py ────────────────────────────────────
+# Both auth + CORS middlewares live in middleware.py now. register()
+# attaches them in the correct order so CORS wraps auth.
+import middleware as _mw
+_mw.register(app)
 
 
-# ── Models ─────────────────────────────────────────────────────────────────────
-class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-    store_id: Optional[str] = "default"
-    # Salla storefront SDK passes the logged-in customer's ID here. When
-    # present, the backend looks up the customer's profile from Salla
-    # (name, phone, email, city, gender) and links any future conversation
-    # to it — so the same customer's chat history follows them across
-    # devices and re-opens.
-    customer_id: Optional[str] = None
-    customer_name: Optional[str] = None   # widget hint when SDK has it
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    session_id: str
-    bot_enabled: bool = True
-    components: Optional[list] = None   # rich UI components (product cards, cart, checkout…)
-    cart_count: int = 0                 # current cart item count for badge
-
-
-class AdminReplyRequest(BaseModel):
-    message: str
-
-
-class BotToggleRequest(BaseModel):
-    enabled: bool
-
-
-class LoginRequest(BaseModel):
-    password: str
-    email: Optional[str] = ""
-
-
-class AIConfigRequest(BaseModel):
-    groq_api_key:      Optional[str] = ""
-    anthropic_api_key: Optional[str] = ""
-    openai_api_key:    Optional[str] = ""  # sk-proj-...
-    ai_model:          Optional[str] = ""  # e.g. "gpt-4o", "llama-3.3-70b-versatile", "claude-sonnet-4-6"
-    bot_name:          Optional[str] = ""
-    store_type:        Optional[str] = None  # "printing" | "general" — gates printing features
-    # WhatsApp Cloud API (Meta) — per-store channel config
-    whatsapp_token:    Optional[str] = None  # access token (write-only; "" keeps existing)
-    whatsapp_phone_id: Optional[str] = None  # Phone Number ID
-    whatsapp_enabled:  Optional[bool] = None
-
-
-class PasswordChangeRequest(BaseModel):
-    current_password: str
-    new_password:     str
-
-
-class RateRequest(BaseModel):
-    session_id: str
-    store_id:   str = "default"
-    rating:     int          # 1 – 5
-    comment:    str = ""
-
-
-class EmployeeCreateRequest(BaseModel):
-    name:     str
-    email:    str
-    password: str
-    role:     Optional[str] = "agent"     # 'agent' | 'manager'
-    active:   Optional[bool] = True
-
-
-class EmployeeUpdateRequest(BaseModel):
-    name:     Optional[str]  = None
-    email:    Optional[str]  = None
-    password: Optional[str]  = None       # set to a new value to change it
-    role:     Optional[str]  = None
-    active:   Optional[bool] = None
-
-
-class EmployeeLoginRequest(BaseModel):
-    email:    str
-    password: str
-
-
-class EndConversationRequest(BaseModel):
-    farewell:  Optional[str] = ""        # employee farewell text
-    skip_csat: Optional[bool] = False    # if true, don't post the CSAT survey
+# ── Models moved to models.py (re-exported via the import above) ─────────
 
 
 # ── Utility endpoints ──────────────────────────────────────────────────────────
-@app.get("/env-check")
-async def env_check(request: Request):
-    """
-    Health / diagnostics endpoint.
-    Basic info is public (needed to debug widget issues).
-    Security-sensitive flags (default password, ADMIN_SECRET stability) are
-    ONLY returned to authenticated super-admins to avoid leaking the security
-    posture to unauthenticated callers.
-    """
-    stores    = sm.list_stores()
-    db_status = db.get_status()
-    store_agents = []
-    for s in stores:
-        sid = s["store_id"]
-        a   = sm.get_agent(sid)
-        store_agents.append({
-            "store_id":   sid,
-            "store_name": s.get("store_name", ""),
-            "agent_ok":   a is not None,
-            "has_ai_cfg": s.get("has_ai_config", False),
-        })
+# env-check, force-db-sync, widget.js, snippet, test-widget, health,
+# SPA shells, and /admin/stores live in routers/public.py now.
 
-    if not db_status["connected"]:
-        if not db_status["database_url"]:
-            print("[startup] ⚠️  DATABASE_URL not set — store data will be LOST on every deploy!")
-        else:
-            print("[startup] ⚠️  DATABASE_URL is set but DB connection failed — check Railway logs")
-
-    result: dict = {
-        "GROQ_API_KEY":           bool(os.getenv("GROQ_API_KEY")),
-        "ANTHROPIC_API_KEY":      bool(os.getenv("ANTHROPIC_API_KEY")),
-        "SALLA_ACCESS_TOKEN":     bool(os.getenv("SALLA_ACCESS_TOKEN")),
-        "SALLA_WEBHOOK_SECRET":   bool(os.getenv("SALLA_WEBHOOK_SECRET")),
-        "DATABASE_URL":           db_status["database_url"],
-        "DB_CONNECTED":           db_status["connected"],
-        "BASE_URL":               os.getenv("BASE_URL", "not set"),
-        "stores_registered":      len(stores),
-        "stores":                 store_agents,
-    }
-
-    # Security-sensitive diagnostics — only visible to authenticated super-admins
-    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    claims = _auth.verify_token(token)
-    if claims and claims.get("su"):
-        super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
-        result["ADMIN_SECRET_STABLE"]             = _auth.ADMIN_SECRET_STABLE
-        result["SUPER_ADMIN_PASSWORD_IS_DEFAULT"] = (super_pass == "admin")
-
-    return result
-
-
-@app.post("/admin/force-db-sync")
-async def force_db_sync(request: Request):
-    """
-    Super-admin: force-save every in-memory store to PostgreSQL.
-    Use this to migrate data after connecting a new DB, or to recover
-    from a situation where DB wasn't connected during registration.
-    """
-    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    claims = _auth.verify_token(token)
-    if not claims or not claims.get("su"):
-        raise HTTPException(403, "مصرح للمدير العام فقط")
-
-    if not db.available():
-        raise HTTPException(503, "قاعدة البيانات غير متصلة. تأكد من إعداد DATABASE_URL في Railway.")
-
-    # Build the list of all stores with their full token dicts
-    stores_data = []
-    for s in sm.list_stores():
-        sid    = s["store_id"]
-        tokens = sm.get_store_info(sid)
-        if tokens:
-            stores_data.append({"store_id": sid, "tokens": tokens})
-
-    saved = await db.force_save_all_stores(stores_data)
-    print(f"[admin] force-db-sync: saved {saved}/{len(stores_data)} stores to DB")
-    return {
-        "status":  "ok",
-        "saved":   saved,
-        "total":   len(stores_data),
-        "message": f"تم حفظ {saved} متجر في قاعدة البيانات بنجاح ✅",
-    }
-
-
-@app.get("/widget.js")
-async def serve_widget():
-    widget_path = Path(__file__).parent / "widget.js"
-    return FileResponse(widget_path, media_type="application/javascript")
-
-
-@app.get("/snippet")
-async def snippet_guide():
-    """
-    Public page — shows the exact Salla Snippets code the app developer needs
-    to paste in the Partners Portal (App → Snippets → New Snippet).
-
-    Uses {{ merchant.id }} so Salla resolves the correct store ID automatically
-    for every merchant that installs the app.
-    """
-    base = os.getenv("BASE_URL", "http://localhost:8000")
-    snippet_code = (
-        f"<!-- Salla Chat Bot — paste this in Partners Portal → App → Snippets -->\n"
-        f"<script>\n"
-        f"window.SallaChatConfig = {{\n"
-        f'  storeId:      "{{{{ merchant.id }}}}",\n'
-        f'  storeName:    "{{{{ store.name }}}}",\n'
-        f'  primaryColor: "#1a56db",\n'
-        f'  position:     "left"\n'
-        f"}};\n"
-        f"</script>\n"
-        f'<script src="{base}/widget.js" defer></script>'
-    )
-    html = f"""<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Salla Snippets — كود التضمين التلقائي</title>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap" rel="stylesheet">
-<style>
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:'Tajawal',sans-serif;background:#f1f5f9;color:#1e293b;padding:32px;direction:rtl}}
-  .card{{background:#fff;border-radius:16px;padding:28px 32px;max-width:820px;margin:0 auto;box-shadow:0 2px 16px rgba(0,0,0,.08)}}
-  h1{{font-size:22px;font-weight:800;margin-bottom:6px}}
-  .sub{{color:#64748b;font-size:14px;margin-bottom:24px}}
-  .steps{{counter-reset:step;display:flex;flex-direction:column;gap:12px;margin-bottom:24px}}
-  .step{{display:flex;gap:12px;align-items:flex-start;font-size:14px;line-height:1.6}}
-  .step::before{{counter-increment:step;content:counter(step);min-width:26px;height:26px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0;margin-top:1px}}
-  code{{background:#f1f5f9;padding:2px 7px;border-radius:4px;font-size:13px;font-family:monospace}}
-  .code-box{{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:20px;font-family:monospace;font-size:13px;line-height:1.7;white-space:pre;overflow-x:auto;position:relative;margin-bottom:16px}}
-  .copy-btn{{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:9px 20px;font-family:'Tajawal',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}}
-  .copy-btn:hover{{background:#2563eb}}
-  .alert{{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:12px 16px;font-size:13px;line-height:1.6}}
-  a{{color:#3b82f6}}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>🧩 Salla Snippets — تضمين تلقائي للبوت</h1>
-  <p class="sub">هذا الكود يُضاف مرة واحدة في Partners Portal وسلة تحقنه تلقائياً في كل متجر يثبّت تطبيقك</p>
-
-  <div class="steps">
-    <div class="step">افتح <a href="https://salla.partners" target="_blank">salla.partners</a> ← تطبيقاتي ← تطبيقك ← Snippets</div>
-    <div class="step">اضغط <strong>إنشاء Snippet جديد</strong></div>
-    <div class="step">اختر الموضع: <code>Body End</code> (قبل نهاية &lt;body&gt;)</div>
-    <div class="step">الصق الكود التالي كاملاً ثم احفظ</div>
-    <div class="step">عند تثبيت أي متجر للتطبيق، البوت يظهر تلقائياً بدون أي إعداد إضافي ✅</div>
-  </div>
-
-  <div class="code-box" id="snippet-code">{snippet_code}</div>
-  <button class="copy-btn" onclick="copySnippet()">📋 نسخ الكود</button>
-
-  <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
-  <div class="alert">
-    💡 <strong>ملاحظة:</strong> <code>{{{{ merchant.id }}}}</code> و <code>{{{{ store.name }}}}</code>
-    يُستبدلان تلقائياً بسلة بمعرّف وباسم المتجر الحقيقي — لا تغيّر هذه القيم يدوياً.
-    <br>يمكنك تغيير <code>primaryColor</code> و <code>position</code> حسب تصميم تطبيقك.
-  </div>
-</div>
-
-<script>
-function copySnippet() {{
-  var code = document.getElementById('snippet-code').textContent;
-  navigator.clipboard.writeText(code).then(function() {{
-    var btn = document.querySelector('.copy-btn');
-    btn.textContent = '✅ تم النسخ!';
-    setTimeout(function(){{ btn.textContent = '📋 نسخ الكود'; }}, 2000);
-  }});
-}}
-</script>
-</body>
-</html>"""
-    return HTMLResponse(html)
-
-
-@app.get("/test-widget/{store_id}", response_class=HTMLResponse)
-async def test_widget_page(store_id: str):
-    """
-    Quick test page — embeds the widget with the *real* store_id so developers
-    can test the bot without going through Salla Snippets.
-    Linked from the admin dashboard 'Test Bot' button.
-    """
-    base  = os.getenv("BASE_URL", "http://localhost:8000")
-    info  = sm.get_store_info(store_id)
-    name  = info.get("store_name", f"متجر {store_id}")
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>اختبار بوت — {name}</title>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
-<style>
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:'Tajawal',sans-serif;background:#f1f5f9;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px}}
-  .card{{background:#fff;border-radius:16px;padding:28px 32px;max-width:480px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.10);text-align:center}}
-  h1{{font-size:20px;font-weight:800;margin-bottom:8px;color:#1e293b}}
-  .sub{{color:#64748b;font-size:14px;margin-bottom:24px}}
-  .info{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;font-size:13px;color:#475569;text-align:right;margin-bottom:16px}}
-  .info b{{color:#1e293b}}
-  .hint{{font-size:12px;color:#94a3b8;margin-top:16px}}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>🧪 وضع الاختبار</h1>
-  <p class="sub">البوت يعمل بـ store_id الحقيقي — اضغط أيقونة الدردشة أسفل الشاشة</p>
-  <div class="info">
-    <div><b>المتجر:</b> {name}</div>
-    <div><b>Store ID:</b> {store_id}</div>
-  </div>
-  <p class="hint">💡 هذه الصفحة للاختبار فقط — لا تشاركها مع العملاء</p>
-</div>
-<script>
-window.SallaChatConfig = {{
-  storeId:      "{store_id}",
-  storeName:    "{name}",
-  primaryColor: "#1a56db",
-  position:     "left",
-  apiUrl:       "{base}",
-}};
-</script>
-<script src="{base}/widget.js" defer></script>
-</body>
-</html>""")
-
-
-@app.get("/health")
-async def health():
-    stores = sm.list_stores()
-    total_products = sum(s.get("products_count", 0) for s in stores)
-    return {
-        "status":           "ok",
-        "service":          "salla-printing-chatbot",
-        "version":          "2.0.0",
-        "stores_count":     len(stores),
-        "total_products":   total_products,
-    }
-
-
-# ── Admin HTML (React app or legacy fallback) ──────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def root_index():
-    return _serve_react_or_legacy()
-
-@app.get("/landing", response_class=HTMLResponse)
-async def landing_page():
-    return _serve_react_or_legacy()
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return _serve_react_or_legacy()
-
-@app.get("/privacy", response_class=HTMLResponse)
-async def privacy_page():
-    return _serve_react_or_legacy()
-
-@app.get("/terms", response_class=HTMLResponse)
-async def terms_page():
-    return _serve_react_or_legacy()
-
-@app.get("/data-deletion", response_class=HTMLResponse)
-async def data_deletion_page():
-    return _serve_react_or_legacy()
-
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_index():
-    return _serve_react_or_legacy()
-
-@app.get("/store/{store_id}", response_class=HTMLResponse)
-async def store_spa(store_id: str):
-    return _serve_react_or_legacy()
-
-@app.get("/store/{store_id}/{rest:path}", response_class=HTMLResponse)
-async def store_spa_sub(store_id: str, rest: str):
-    return _serve_react_or_legacy()
-
-
-@app.get("/admin/stores")
-async def admin_list_stores():
-    """Return JSON list of all registered stores."""
-    return {"stores": sm.list_stores()}
-
-
-# NOTE: /admin/{store_id} must come AFTER /admin/stores so FastAPI matches
-# the literal 'stores' path first.
-@app.get("/admin/{store_id}", response_class=HTMLResponse)
-async def admin_store_page(store_id: str):
-    """Per-store admin dashboard — serves the React SPA (hash-router handles sub-routes)."""
-    return _serve_react_or_legacy()
-
-
-# ── Auth: Admin login (email + password) ────────────────────────────────────────
-@app.post("/admin/auth/login")
-async def super_login(req: LoginRequest, request: Request):
-    ip          = request.client.host if request.client else "unknown"
-    super_email = os.getenv("SUPER_ADMIN_EMAIL", "h456ad@gmail.com").strip().lower()
-    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
-
-    # Warn once in logs if default password is still in use
-    if super_pass == "admin":
-        print("⚠️  [auth] SUPER_ADMIN_PASSWORD is still the default 'admin' — please change it!")
-
-    if await _is_rate_limited(f"super:{ip}"):
-        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
-
-    email_in = (req.email or "").strip().lower()
-    # Constant-time comparison for both fields to avoid timing leaks.
-    email_ok = hmac.compare_digest(email_in, super_email)
-    pass_ok  = bool(req.password) and hmac.compare_digest(req.password, super_pass)
-    if not (email_ok and pass_ok):
-        print(f"[auth] ❌ Failed admin login attempt from {ip} (email={email_in!r})")
-        raise HTTPException(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة")
-
-    print(f"[auth] ✅ Admin login ({email_in}) from {ip}")
-    token = _auth.create_token("super", is_super=True)
-    return {"token": token, "store_id": "super", "is_super": True}
-
-
-# ── Auth: Per-store login ──────────────────────────────────────────────────────
-@app.post("/admin/{store_id}/auth/login")
-async def store_login(store_id: str, req: LoginRequest, request: Request):
-    ip = request.client.host if request.client else "unknown"
-
-    if await _is_rate_limited(f"{store_id}:{ip}"):
-        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
-
-    if not sm.is_registered(store_id):
-        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-
-    stored_hash = sm.get_admin_password_hash(store_id)
-    if not stored_hash or not _auth.check_password(req.password, stored_hash):
-        print(f"[auth] ❌ Failed login for store {store_id!r} from {ip}")
-        raise HTTPException(401, "كلمة المرور غير صحيحة")
-
-    print(f"[auth] ✅ Store login: {store_id!r} from {ip}")
-    token = _auth.create_token(store_id)
-    info  = sm.get_store_info(store_id)
-    return {
-        "token":      token,
-        "store_id":   store_id,
-        "store_name": info.get("store_name", f"متجر {store_id}"),
-    }
-
-
-# ── Auth: Employee login (per-store agent) ────────────────────────────────────
-@app.post("/admin/{store_id}/auth/employee-login")
-async def employee_login(store_id: str, req: EmployeeLoginRequest, request: Request):
-    ip = request.client.host if request.client else "unknown"
-
-    if await _is_rate_limited(f"{store_id}:emp:{ip}"):
-        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
-
-    if not sm.is_registered(store_id):
-        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-
-    emp = await db.get_employee_by_email(store_id, (req.email or "").strip())
-    if not emp or not emp.get("active"):
-        print(f"[auth] ❌ Employee login miss for {store_id!r}/{req.email!r} from {ip}")
-        raise HTTPException(401, "بريد إلكتروني أو كلمة مرور غير صحيحة")
-    if not _auth.check_password(req.password, emp.get("password_hash", "")):
-        print(f"[auth] ❌ Employee bad password for {store_id!r}/{req.email!r}")
-        raise HTTPException(401, "بريد إلكتروني أو كلمة مرور غير صحيحة")
-
-    token = _auth.create_token(
-        store_id,
-        employee_id=emp["id"],
-        employee_name=emp["name"],
-        employee_role=emp.get("role", "agent"),
-    )
-    info = sm.get_store_info(store_id)
-    print(f"[auth] ✅ Employee login {emp['email']!r} for store {store_id!r}")
-    return {
-        "token":      token,
-        "store_id":   store_id,
-        "store_name": info.get("store_name", f"متجر {store_id}"),
-        "employee":   {
-            "id":   emp["id"],
-            "name": emp["name"],
-            "role": emp.get("role", "agent"),
-        },
-    }
-
-
-# ── Auth: Token verify (lightweight — for client-side checkAuth) ──────────────
-@app.get("/admin/{store_id}/auth/verify")
-async def verify_store_token(store_id: str, request: Request):
-    """
-    Lightweight endpoint the admin SPA calls on page load to check whether
-    its stored token is still valid without triggering a heavy data load.
-    Returns 200 {ok: true} or 401.
-    """
-    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    claims = _auth.verify_token(token)
-    if not claims:
-        raise HTTPException(401, "توكن منتهي أو غير صحيح")
-    if not claims.get("su") and claims.get("s") != store_id:
-        raise HTTPException(403, "غير مصرح")
-    emp = None
-    if "eid" in claims:
-        emp = {
-            "id":   int(claims.get("eid", 0)),
-            "name": claims.get("en", ""),
-            "role": claims.get("er", "agent"),
-        }
-    return {
-        "ok":       True,
-        "store_id": store_id,
-        "is_super": claims.get("su", False),
-        "employee": emp,
-    }
+# ── Auth endpoints moved to routers/auth.py ──────────────────────────────
 
 
 # ── Store info (for store owner — no super token needed) ─────────────────────
@@ -979,10 +404,6 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
 
 # ── Settings: AI Brain (custom knowledge + memory preview) ───────────────────
 
-class CustomKnowledgeRequest(BaseModel):
-    custom_knowledge: str = ""
-
-
 @app.get("/admin/{store_id}/settings/brain")
 async def get_ai_brain(store_id: str):
     """
@@ -1039,13 +460,6 @@ async def retrain_ai_brain(store_id: str):
 
 
 # ── Bot training (admin teaches the AI: instructions, FAQs, files) ──────────
-
-class TrainingTextRequest(BaseModel):
-    kind:    str       # 'instruction' | 'faq'
-    title:   str       # short label / question
-    content: str       # body / answer
-    enabled: bool = True
-
 
 @app.get("/admin/{store_id}/settings/training")
 async def list_bot_training(store_id: str):
@@ -1177,18 +591,6 @@ async def get_notification_settings(store_id: str):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     return _notif.get_settings(store_id)
-
-
-class NotificationSettingsRequest(BaseModel):
-    email_enabled:       bool  = False
-    email_address:       str   = ""
-    webhook_url:         str   = ""
-    on_new_conversation: bool  = True
-    on_abandoned_cart:   bool  = True
-    on_low_rating:       bool  = True
-    quiet_hours_enabled: bool  = False
-    quiet_hours_start:   int   = 22
-    quiet_hours_end:     int   = 8
 
 
 @app.put("/admin/{store_id}/settings/notifications")
@@ -1694,10 +1096,9 @@ async def store_analytics(store_id: str):
 
     # ── Abandoned carts ────────────────────────────────────────────────────────
     # Carts come from Salla webhooks and aren't tagged by channel, so they
-    # only live at the top level.
-    carts_list = list(_abandoned_carts.get(store_id, []))
-    if not carts_list and db.available():
-        carts_list = await db.load_abandoned_carts(store_id)
+    # only live at the top level. Read straight from the DB (the source of
+    # truth — we no longer keep a process-local cache).
+    carts_list = await db.load_abandoned_carts(store_id) if db.available() else []
 
     total_carts    = len(carts_list)
     recovered_carts = sum(1 for c in carts_list if c.get("recovered"))
@@ -1778,8 +1179,8 @@ async def store_roi(store_id: str, days: int = 30):
                 if m.get("role") in ("assistant", "admin")
             )
 
-    # 3) Recovered abandoned carts (in-memory cache)
-    carts = list(_abandoned_carts.get(store_id, []))
+    # 3) Recovered abandoned carts (from DB — multi-instance safe)
+    carts = await db.load_abandoned_carts(store_id) if db.available() else []
     carts_recovered = sum(1 for c in carts if c.get("recovered"))
 
     # 4) Time saved: assume each handled conversation would take a human ~5 min
@@ -1994,12 +1395,21 @@ async def store_admin_reply(
     asyncio.create_task(bot_learning.capture_admin_correction(store_id, session_id, text))
 
     # If this is a WhatsApp thread, also deliver the admin's reply to WhatsApp.
+    # Routed through the durable outbox so a restart between admin-clicked-send
+    # and Meta-API-accepted doesn't drop the customer-facing message.
     if session_id.startswith("wa:"):
-        import whatsapp as wa
         cfg = sm.get_ai_config(store_id) or {}
         token, phone_id = (cfg.get("whatsapp_token") or "").strip(), (cfg.get("whatsapp_phone_id") or "").strip()
         if token and phone_id:
-            asyncio.create_task(wa.send_text(token, phone_id, session_id[3:], text))
+            await db.outbox_enqueue(
+                kind     = "whatsapp_send",
+                store_id = store_id,
+                payload  = {
+                    "phone_id": phone_id,
+                    "to":       session_id[3:],
+                    "text":     text,
+                },
+            )
 
     return {"status": "sent", "message": msg}
 
@@ -2011,6 +1421,16 @@ async def store_takeover(store_id: str, session_id: str):
     cs.mark_admin_read(session_id)
     # Persist the bot_enabled change so it survives restart
     await cs.flush(session_id)
+    # Push to widget — it shows the "human took over" banner without polling.
+    await realtime.publish(f"session:{session_id}", "bot_toggle", {
+        "session_id":  session_id,
+        "bot_enabled": False,
+    })
+    # Push to admin dashboard — sidebar can re-paint the takeover badge.
+    await realtime.publish(f"store:{store_id}", "bot_toggle", {
+        "session_id":  session_id,
+        "bot_enabled": False,
+    })
     return {"status": "ok", "bot_enabled": False, "session_id": session_id}
 
 
@@ -2021,6 +1441,15 @@ async def store_handback(store_id: str, session_id: str):
     await cs.add_message(session_id, "admin",
                    "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
                    store_id)
+    # bot_enabled flipped back on — widget hides the "human" banner.
+    await realtime.publish(f"session:{session_id}", "bot_toggle", {
+        "session_id":  session_id,
+        "bot_enabled": True,
+    })
+    await realtime.publish(f"store:{store_id}", "bot_toggle", {
+        "session_id":  session_id,
+        "bot_enabled": True,
+    })
     return {"status": "ok", "bot_enabled": True, "session_id": session_id}
 
 
@@ -2433,361 +1862,21 @@ async def admin_handback_compat(session_id: str):
 
 
 # ── Webhook infrastructure (all state persisted to PostgreSQL) ───────────────
-
-# Abandoned carts: in-memory hot cache mirroring the abandoned_carts table.
-# DB is the source of truth — this exists only to avoid a query per page load.
-_abandoned_carts: dict = collections.defaultdict(lambda: collections.deque(maxlen=500))
-
-
-def _log_event(store_id: str, event: str, status: str, detail: str = "",
-                sig_status: str = "", body_head: str = "",
-                content_type: str = "", user_agent: str = ""):
-    """
-    Fire-and-forget webhook log row. Writes to webhook_log table so the
-    full audit trail survives every Railway redeploy. Errors are logged
-    by the db.fire callback (no silent loss).
-    """
-    db.fire(db.log_webhook(
-        store_id=store_id, event=event, status=status, detail=detail,
-        sig_status=sig_status, body_head=body_head,
-        content_type=content_type, user_agent=user_agent,
-    ))
+#
+# The previous version kept a per-store collections.deque(maxlen=500) cache
+# of abandoned carts in memory. That cache is gone in Phase 1 — read direct
+# from the abandoned_carts table. Reason: a multi-instance deploy meant
+# instance A's deque was stale to instance B, so admins saw different lists
+# depending on which pod served the request.
 
 
-async def _already_seen(dedup_key: str) -> bool:
-    """
-    Atomic check-and-set on webhook_seen table. Returns True if this key
-    has already been processed (Salla retried). Persisted across restarts
-    so a redeploy mid-retry-window doesn't re-process old events.
-    """
-    return await db.is_webhook_seen(dedup_key)
+# _log_event + _verify_signature + all _handle_* + _process_salla_event +
+# /webhook/salla + /admin/{store_id}/webhooks/log + /webhook/salla/debug
+# + /whatsapp/webhook + /whatsapp/debug + _handle_whatsapp_message +
+# _parse_csat_reply ALL live in routers/webhooks.py now.
 
 
-def _verify_signature(body: bytes, headers) -> tuple:
-    """
-    Verify X-Salla-Signature using HMAC-SHA256.
-    Returns (ok: bool, detail: str).
 
-    Behaviour:
-    - No secret configured → accept (dev mode).
-    - Secret configured + signature present → verify strictly.
-    - Secret configured + signature ABSENT:
-        • Default (lenient): accept with warning — some Salla easy-mode events
-          legitimately omit the header.
-        • Strict mode (WEBHOOK_REQUIRE_SIGNATURE=true env var): reject — use
-          this in production once you've confirmed all events carry a signature.
-    """
-    secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
-    if not secret:
-        return True, "no_secret_configured"
-
-    sig = headers.get("X-Salla-Signature", "")
-    if not sig:
-        if os.getenv("WEBHOOK_REQUIRE_SIGNATURE", "false").lower() == "true":
-            print("[webhook] ⛔ Missing X-Salla-Signature — rejected (strict mode)")
-            return False, "signature_required_but_absent"
-        print("[webhook] ⚠️ Missing X-Salla-Signature — accepted with warning (set WEBHOOK_REQUIRE_SIGNATURE=true to harden)")
-        return True, "signature_absent_accepted"
-
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, sig):
-        print(f"[webhook] ⛔ Signature mismatch — rejected (got {sig[:16]}…)")
-        return False, f"signature_mismatch got={sig[:16]}"
-
-    return True, "signature_ok"
-
-
-# ── Per-event async handlers ───────────────────────────────────────────────────
-
-async def _handle_store_authorize(merchant_id: str, data: dict):
-    """app.store.authorize — store installs / reinstalls the app."""
-    access_token  = data.get("access_token", "")
-    refresh_token = data.get("refresh_token", "")
-    expires       = data.get("expires", 0)       # unix timestamp (2-week expiry)
-    expires_in    = data.get("expires_in", 0)    # seconds alternative
-    store_info    = data.get("store", {})
-
-    store_id = merchant_id or "default"
-    if not access_token:
-        print(f"[webhook] app.store.authorize for {store_id!r} — no token in payload")
-        return
-    if store_id.lower() in _RESERVED_IDS and store_id != "default":
-        print(f"[webhook] ⚠️ Reserved store_id {store_id!r} — ignoring authorize event")
-        return
-
-    # Compute expires_at ISO string for proactive refresh scheduling
-    expires_at = ""
-    try:
-        if expires_in:
-            expires_at = (_dt.datetime.utcnow() + _dt.timedelta(seconds=int(expires_in))).isoformat()
-        elif expires:
-            expires_at = _dt.datetime.utcfromtimestamp(int(expires)).isoformat()
-    except Exception:
-        pass
-
-    merged_info = {**store_info, "expires_at": expires_at} if expires_at else store_info
-
-    sm.register_store(
-        store_id=store_id,
-        access_token=access_token,
-        refresh_token=refresh_token,
-        store_info=merged_info,
-    )
-
-    # Directly await the DB save for this critical event so data is never
-    # lost even if the server restarts seconds after the webhook.
-    if db.available():
-        tokens = sm.get_store_info(store_id)
-        await db.save_store(store_id, tokens)
-        print(f"[webhook] 💾 Store {store_id!r} directly saved to DB")
-
-    asyncio.create_task(_sync_task(store_id, access_token))
-    _log_event(store_id, "app.store.authorize", "ok",
-               f"token …{access_token[-6:]}  expires={expires}")
-    print(f"[webhook] ✅ Store {store_id!r} authorized, sync triggered")
-
-
-async def _handle_app_uninstalled(merchant_id: str, data: dict):
-    """
-    app.uninstalled — the merchant removed the app. Salla's app review
-    REQUIRES that uninstalling deletes the merchant's data. We purge the
-    store from the DB and drop it from memory/files so we never use the
-    revoked token again.
-    """
-    store_id = merchant_id or "default"
-    if store_id == "default":
-        print("[webhook] app.uninstalled for 'default' — skipping purge (env store)")
-        return
-    try:
-        if db.available():
-            await db.purge_store(store_id)
-        sm.unregister_store(store_id)
-        _log_event(store_id, "app.uninstalled", "ok", "store data purged")
-        print(f"[webhook] 🗑️ Store {store_id!r} uninstalled — data purged")
-    except Exception as e:
-        _log_event(store_id, "app.uninstalled", "error", str(e))
-        print(f"[webhook] ❌ app.uninstalled purge failed for {store_id!r}: {e}")
-
-
-async def _handle_app_lifecycle(event: str, merchant_id: str, data: dict):
-    """
-    Acknowledge the remaining app lifecycle events Salla sends and checks
-    for during app review:
-      app.installed, app.trial.started, app.trial.expired,
-      app.subscription.started, app.subscription.renewed,
-      app.subscription.expired, app.subscription.canceled,
-      app.feedback.created, app.settings.updated
-    We log them (and could gate features on subscription status later).
-    """
-    store_id = merchant_id or "default"
-    _log_event(store_id, event, "ok", "acknowledged")
-    print(f"[webhook] {event!r} acknowledged for store {store_id!r}")
-
-
-async def _handle_product_event(event: str, merchant_id: str, data: dict):
-    """
-    product.created / product.updated / product.deleted /
-    product.status.updated / product.price.updated / product.image.updated /
-    product.category.updated / product.brand.updated / product.tags.updated /
-    product.available / product.quantity.low
-    → Incremental cache patch instead of full re-sync.
-    """
-    from store_sync import patch_product_in_cache
-
-    store_id   = merchant_id or "default"
-    product_id = data.get("id") or data.get("product_id", "")
-    if not product_id:
-        return
-
-    is_delete = event == "product.deleted"
-    ok = await patch_product_in_cache(store_id, product_id, delete=is_delete)
-    status = "ok" if ok else "skip"
-    _log_event(store_id, event, status, f"product_id={product_id}")
-
-    # Reset the cached agent so the updated catalogue is picked up on next chat
-    if ok:
-        sm.reset_agent(store_id)
-
-
-async def _handle_order_event(event: str, merchant_id: str, data: dict):
-    """
-    order.created / order.updated / order.status.updated / order.cancelled …
-    Logs the event; could be extended to send admin notifications.
-    """
-    store_id    = merchant_id or "default"
-    order_id    = str(data.get("id", ""))
-    order_ref   = str(data.get("reference_id", ""))
-    status_info = (data.get("status") or {})
-    status_name = status_info.get("name", "") if isinstance(status_info, dict) else str(status_info)
-    total_info  = (data.get("total") or {})
-    total_amt   = total_info.get("amount", "") if isinstance(total_info, dict) else str(total_info)
-    currency    = total_info.get("currency", "SAR") if isinstance(total_info, dict) else "SAR"
-
-    detail = f"order_id={order_id}  ref={order_ref}  status={status_name}  total={total_amt} {currency}"
-    _log_event(store_id, event, "ok", detail)
-    print(f"[webhook] {event!r} — {detail}")
-
-
-async def _handle_customer_event(event: str, merchant_id: str, data: dict):
-    store_id    = merchant_id or "default"
-    customer_id = str(data.get("id", ""))
-    _log_event(store_id, event, "ok", f"customer_id={customer_id}")
-    print(f"[webhook] {event!r} customer={customer_id} store={store_id}")
-
-
-async def _handle_abandoned_cart(merchant_id: str, data: dict):
-    """
-    abandoned.cart — a customer added items but didn't complete checkout.
-    Stores a normalised notification in the per-store in-memory deque so the
-    admin dashboard can show it without a live API call.
-    """
-    store_id = merchant_id or "default"
-    cart_id  = str(data.get("id", ""))
-    customer = data.get("customer") or {}
-    total    = data.get("total")    or {}
-
-    notification = {
-        "id":             cart_id,
-        "ts":             _dt.datetime.utcnow().isoformat() + "Z",
-        "customer_name":  customer.get("name", "—"),
-        "customer_phone": customer.get("mobile", customer.get("phone", "—")),
-        "customer_email": customer.get("email", "—"),
-        "total":          (total.get("amount", "—") if isinstance(total, dict) else str(total or "—")),
-        "currency":       (total.get("currency", "SAR") if isinstance(total, dict) else "SAR"),
-        "items_count":    len(data.get("items") or []),
-        "age_minutes":    data.get("age_in_minutes", 0),
-        "checkout_url":   data.get("checkout_url", ""),
-        "status":         data.get("status", "active"),   # active | purchased
-        "recovered":      False,
-    }
-    _abandoned_carts[store_id].appendleft(notification)
-
-    # Persist to DB so carts survive restarts
-    if cart_id:
-        await db.save_abandoned_cart(store_id, cart_id, notification)
-
-    _log_event(
-        store_id, "abandoned.cart", "ok",
-        f"cart_id={cart_id}  customer={notification['customer_name']}  "
-        f"total={notification['total']} {notification['currency']}"
-    )
-    print(
-        f"[webhook] 🛒 Abandoned cart {cart_id!r} — "
-        f"{notification['customer_name']} — "
-        f"{notification['total']} {notification['currency']} — "
-        f"store={store_id!r}"
-    )
-
-    # ── Fire notification to store owner ──────────────────────────────────────
-    asyncio.create_task(_notif.notify(store_id, "abandoned_cart", {
-        "customer_name": notification["customer_name"],
-        "cart_total":    f"{notification['total']} {notification['currency']}",
-    }))
-
-
-# ── Salla Webhook endpoint ─────────────────────────────────────────────────────
-@app.post("/webhook/salla")
-async def salla_webhook(request: Request):
-    """
-    Central Salla webhook receiver.
-    • Logs every raw attempt before any processing (for debugging)
-    • Verifies HMAC-SHA256 signature; missing signature = warning only (easy-mode compat)
-    • Deduplicates retries (Salla retries up to 3× every 5 min)
-    • Routes to per-event async handlers and always returns 200 within the 30 s timeout
-    """
-    body = await request.body()
-    body_head = body[:200].decode("utf-8", errors="replace")
-    content_type = request.headers.get("Content-Type", "")
-    user_agent   = request.headers.get("User-Agent", "")
-
-    # ── 1. Signature verification ──────────────────────────────────────────────
-    sig_ok, sig_detail = _verify_signature(body, request.headers)
-
-    if not sig_ok:
-        # Log the rejection too — useful for debugging mismatched secrets
-        _log_event("", "", "rejected", f"signature: {sig_detail}",
-                   sig_status=sig_detail, body_head=body_head,
-                   content_type=content_type, user_agent=user_agent)
-        raise HTTPException(401, f"Webhook signature invalid: {sig_detail}")
-
-    # ── 2. Parse JSON ──────────────────────────────────────────────────────────
-    import json as _json
-    try:
-        payload = _json.loads(body)
-    except Exception as exc:
-        _log_event("", "", "error", f"invalid JSON: {exc}",
-                   sig_status=sig_detail, body_head=body_head,
-                   content_type=content_type, user_agent=user_agent)
-        raise HTTPException(400, f"Invalid JSON: {exc}")
-
-    event       = payload.get("event", "")
-    merchant_id = str(payload.get("merchant", ""))
-    data        = payload.get("data", {})
-    created_at  = payload.get("created_at", "")
-
-    print(f"[webhook] {event!r}  merchant={merchant_id or '—'}  ts={created_at}")
-
-    # ── 3. Idempotency — skip duplicate deliveries (DB-backed) ────────────────
-    dedup_key = f"{event}:{merchant_id}:{created_at}"
-    if await _already_seen(dedup_key):
-        print(f"[webhook] Duplicate event skipped: {dedup_key}")
-        _log_event(merchant_id or "", event, "duplicate", dedup_key,
-                   sig_status=sig_detail, body_head=body_head,
-                   content_type=content_type, user_agent=user_agent)
-        return {"status": "ok", "duplicate": True}
-
-    # Stash these on the request so the per-event handlers can include them
-    # in their own log rows (we don't want to log the same event twice).
-    _webhook_ctx = {
-        "sig_status": sig_detail, "body_head": body_head,
-        "content_type": content_type, "user_agent": user_agent,
-    }
-
-    # ── 4. Route to handler ────────────────────────────────────────────────────
-    if event == "app.store.authorize":
-        # Handle synchronously so the store is registered before we return
-        await _handle_store_authorize(merchant_id, data)
-
-    elif event == "app.updated":
-        # Salla will immediately follow up with app.store.authorize containing
-        # new tokens — nothing to do here except log it.
-        _log_event(merchant_id or "default", event, "ok", "awaiting app.store.authorize",
-                   **_webhook_ctx)
-        print(f"[webhook] app.updated for merchant {merchant_id} — new tokens incoming")
-
-    elif event.startswith("product."):
-        asyncio.create_task(_handle_product_event(event, merchant_id, data))
-
-    elif event.startswith("order."):
-        asyncio.create_task(_handle_order_event(event, merchant_id, data))
-
-    elif event.startswith("customer."):
-        asyncio.create_task(_handle_customer_event(event, merchant_id, data))
-
-    elif event == "abandoned.cart":
-        asyncio.create_task(_handle_abandoned_cart(merchant_id, data))
-
-    elif event == "app.uninstalled":
-        # Handle synchronously — delete merchant data (Salla privacy rule)
-        await _handle_app_uninstalled(merchant_id, data)
-
-    elif event.startswith("app."):
-        # app.installed / app.trial.* / app.subscription.* / app.feedback.* …
-        asyncio.create_task(_handle_app_lifecycle(event, merchant_id, data))
-
-    else:
-        # Unknown / unhandled event — log and acknowledge
-        _log_event(merchant_id or "default", event, "unhandled", **_webhook_ctx)
-        print(f"[webhook] Unhandled event: {event!r}")
-
-    return {"status": "ok", "event": event}
-
-
-# ── Webhook events log (per-store) ─────────────────────────────────────────────
-@app.get("/admin/{store_id}/webhooks/log")
-async def store_webhook_log(store_id: str):
-    """Return the newest 200 webhook events for this store from the DB."""
-    events = await db.get_webhook_log(store_id=store_id, limit=200)
     return {"store_id": store_id, "count": len(events), "events": events}
 
 
@@ -2798,8 +1887,11 @@ async def store_abandoned_carts(store_id: str, source: str = "cache"):
     """
     Return abandoned carts for a store.
 
-    ?source=cache  (default) — in-memory webhook notifications received since last restart.
+    ?source=cache  (default) — abandoned_carts table (populated from webhooks).
     ?source=api    — live fetch from Salla GET /carts/abandoned (requires carts.read scope).
+
+    Note: the legacy ?source=cache name is kept for frontend backward compat,
+    but it now reads from PostgreSQL — there is no in-memory cache anymore.
     """
     if source == "api":
         token = sm.get_access_token(store_id)
@@ -2814,31 +1906,15 @@ async def store_abandoned_carts(store_id: str, source: str = "cache"):
         except Exception as e:
             raise HTTPException(500, f"{type(e).__name__}: {e}")
 
-    # cache source — try in-memory first; fall back to DB on cold start
-    carts = list(_abandoned_carts.get(store_id, []))
-    if not carts and db.available():
-        carts = await db.load_abandoned_carts(store_id)
-        # Warm the in-memory cache from DB
-        for cart in reversed(carts):
-            _abandoned_carts[store_id].appendleft(cart)
-        return {"source": "db", "carts": carts, "count": len(carts)}
-    return {"source": "cache", "carts": carts, "count": len(carts)}
+    carts = await db.load_abandoned_carts(store_id) if db.available() else []
+    return {"source": "db", "carts": carts, "count": len(carts)}
 
 
 @app.post("/admin/{store_id}/abandoned-carts/{cart_id}/recover")
 async def mark_cart_recovered(store_id: str, cart_id: str):
     """Mark an abandoned cart notification as handled / recovered."""
-    carts = _abandoned_carts.get(store_id)
-    found = False
-    if carts:
-        for cart in carts:
-            if cart.get("id") == cart_id:
-                cart["recovered"] = True
-                found = True
-                break
-    # Persist recovery status to DB
-    asyncio.create_task(db.mark_cart_recovered(store_id, cart_id))
-    return {"status": "ok", "cart_id": cart_id, "recovered": True, "found_in_cache": found}
+    await db.mark_cart_recovered(store_id, cart_id)
+    return {"status": "ok", "cart_id": cart_id, "recovered": True}
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────
@@ -2884,36 +1960,6 @@ async def store_order_detail(store_id: str, order_id: str):
         return await client.get_order(order_id)
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
-
-
-# ── Webhook raw attempts debug (super-admin only) ─────────────────────────────
-@app.get("/webhook/salla/debug")
-async def webhook_debug(request: Request):
-    """
-    Diagnostics endpoint — shows last 50 raw webhook attempts.
-    Requires super-admin authentication to avoid leaking merchant IDs to
-    unauthenticated callers.
-    """
-    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    claims = _auth.verify_token(token)
-    if not claims or not claims.get("su"):
-        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
-
-    attempts = await db.get_webhook_log(store_id=None, limit=50)
-    return {
-        "webhook_url":    f"{os.getenv('BASE_URL','http://localhost:8000')}/webhook/salla",
-        "secret_set":     bool(os.getenv("SALLA_WEBHOOK_SECRET", "")),
-        "total_attempts": len(attempts),
-        "attempts":       attempts,
-    }
-
-
-# ── Manual store registration (super admin) ────────────────────────────────────
-class ManualRegisterRequest(BaseModel):
-    store_id:      str
-    access_token:  str
-    refresh_token: Optional[str] = ""
-    store_name:    Optional[str] = ""
 
 
 @app.post("/admin/stores/register")
@@ -3165,9 +2211,14 @@ async def _fetch_salla_customer(store_id: str, customer_id: str,
 
 # ── Chat ───────────────────────────────────────────────────────────────────────
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, request: Request):
     if not req.message.strip():
         raise HTTPException(400, "الرسالة فارغة")
+
+    # Hard cap on message size — prevents a single request from blowing the
+    # LLM context window or being used as a JSON-payload DoS vector.
+    if len(req.message) > 4000:
+        raise HTTPException(413, "الرسالة طويلة جداً. اختصرها وحاول مجدداً.")
 
     store_id   = req.store_id or "default"
 
@@ -3176,6 +2227,17 @@ async def chat(req: ChatRequest):
     # passed literally.  Fall back to "default" to avoid polluting the registry.
     if "{{" in store_id or "}}" in store_id:
         store_id = "default"
+
+    # ── Rate limit (public endpoint — protects LLM spend) ─────────────────
+    ip = request.client.host if request.client else "unknown"
+    rl_session_key = (req.session_id or "no-session")[:64]
+    tripped = await _chat_rate_limited(store_id, rl_session_key, ip)
+    if tripped:
+        print(f"[chat] ⛔ rate-limited axis={tripped} store={store_id!r} sid={rl_session_key!r} ip={ip}")
+        raise HTTPException(
+            429,
+            "عدد رسائل كبير في وقت قصير. انتظر دقيقة وحاول مجدداً.",
+        )
 
     # ── Customer identity (when the widget runs on a Salla store and the
     # visitor is logged in, the SDK gives us a stable customer_id). We use
@@ -3222,11 +2284,12 @@ async def chat(req: ChatRequest):
 
     agent = sm.get_agent(store_id)
     requested_store_id = store_id   # remember what the widget asked for
-    if agent is None:
-        env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
 
-        # 1) Exact store not found — register env-var token as "default" ONCE
-        #    (avoid calling register_store on every request — it resets the agent)
+    # When the widget reports the placeholder "default" store_id (i.e. it was
+    # embedded outside Salla Snippets so the template wasn't resolved), we
+    # still allow the env-var fallback so dev / direct embeds work.
+    if agent is None and store_id == "default":
+        env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
         if env_token:
             if not sm.is_registered("default"):
                 sm.register_store(
@@ -3234,42 +2297,45 @@ async def chat(req: ChatRequest):
                     os.getenv("SALLA_REFRESH_TOKEN", ""),
                     {"name": "المتجر الافتراضي"},
                 )
-            agent    = sm.get_agent("default")
-            store_id = "default"
+            agent = sm.get_agent("default")
 
-        # 2) No env var — fall back to first available registered store
-        if agent is None:
-            stores = sm.list_stores()
-            if stores:
-                fallback_id = stores[0]["store_id"]
-                agent    = sm.get_agent(fallback_id)
-                store_id = fallback_id
-
-        # Loud warning so super-admin can see in Railway logs that a real
-        # merchant's widget is hitting our backend but the store was never
-        # registered — usually a missing/lost app.store.authorize webhook.
-        if agent is not None and requested_store_id != store_id:
+    # A *specific* store_id that isn't registered is NOT silently rerouted
+    # anymore — previously we fell back to the first registered store, which
+    # leaked one merchant's customer chats into another merchant's dashboard.
+    # Now we refuse with a setup-required reply so the merchant sees they need
+    # to install / reinstall the Salla app.
+    if agent is None:
+        if requested_store_id != "default":
             print(
-                f"[chat] ⚠️ ORPHAN STORE: widget requested {requested_store_id!r} "
-                f"(not registered) — falling back to {store_id!r}. "
-                f"Conversation will appear in {store_id!r}'s dashboard. "
-                f"Fix: register {requested_store_id!r} via /admin/stores/register "
-                f"or reinstall the app on that store."
+                f"[chat] ⛔ ORPHAN STORE REFUSED: widget requested {requested_store_id!r} "
+                f"(not registered). Refusing to merge into another store. "
+                f"Fix: install the app on {requested_store_id!r}, or call "
+                f"/admin/stores/register if you have valid tokens."
             )
-
-        # 3) Nothing works → friendly message (NOT bot_enabled=False — that triggers
-        #    the widget's "admin takeover" UI which loops endlessly)
-        if agent is None:
             err_reply = (
-                "عذراً، المتجر غير مُعدّ بعد. "
-                "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
+                "عذراً، هذا المتجر لم يُربط بعد بنظام البوت. "
+                "يرجى تثبيت التطبيق من سوق سلة أو التواصل مع الدعم."
             )
-            await cs.add_message(session_id, "assistant", err_reply, store_id)
+            # Do NOT persist this message under a misleading store_id; use the
+            # requested id so a future registration picks up the right thread.
+            await cs.add_message(session_id, "assistant", err_reply, requested_store_id)
             return ChatResponse(
                 reply=err_reply,
                 session_id=session_id,
-                bot_enabled=True,   # keep widget in normal state; bot is just misconfigured
+                bot_enabled=True,   # error ≠ admin takeover
             )
+
+        # default store + no env token + no registered stores → still respond
+        err_reply = (
+            "عذراً، المتجر غير مُعدّ بعد. "
+            "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
+        )
+        await cs.add_message(session_id, "assistant", err_reply, store_id)
+        return ChatResponse(
+            reply=err_reply,
+            session_id=session_id,
+            bot_enabled=True,
+        )
 
     try:
         reply = await agent.chat(message=req.message, session_id=session_id)
@@ -3328,6 +2394,15 @@ async def chat(req: ChatRequest):
             "session_id":    session_id,
             "first_message": req.message[:200],
         }))
+        # Realtime: tell every admin watching this store that a brand-new
+        # conversation just opened. Their inbox list refreshes without a
+        # poll. add_message already published 'new_message' so this is the
+        # ONE extra event marking the session-start moment.
+        await realtime.publish(f"store:{store_id}", "new_conversation", {
+            "session_id":    session_id,
+            "customer_name": cust_name,
+            "first_message": req.message[:200],
+        })
 
     return ChatResponse(
         reply      = reply,
@@ -3351,6 +2426,14 @@ async def chat_rate(req: RateRequest):
         raise HTTPException(400, "التقييم يجب أن يكون بين 1 و 5")
     await cs.restore_to_memory(req.session_id)
     await cs.set_rating(req.session_id, req.rating, req.comment)
+
+    # Realtime push so the admin dashboard's CSAT widget updates without
+    # waiting for the next page refresh. Comment intentionally omitted from
+    # the NOTIFY payload — admin can see it in the detail view.
+    await realtime.publish(f"store:{req.store_id}", "rating", {
+        "session_id": req.session_id,
+        "rating":     req.rating,
+    })
 
     conv = cs.all_conversations().get(req.session_id)
     if conv:
@@ -3379,197 +2462,195 @@ async def chat_rate(req: RateRequest):
 
 @app.get("/chat/poll")
 async def chat_poll(session_id: str):
-    """Widget polls this endpoint to receive admin messages in real time."""
+    """
+    LEGACY polling endpoint. The widget moved to SSE in Phase 3
+    (/chat/stream). This stays for one release cycle as a fallback for
+    clients that can't open EventSource (corporate proxies that strip
+    text/event-stream, very old browsers).
+    """
     await cs.restore_to_memory(session_id)
     pending = cs.pop_pending_for_widget(session_id)
     bot_on  = cs.is_bot_enabled(session_id)
     return {"messages": pending, "bot_enabled": bot_on}
 
 
-# ── WhatsApp Cloud API webhook ─────────────────────────────────────────────────
-@app.get("/whatsapp/webhook")
-async def whatsapp_verify(request: Request):
-    """Meta webhook verification handshake (GET with hub.* query params)."""
-    import whatsapp as wa
-    qp        = request.query_params
-    challenge = wa.verify_challenge(
-        qp.get("hub.mode", ""), qp.get("hub.verify_token", ""), qp.get("hub.challenge", ""))
-    if challenge is not None:
-        # Meta expects the raw challenge as text/plain
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(challenge)
-    raise HTTPException(403, "verify token mismatch")
+# ─────────────────────────────────────────────────────────────────────────
+# Server-Sent Events — replaces polling for both widget and admin
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Why SSE and not WebSocket:
+#   • Half-duplex (server → client) is enough for chat updates. The
+#     client → server side stays HTTP POST.
+#   • Works through every corporate proxy / CDN that supports HTTP/1.1
+#     chunked transfer. WebSockets get blocked more often.
+#   • Auto-reconnect with Last-Event-ID is built into EventSource — we
+#     don't have to write reconnection logic on the client.
+#
+# Auth: EventSource (the W3C API the widget uses) can NOT send custom
+# headers. For the admin stream we need Bearer auth, so the admin SPA:
+#   1. POST /admin/{store_id}/stream/ticket (with Authorization header)
+#   2. → {"ticket": "<short-lived-id>"}
+#   3. GET /admin/{store_id}/stream?ticket=...
+# Tickets are single-use, 5-minute TTL, in-memory (per-instance fine
+# because each instance issues its own and the user's SSE will hit the
+# same instance immediately).
+#
+# The widget /chat/stream needs no auth — like /chat itself — and is
+# scoped by the (unguessable) session_id UUID.
+
+import secrets as _secrets
+import time as _stream_time
+
+# ticket → (store_id, expires_at_unix). 5-min TTL; lazy cleanup on read.
+_STREAM_TICKETS: dict[str, tuple[str, float]] = {}
+_TICKET_TTL_SECONDS = 300
 
 
-@app.post("/whatsapp/webhook")
-async def whatsapp_incoming(request: Request):
+def _issue_stream_ticket(store_id: str) -> str:
+    """Generate a single-use ticket bound to a store_id, with TTL."""
+    # GC expired tickets opportunistically — keeps the dict small.
+    now = _stream_time.time()
+    expired = [t for t, (_, exp) in _STREAM_TICKETS.items() if exp < now]
+    for t in expired:
+        _STREAM_TICKETS.pop(t, None)
+
+    tok = _secrets.token_urlsafe(24)
+    _STREAM_TICKETS[tok] = (store_id, now + _TICKET_TTL_SECONDS)
+    return tok
+
+
+def _consume_stream_ticket(ticket: str, store_id: str) -> bool:
+    """Validate a ticket and remove it. Single-use."""
+    entry = _STREAM_TICKETS.pop(ticket, None)
+    if entry is None:
+        return False
+    bound_store, exp = entry
+    if exp < _stream_time.time():
+        return False
+    return bound_store == store_id
+
+
+@app.post("/admin/{store_id}/stream/ticket")
+async def admin_stream_ticket(store_id: str, request: Request):
     """
-    Receive WhatsApp messages, route each to the right store's bot, and reply.
-    Returns 200 immediately (Meta requires a fast ack) and processes the bot
-    reply in the background.
+    Exchange a Bearer token (in the Authorization header) for a single-use
+    stream ticket. The admin SPA calls this right before opening the
+    EventSource. The auth middleware has already validated the bearer for
+    this store_id by the time we get here.
     """
-    import whatsapp as wa
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"status": "ignored"}
-    for msg in wa.extract_messages(payload):
-        asyncio.create_task(_handle_whatsapp_message(msg))
-    return {"status": "received"}
-
-
-async def _handle_whatsapp_message(msg: dict):
-    """Route one inbound WhatsApp message → bot → send reply. Never raises."""
-    import whatsapp as wa
-    try:
-        phone_id = msg.get("phone_id", "")
-        sender   = msg.get("from", "")
-        text     = msg.get("text", "")
-
-        print(f"[whatsapp] 📨 incoming: phone_id={phone_id!r} from={sender!r} text={text[:60]!r}")
-
-        if not (phone_id and sender and text):
-            print(f"[whatsapp] ⚠️ missing required fields — dropped")
-            return
-
-        store_id = sm.find_store_by_whatsapp_phone_id(phone_id)
-        if not store_id:
-            # Log all registered phone IDs to help diagnose mismatch
-            registered = [
-                (sid, (sm.get_ai_config(sid) or {}).get("whatsapp_phone_id", "—"))
-                for sid in [s["store_id"] for s in sm.list_stores()]
-            ]
-            print(f"[whatsapp] ❌ no store for phone_id={phone_id!r}")
-            print(f"[whatsapp]    registered phone IDs: {registered}")
-            return
-
-        cfg   = sm.get_ai_config(store_id) or {}
-        token = (cfg.get("whatsapp_token") or "").strip()
-        print(f"[whatsapp] ✅ store={store_id!r} enabled={cfg.get('whatsapp_enabled')} token={'✓' if token else '✗'}")
-        if not cfg.get("whatsapp_enabled") or not token:
-            print(f"[whatsapp] ⛔ disabled or no token — skipping")
-            return
-
-        # Stable per-customer session keyed by phone, so the thread persists and
-        # shows in the admin inbox just like a widget chat.
-        session_id = f"wa:{sender}"
-        await cs.restore_to_memory(session_id)
-        cs.get_or_create(session_id, store_id)
-        # Record the customer's WhatsApp identity (name + phone) once.
-        info = cs.get_customer_info(session_id) or {}
-        if not info.get("phone"):
-            cs.set_customer_info(session_id, {
-                "name":  msg.get("name", "") or info.get("name", ""),
-                "phone": sender,
-                "channel": "whatsapp",
-            })
-
-        # ── CSAT response intercept ────────────────────────────────────────
-        # If the most recent bot message was a CSAT survey, treat any reply
-        # to it as a rating instead of routing back through the agent — the
-        # bot would otherwise reply with something unrelated to the rating.
-        conv_now   = cs.all_conversations().get(session_id) or {}
-        msgs_now   = conv_now.get("messages", [])
-        csat_msg   = None
-        for prev in reversed(msgs_now):
-            role = prev.get("role")
-            if role == "user":
-                break  # newer user msg means CSAT was already answered
-            if role == "assistant" and (prev.get("meta") or {}).get("kind") == "csat":
-                csat_msg = prev
-                break
-        if csat_msg:
-            interactive_id = msg.get("interactive_id", "") or ""
-            rating = _parse_csat_reply(interactive_id, text)
-            if rating:
-                await cs.add_message(session_id, "user", text or interactive_id, store_id)
-                await cs.set_rating(session_id, rating, f"CSAT WhatsApp: {text or interactive_id}")
-                # Attribute to the agent the survey was about
-                csat_meta = csat_msg.get("meta") or {}
-                conv_now["rating_employee_id"]   = csat_meta.get("target_agent_id")
-                conv_now["rating_employee_name"] = csat_meta.get("target_agent_name", "")
-                conv_now["rated_at"]             = _dt.datetime.utcnow().isoformat()
-                cs.mark_dirty(session_id)
-                await cs.flush(session_id)
-                await wa.send_text(token, phone_id, sender, "شكراً لتقييمك 🌷")
-                print(f"[whatsapp] ⭐ CSAT recorded: {rating} for store {store_id}")
-                return
-
-        if not cs.is_bot_enabled(session_id):
-            # Admin took this thread over — just record the message, don't auto-reply.
-            await cs.add_message(session_id, "user", text, store_id)
-            return
-
-        agent = sm.get_agent(store_id)
-        if agent is None:
-            return
-        reply = await agent.chat(message=text, session_id=session_id)
-        await wa.send_text(token, phone_id, sender, reply)
-        print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
-    except Exception as exc:
-        print(f"[whatsapp] handle error: {exc}")
-
-
-def _parse_csat_reply(interactive_id: str, text: str) -> int:
-    """
-    Decode a WhatsApp CSAT reply to its 1-5 rating, or 0 if it doesn't look
-    like one. Accepts:
-      - interactive list reply id "csat:N"
-      - the literal Arabic label ("راضٍ تماماً" → 5, …)
-      - a plain number 1-5
-    """
-    if interactive_id and interactive_id.startswith("csat:"):
-        try:
-            n = int(interactive_id.split(":", 1)[1])
-            return n if 1 <= n <= 5 else 0
-        except (ValueError, IndexError):
-            return 0
-    t = (text or "").strip()
-    if not t:
-        return 0
-    # Plain digit
-    if t.isdigit():
-        n = int(t)
-        return n if 1 <= n <= 5 else 0
-    # Arabic label match
-    label_map = {
-        "راضٍ تماماً":     5, "راض تماما":      5, "راضٍ تماما":  5,
-        "راضٍ":            4, "راض":           4,
-        "محايد":          3,
-        "غير راضٍ":        2, "غير راض":       2,
-        "غير راضٍ تماماً": 1, "غير راض تماما": 1, "غير راضٍ تماما": 1,
-    }
-    for k, v in label_map.items():
-        if k in t:
-            return v
-    return 0
-
-
-@app.get("/whatsapp/debug")
-async def whatsapp_debug(request: Request):
-    """
-    Super-admin diagnostic: shows WhatsApp config for all stores.
-    Masks the token — only shows if it's set or not.
-    """
+    # auth middleware already ran for /admin/{store_id}/* paths — but
+    # this specific route uses 'stream' which isn't in the regex (it
+    # only matches conversations|bot|sync|... etc). Validate explicitly.
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     claims = _auth.verify_token(token)
-    if not claims or not claims.get("su"):
-        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+    if not claims:
+        raise HTTPException(401, "يرجى تسجيل الدخول")
+    if not claims.get("su") and claims.get("s") != store_id:
+        raise HTTPException(403, "غير مصرح لك بالوصول")
+    return {"ticket": _issue_stream_ticket(store_id), "ttl_seconds": _TICKET_TTL_SECONDS}
 
-    result = []
-    for s in sm.list_stores():
-        sid = s["store_id"]
-        cfg = sm.get_ai_config(sid) or {}
-        result.append({
-            "store_id":       sid,
-            "store_name":     s.get("store_name", ""),
-            "wa_enabled":     bool(cfg.get("whatsapp_enabled")),
-            "wa_phone_id":    cfg.get("whatsapp_phone_id", ""),
-            "wa_token_set":   bool(cfg.get("whatsapp_token", "").strip()),
-            "wa_verify_token": os.getenv("WHATSAPP_VERIFY_TOKEN", "sallabot-wa"),
-            "webhook_url":    f"{os.getenv('BASE_URL','')}/whatsapp/webhook",
-        })
-    return {"stores": result}
+
+def _format_sse(event_type: str, data: dict) -> str:
+    """Standard SSE wire format: `event: <type>\\ndata: <json>\\n\\n`."""
+    import json as _json
+    payload = _json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event_type}\ndata: {payload}\n\n"
+
+
+@app.get("/admin/{store_id}/stream")
+async def admin_stream(store_id: str, ticket: str = "", request: Request = None):
+    """
+    Server-Sent Events stream for the admin dashboard. Pushes events as
+    they happen across this store:
+      • new_message     — customer sent something (or admin replied elsewhere)
+      • new_conversation— first message on a brand-new session
+      • rating          — customer submitted a CSAT
+      • bot_toggle      — global / per-store / per-session bot state changed
+    """
+    if not ticket or not _consume_stream_ticket(ticket, store_id):
+        raise HTTPException(401, "Invalid or expired stream ticket")
+    if not realtime.available():
+        raise HTTPException(503, "Realtime channel unavailable — DB listener down")
+
+    async def event_gen():
+        # Initial hello so the client knows the connection is alive.
+        yield _format_sse("connected", {"store_id": store_id})
+        # Heartbeat task — pushes a comment every 25s to keep proxies
+        # (Cloudflare, nginx, Railway) from closing idle connections.
+        last_beat = _stream_time.time()
+        async for event in realtime.subscribe(f"store:{store_id}"):
+            if event["type"] == "_shutdown":
+                yield _format_sse("shutdown", {"reason": "server restart"})
+                return
+            yield _format_sse(event["type"], event["data"])
+            # Opportunistic heartbeat inside the event loop.
+            now = _stream_time.time()
+            if now - last_beat > 25:
+                yield ": heartbeat\n\n"
+                last_beat = now
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache, no-transform",
+            "X-Accel-Buffering": "no",   # nginx hint: don't buffer
+            "Connection":        "keep-alive",
+        },
+    )
+
+
+@app.get("/chat/stream")
+async def chat_stream(session_id: str):
+    """
+    Server-Sent Events stream for the widget. Pushes events for this
+    specific session:
+      • admin_message — admin (or employee) replied
+      • bot_toggle    — bot was turned off/on for this session
+
+    Authenticated by possession of session_id (unguessable UUID) — same
+    contract as /chat itself.
+    """
+    if not session_id or len(session_id) > 200:
+        raise HTTPException(400, "session_id required")
+    if not realtime.available():
+        raise HTTPException(503, "Realtime channel unavailable")
+
+    async def event_gen():
+        yield _format_sse("connected", {"session_id": session_id})
+        # On reconnect, flush any messages that landed while the client
+        # was disconnected. This is the bridge between Phase 1's
+        # pending_for_widget queue and the new SSE delivery.
+        try:
+            await cs.restore_to_memory(session_id)
+            pending = cs.pop_pending_for_widget(session_id)
+            for msg in pending:
+                yield _format_sse("admin_message", msg)
+        except Exception as exc:
+            print(f"[stream] flush-on-connect for {session_id} failed: {exc}")
+
+        last_beat = _stream_time.time()
+        async for event in realtime.subscribe(f"session:{session_id}"):
+            if event["type"] == "_shutdown":
+                yield _format_sse("shutdown", {"reason": "server restart"})
+                return
+            yield _format_sse(event["type"], event["data"])
+            now = _stream_time.time()
+            if now - last_beat > 25:
+                yield ": heartbeat\n\n"
+                last_beat = now
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection":        "keep-alive",
+        },
+    )
 
 
 @app.get("/chat/history")

@@ -106,6 +106,14 @@ export const api = {
     get<{ total: number; conversations: ConvSummary[] }>(
       `/admin/${storeId}/conversations?limit=${limit}&offset=${offset}`,
     ),
+
+  // Realtime stream ticket — exchanged for a short-lived token because
+  // EventSource can't send custom headers. POST is authenticated by the
+  // current bearer; the returned ticket is consumed by openAdminStream.
+  streamTicket: (storeId: string) =>
+    post<{ ticket: string; ttl_seconds: number }>(
+      `/admin/${storeId}/stream/ticket`,
+    ),
   getConversation: (storeId: string, sessionId: string) =>
     get<Conversation>(`/admin/${storeId}/conversations/${sessionId}`),
   adminReply: (storeId: string, sessionId: string, message: string) =>
@@ -755,4 +763,130 @@ export interface DebugInfo {
   last_sync: string
   last_sync_errors: string[]
   salla_api_test?: { status_code?: number; body_preview?: string; error?: string }
+}
+
+
+// ── Realtime stream helper ──────────────────────────────────────────────
+//
+// Opens an authenticated SSE connection to /admin/{storeId}/stream and
+// dispatches events to user-supplied handlers. Handles ticket exchange,
+// auto-reconnect with backoff, and cleanup. Returns a function the caller
+// invokes in their useEffect cleanup to tear down the connection.
+//
+// Why a wrapper: EventSource can't send Authorization headers. We POST
+// (with bearer) to exchange for a single-use ticket and pass it via URL.
+// Tickets expire in 5 minutes — we re-fetch on every (re)connect so a
+// long-running tab survives token rotation cleanly.
+
+export interface AdminStreamHandlers {
+  /** New chat message landed (any role: user / assistant / admin). */
+  onMessage?:        (data: StreamMessageEvent) => void
+  /** First message in a brand-new session. */
+  onNewConversation?: (data: { session_id: string; customer_name: string; first_message: string }) => void
+  /** Customer submitted a CSAT rating. */
+  onRating?:         (data: { session_id: string; rating: number }) => void
+  /** Bot was toggled for a session (admin took over / handed back). */
+  onBotToggle?:      (data: { session_id: string; bot_enabled: boolean }) => void
+  /** Connection went down. Called once per disconnect, NOT on every retry. */
+  onDisconnect?:     () => void
+  /** Connection (re)established. */
+  onConnect?:        () => void
+}
+
+export interface StreamMessageEvent {
+  session_id: string
+  store_id:   string
+  role:       'user' | 'assistant' | 'admin' | string
+  ts:         string
+  preview:    string
+}
+
+const STREAM_BACKOFF_MAX_MS = 30_000
+
+export function openAdminStream(
+  storeId: string,
+  handlers: AdminStreamHandlers,
+): () => void {
+  let es: EventSource | null = null
+  let backoff = 1_000
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let closed = false
+
+  async function connect() {
+    if (closed) return
+    let ticket: string
+    try {
+      const r = await api.streamTicket(storeId) as { ticket: string }
+      ticket = r.ticket
+    } catch {
+      // Bearer expired or store_id mismatch — schedule a retry. The
+      // caller (Conversations page) typically catches the auth error
+      // on its next API call and routes the user back to /login.
+      scheduleReconnect()
+      return
+    }
+    if (closed) return
+
+    const url = `/admin/${encodeURIComponent(storeId)}/stream?ticket=${encodeURIComponent(ticket)}`
+    es = new EventSource(url)
+
+    es.addEventListener('connected', () => {
+      backoff = 1_000
+      handlers.onConnect?.()
+    })
+
+    es.addEventListener('new_message', (e: MessageEvent) => {
+      try { handlers.onMessage?.(JSON.parse(e.data)) } catch {/* malformed — ignore */}
+    })
+    es.addEventListener('new_conversation', (e: MessageEvent) => {
+      try { handlers.onNewConversation?.(JSON.parse(e.data)) } catch {/**/}
+    })
+    es.addEventListener('rating', (e: MessageEvent) => {
+      try { handlers.onRating?.(JSON.parse(e.data)) } catch {/**/}
+    })
+    es.addEventListener('bot_toggle', (e: MessageEvent) => {
+      try { handlers.onBotToggle?.(JSON.parse(e.data)) } catch {/**/}
+    })
+    es.addEventListener('shutdown', () => {
+      // Server is restarting — close cleanly and let backoff reconnect.
+      try { es?.close() } catch {/**/}
+      scheduleReconnect()
+    })
+
+    es.onerror = () => {
+      // EventSource auto-retries on transient errors. We trigger our own
+      // reconnect only when the readyState shows the connection is
+      // permanently CLOSED — otherwise we'd double-reconnect.
+      if (es && es.readyState === 2 /* CLOSED */) {
+        handlers.onDisconnect?.()
+        scheduleReconnect()
+      }
+    }
+  }
+
+  function scheduleReconnect() {
+    if (closed || reconnectTimer) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      backoff = Math.min(backoff * 2, STREAM_BACKOFF_MAX_MS)
+      connect()
+    }, backoff)
+  }
+
+  // Kick off the first connection asynchronously so the caller's render
+  // pass isn't blocked by the ticket fetch.
+  void connect()
+
+  // Cleanup returned to the caller.
+  return () => {
+    closed = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (es) {
+      try { es.close() } catch {/**/}
+      es = null
+    }
+  }
 }

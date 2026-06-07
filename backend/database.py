@@ -20,6 +20,8 @@ import asyncio
 import asyncpg
 from typing import Optional
 
+import crypto as _crypto
+
 _pool: Optional[asyncpg.Pool] = None
 
 
@@ -222,6 +224,90 @@ async def _create_tables():
             -- Avoid double-counting if the same order is recorded twice.
             CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_orders_unique
                 ON bot_orders (store_id, order_ref);
+
+            -- ── Durable webhook ingest queue ───────────────────────────────
+            -- Every incoming webhook (Salla + WhatsApp) is INSERTed here
+            -- BEFORE the 200 OK ack. A worker drains pending rows with
+            -- SELECT FOR UPDATE SKIP LOCKED. This is the transactional
+            -- inbox pattern — it guarantees that a process restart between
+            -- "received" and "processed" doesn't lose the event.
+            --
+            -- The UNIQUE (source, dedup_key) constraint replaces the old
+            -- webhook_seen table: idempotent receipts are now atomic at the
+            -- INSERT level (ON CONFLICT DO NOTHING).
+            CREATE TABLE IF NOT EXISTS webhook_inbox (
+                id            BIGSERIAL PRIMARY KEY,
+                source        TEXT NOT NULL,                  -- 'salla' | 'whatsapp'
+                event_type    TEXT,                           -- 'order.created' | 'whatsapp.message' | …
+                dedup_key     TEXT,                           -- '{event}:{merchant}:{created_at}' | 'wa:{message_id}'
+                store_id      TEXT,                           -- for routing & log filtering
+                payload       JSONB NOT NULL,                 -- full parsed body
+                meta          JSONB NOT NULL DEFAULT '{}'::jsonb,  -- sig_status, body_head, headers
+                status        TEXT NOT NULL DEFAULT 'pending',-- pending|processing|done|failed|dead
+                attempts      INT  NOT NULL DEFAULT 0,
+                last_error    TEXT,
+                claimed_by    TEXT,
+                claimed_at    TIMESTAMPTZ,
+                created_at    TIMESTAMPTZ DEFAULT NOW(),
+                processed_at  TIMESTAMPTZ
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_dedup
+                ON webhook_inbox (source, dedup_key)
+                WHERE dedup_key IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_inbox_pending
+                ON webhook_inbox (status, created_at)
+                WHERE status IN ('pending', 'failed');
+            CREATE INDEX IF NOT EXISTS idx_inbox_dead
+                ON webhook_inbox (status, created_at DESC)
+                WHERE status = 'dead';
+
+            -- ── Durable outbound delivery queue ────────────────────────────
+            -- Every outbound side-effect (email, custom webhook, WhatsApp
+            -- send) is INSERTed here as part of the same DB transaction
+            -- that triggered it. A worker dispatches with exponential
+            -- backoff and parks dead rows after MAX_ATTEMPTS for an admin
+            -- to inspect.
+            CREATE TABLE IF NOT EXISTS outbox (
+                id              BIGSERIAL PRIMARY KEY,
+                kind            TEXT NOT NULL,             -- notify_email|notify_webhook|whatsapp_send|whatsapp_csat
+                store_id        TEXT,
+                payload         JSONB NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'pending',
+                attempts        INT  NOT NULL DEFAULT 0,
+                last_error      TEXT,
+                next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                sent_at         TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_outbox_pending
+                ON outbox (status, next_attempt_at)
+                WHERE status IN ('pending', 'failed');
+            CREATE INDEX IF NOT EXISTS idx_outbox_dead
+                ON outbox (status, created_at DESC)
+                WHERE status = 'dead';
+
+            -- Track which sessions have unflushed conversation state. Used
+            -- by the drainer to find work in O(index) time without a
+            -- full-table JSONB scan. Replaces the in-memory _dirty_sessions
+            -- set so multi-instance deployments stay coherent.
+            ALTER TABLE conversations
+              ADD COLUMN IF NOT EXISTS dirty_at TIMESTAMPTZ;
+            CREATE INDEX IF NOT EXISTS idx_conv_dirty
+                ON conversations (dirty_at) WHERE dirty_at IS NOT NULL;
+
+            -- ── Leader-election leases ─────────────────────────────────────
+            -- One row per named periodic job. The holder claims a TTL
+            -- (acquire+renew is the same SQL); other instances see the
+            -- row not-expired and sleep this tick. If the holder dies,
+            -- the row's expires_at lapses and another instance takes over
+            -- on its next tick. Survives connection drops (no advisory-
+            -- lock session semantics).
+            CREATE TABLE IF NOT EXISTS leader_locks (
+                name        TEXT PRIMARY KEY,
+                holder      TEXT NOT NULL,
+                acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at  TIMESTAMPTZ NOT NULL
+            );
         """)
 
 
@@ -913,6 +999,10 @@ async def force_save_all_stores(stores: list[dict]) -> int:
             continue
         try:
             ai_cfg = tokens.get("ai_config", {})
+            # Encrypt secrets before the bulk write — same boundary as
+            # save_store / save_ai_config.
+            enc_tokens = _crypto.encrypt_store_blob(tokens)
+            enc_ai_cfg = _crypto.encrypt_ai_config_blob(ai_cfg)
             async with _pool.acquire() as conn:
                 await conn.execute(
                     """
@@ -924,8 +1014,8 @@ async def force_save_all_stores(stores: list[dict]) -> int:
                           updated_at = NOW()
                     """,
                     sid,
-                    json.dumps(tokens,  ensure_ascii=False),
-                    json.dumps(ai_cfg,  ensure_ascii=False),
+                    json.dumps(enc_tokens,  ensure_ascii=False),
+                    json.dumps(enc_ai_cfg,  ensure_ascii=False),
                 )
             saved += 1
         except Exception as e:
@@ -1049,8 +1139,16 @@ def _coerce_jsonb(value) -> dict:
 
 async def load_all_stores() -> list:
     """
-    Return all store rows from the DB.
+    Return all store rows from the DB with secrets decrypted in memory.
     Each row: {store_id, tokens, ai_config, cache_data}
+
+    Decryption is transparent — callers iterating the returned list see
+    plaintext access_token, refresh_token, and provider API keys, just
+    like before Phase C9. The ciphertext only ever exists on disk.
+
+    Legacy plaintext rows (pre-encryption deploys) pass through unchanged
+    via crypto.decrypt's pass-through-on-no-prefix behaviour. The 0002
+    migration upgrades them at deploy time.
     """
     if not _pool:
         return []
@@ -1059,20 +1157,24 @@ async def load_all_stores() -> list:
             rows = await conn.fetch(
                 "SELECT store_id, tokens, ai_config, cache_data FROM stores"
             )
-        result = [
-            {
+        result = []
+        for r in rows:
+            tokens    = _coerce_jsonb(r["tokens"])
+            ai_config = _coerce_jsonb(r["ai_config"])
+            # Decrypt at the boundary. crypto helpers are no-op for empty
+            # / missing / non-string fields, so this is safe even for
+            # half-populated rows.
+            tokens    = _crypto.decrypt_store_blob(tokens)
+            ai_config = _crypto.decrypt_ai_config_blob(ai_config)
+            result.append({
                 "store_id":  r["store_id"],
-                "tokens":    _coerce_jsonb(r["tokens"]),
-                "ai_config": _coerce_jsonb(r["ai_config"]),
+                "tokens":    tokens,
+                "ai_config": ai_config,
                 "cache":     _coerce_jsonb(r["cache_data"]),
-            }
-            for r in rows
-        ]
+            })
         print(f"[db] load_all_stores: fetched {len(result)} row(s) from PostgreSQL")
         return result
     except Exception as e:
-        # Print the FULL exception (not just message) so silent failures
-        # like dict(str) TypeErrors are visible in Railway logs
         import traceback
         print(f"[db] ❌ load_all_stores error: {type(e).__name__}: {e}")
         traceback.print_exc()
@@ -1118,9 +1220,16 @@ async def list_raw_stores() -> list:
 
 
 async def save_store(store_id: str, tokens: dict):
-    """Upsert store tokens (access/refresh token, store name, etc.)."""
+    """
+    Upsert store tokens. Secrets inside the blob (access_token,
+    refresh_token, ai_config.{groq,anthropic,openai,whatsapp}_*) are
+    encrypted at this boundary — see crypto.encrypt_store_blob. Memory
+    keeps plaintext, so existing callers reading tokens["access_token"]
+    are unaffected.
+    """
     if not _pool:
         return
+    encrypted_blob = _crypto.encrypt_store_blob(tokens)
     try:
         async with _pool.acquire() as conn:
             await conn.execute(
@@ -1131,7 +1240,7 @@ async def save_store(store_id: str, tokens: dict):
                   SET tokens = EXCLUDED.tokens, updated_at = NOW()
                 """,
                 store_id,
-                json.dumps(tokens, ensure_ascii=False),
+                json.dumps(encrypted_blob, ensure_ascii=False),
             )
     except Exception as e:
         print(f"[db] save_store({store_id!r}) error: {e}")
@@ -1171,9 +1280,14 @@ async def purge_store(store_id: str) -> dict:
 
 
 async def save_ai_config(store_id: str, ai_config: dict):
-    """Upsert only the ai_config column, leaving tokens and cache unchanged."""
+    """
+    Upsert only the ai_config column. Provider API keys
+    (groq/anthropic/openai/whatsapp) are encrypted before write — see
+    crypto.encrypt_ai_config_blob.
+    """
     if not _pool:
         return
+    encrypted = _crypto.encrypt_ai_config_blob(ai_config)
     try:
         async with _pool.acquire() as conn:
             await conn.execute(
@@ -1184,7 +1298,7 @@ async def save_ai_config(store_id: str, ai_config: dict):
                   SET ai_config = EXCLUDED.ai_config, updated_at = NOW()
                 """,
                 store_id,
-                json.dumps(ai_config, ensure_ascii=False),
+                json.dumps(encrypted, ensure_ascii=False),
             )
     except Exception as e:
         print(f"[db] save_ai_config({store_id!r}) error: {e}")
@@ -1382,3 +1496,470 @@ async def mark_cart_recovered(store_id: str, cart_id: str):
             )
     except Exception as e:
         print(f"[db] mark_cart_recovered({cart_id!r}) error: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Webhook inbox (durable ingest queue)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def inbox_insert(
+    source: str,
+    payload: dict,
+    *,
+    event_type: str = "",
+    dedup_key: str = "",
+    store_id: str = "",
+    meta: dict | None = None,
+) -> dict:
+    """
+    Insert a new inbox row, atomic dedup on (source, dedup_key).
+
+    Returns {"inserted": bool, "id": int|None}. inserted=False means a row
+    with the same dedup_key already exists — Salla/Meta retried a duplicate
+    delivery and we should just ack 200 without re-queueing the work.
+    """
+    if not _pool:
+        return {"inserted": False, "id": None}
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO webhook_inbox
+                    (source, event_type, dedup_key, store_id, payload, meta)
+                VALUES ($1, $2, NULLIF($3, ''), $4, $5::jsonb, $6::jsonb)
+                ON CONFLICT (source, dedup_key) DO NOTHING
+                RETURNING id
+                """,
+                source,
+                event_type or "",
+                dedup_key or "",
+                store_id or "",
+                json.dumps(payload, ensure_ascii=False, default=str),
+                json.dumps(meta or {}, ensure_ascii=False, default=str),
+            )
+        if row is None:
+            return {"inserted": False, "id": None}
+        return {"inserted": True, "id": int(row["id"])}
+    except Exception as e:
+        print(f"[db] inbox_insert error: {e}")
+        return {"inserted": False, "id": None}
+
+
+async def inbox_claim_batch(worker_id: str, limit: int = 20) -> list[dict]:
+    """
+    Atomic batch-claim: pick up to `limit` pending/retryable rows, mark them
+    `processing`, and return them. Uses SELECT FOR UPDATE SKIP LOCKED so
+    multiple drainer instances can run side-by-side without contention.
+    """
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH cte AS (
+                    SELECT id
+                    FROM webhook_inbox
+                    WHERE status IN ('pending', 'failed')
+                    ORDER BY created_at
+                    LIMIT $2
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE webhook_inbox w
+                   SET status     = 'processing',
+                       attempts   = w.attempts + 1,
+                       claimed_by = $1,
+                       claimed_at = NOW()
+                  FROM cte
+                 WHERE w.id = cte.id
+              RETURNING w.id, w.source, w.event_type, w.dedup_key,
+                        w.store_id, w.payload, w.meta, w.attempts
+                """,
+                worker_id, limit,
+            )
+        return [
+            {
+                "id":         int(r["id"]),
+                "source":     r["source"],
+                "event_type": r["event_type"] or "",
+                "dedup_key":  r["dedup_key"] or "",
+                "store_id":   r["store_id"] or "",
+                "payload":    _coerce_jsonb(r["payload"]),
+                "meta":       _coerce_jsonb(r["meta"]),
+                "attempts":   int(r["attempts"]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] inbox_claim_batch error: {e}")
+        return []
+
+
+async def inbox_mark_done(inbox_id: int) -> None:
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE webhook_inbox SET status='done', processed_at=NOW(), last_error=NULL "
+                "WHERE id=$1",
+                inbox_id,
+            )
+    except Exception as e:
+        print(f"[db] inbox_mark_done error: {e}")
+
+
+# Same retry ladder used for the outbox (kept here so both drainers behave the
+# same way for ops/runbooks). Index = attempts after the failure.
+_RETRY_BACKOFF_SECONDS = (5, 30, 120, 600, 1800)   # 5s, 30s, 2m, 10m, 30m
+_MAX_ATTEMPTS = 5
+
+
+async def inbox_mark_failed(inbox_id: int, error: str, attempts: int) -> None:
+    """
+    Record a processing failure. After _MAX_ATTEMPTS the row is parked as
+    `dead` for human inspection — never silently dropped.
+    """
+    if not _pool:
+        return
+    final = attempts >= _MAX_ATTEMPTS
+    status = "dead" if final else "failed"
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE webhook_inbox SET status=$2, last_error=$3 WHERE id=$1",
+                inbox_id, status, (error or "")[:2000],
+            )
+    except Exception as e:
+        print(f"[db] inbox_mark_failed error: {e}")
+
+
+async def inbox_count_by_status() -> dict:
+    """Health snapshot for /admin/db-test and a future ops dashboard."""
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT status, COUNT(*) AS n FROM webhook_inbox GROUP BY status"
+            )
+        return {r["status"]: int(r["n"]) for r in rows}
+    except Exception as e:
+        print(f"[db] inbox_count_by_status error: {e}")
+        return {}
+
+
+async def prune_inbox_done(keep_last_days: int = 14) -> int:
+    """Drop processed inbox rows older than N days. DEAD rows are kept."""
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM webhook_inbox "
+                "WHERE status='done' AND processed_at < NOW() - ($1 || ' days')::interval",
+                str(int(keep_last_days)),
+            )
+        # asyncpg returns 'DELETE <rowcount>' on success
+        try:
+            return int(result.split()[-1])
+        except Exception:
+            return 0
+    except Exception as e:
+        print(f"[db] prune_inbox_done error: {e}")
+        return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Outbox (durable outbound delivery queue)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def outbox_enqueue(kind: str, payload: dict, *, store_id: str = "") -> int | None:
+    """Schedule an outbound side-effect (email, custom webhook, WhatsApp send)."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO outbox (kind, store_id, payload)
+                VALUES ($1, $2, $3::jsonb)
+                RETURNING id
+                """,
+                kind, store_id or "",
+                json.dumps(payload, ensure_ascii=False, default=str),
+            )
+        return int(row["id"]) if row else None
+    except Exception as e:
+        print(f"[db] outbox_enqueue error: {e}")
+        return None
+
+
+async def outbox_claim_batch(worker_id: str, limit: int = 20) -> list[dict]:
+    """Same claim-pattern as the inbox, scoped to outbox rows due now."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH cte AS (
+                    SELECT id
+                    FROM outbox
+                    WHERE status IN ('pending', 'failed')
+                      AND next_attempt_at <= NOW()
+                    ORDER BY next_attempt_at
+                    LIMIT $2
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE outbox o
+                   SET status   = 'processing',
+                       attempts = o.attempts + 1
+                  FROM cte
+                 WHERE o.id = cte.id
+              RETURNING o.id, o.kind, o.store_id, o.payload, o.attempts
+                """,
+                worker_id, limit,
+            )
+        return [
+            {
+                "id":       int(r["id"]),
+                "kind":     r["kind"],
+                "store_id": r["store_id"] or "",
+                "payload":  _coerce_jsonb(r["payload"]),
+                "attempts": int(r["attempts"]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] outbox_claim_batch error: {e}")
+        return []
+
+
+async def outbox_mark_sent(outbox_id: int) -> None:
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE outbox SET status='done', sent_at=NOW(), last_error=NULL WHERE id=$1",
+                outbox_id,
+            )
+    except Exception as e:
+        print(f"[db] outbox_mark_sent error: {e}")
+
+
+async def outbox_mark_failed(outbox_id: int, error: str, attempts: int) -> None:
+    """Apply exponential backoff or park as dead after MAX_ATTEMPTS."""
+    if not _pool:
+        return
+    final = attempts >= _MAX_ATTEMPTS
+    status = "dead" if final else "failed"
+    delay_idx = min(attempts - 1, len(_RETRY_BACKOFF_SECONDS) - 1)
+    delay_secs = _RETRY_BACKOFF_SECONDS[max(0, delay_idx)]
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE outbox
+                   SET status          = $2,
+                       last_error      = $3,
+                       next_attempt_at = NOW() + ($4 || ' seconds')::interval
+                 WHERE id = $1
+                """,
+                outbox_id, status, (error or "")[:2000], str(delay_secs),
+            )
+    except Exception as e:
+        print(f"[db] outbox_mark_failed error: {e}")
+
+
+async def outbox_count_by_status() -> dict:
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT status, COUNT(*) AS n FROM outbox GROUP BY status"
+            )
+        return {r["status"]: int(r["n"]) for r in rows}
+    except Exception as e:
+        print(f"[db] outbox_count_by_status error: {e}")
+        return {}
+
+
+async def prune_outbox_sent(keep_last_days: int = 7) -> int:
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM outbox WHERE status='done' AND sent_at < NOW() - ($1 || ' days')::interval",
+                str(int(keep_last_days)),
+            )
+        try:
+            return int(result.split()[-1])
+        except Exception:
+            return 0
+    except Exception as e:
+        print(f"[db] prune_outbox_sent error: {e}")
+        return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dirty-conversation tracking (replaces the in-memory _dirty_sessions set)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def mark_conversation_dirty(session_id: str) -> None:
+    """
+    Set conversations.dirty_at on the existing row so the periodic flusher
+    can find it. No-op when DB is unavailable or the row doesn't exist yet
+    (the next save_conversation will create it and the next mark_dirty will
+    succeed).
+    """
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE conversations SET dirty_at = NOW() WHERE session_id = $1",
+                session_id,
+            )
+    except Exception as e:
+        print(f"[db] mark_conversation_dirty error: {e}")
+
+
+async def fetch_dirty_sessions(limit: int = 200) -> list[str]:
+    """Return up to `limit` session_ids that need a flush, oldest first."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT session_id
+                FROM conversations
+                WHERE dirty_at IS NOT NULL
+                ORDER BY dirty_at
+                LIMIT $1
+                """,
+                limit,
+            )
+        return [r["session_id"] for r in rows]
+    except Exception as e:
+        print(f"[db] fetch_dirty_sessions error: {e}")
+        return []
+
+
+async def clear_conversation_dirty(session_ids: list[str]) -> None:
+    """Clear dirty_at on the given session_ids after a successful save."""
+    if not _pool or not session_ids:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE conversations SET dirty_at = NULL WHERE session_id = ANY($1::text[])",
+                session_ids,
+            )
+    except Exception as e:
+        print(f"[db] clear_conversation_dirty error: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Leader election (DB-row lease)
+# ─────────────────────────────────────────────────────────────────────────────
+# Used by periodic loops so a multi-instance deploy doesn't double-run them
+# (e.g. token-refresh racing between web instances).
+#
+# The model is a "renewable TTL lease":
+#   • try_lead(name, holder, ttl): inserts/refreshes the lock row.
+#     Returns True if THIS holder is now the leader for the next ttl seconds.
+#   • The leader either calls try_lead() again before expiry (renew), or
+#     lets it lapse so another instance takes over.
+#   • No automatic release on crash — the TTL handles it. Pick a TTL that
+#     is comfortably longer than the loop's iteration time.
+#
+# Why not pg_advisory_lock? Advisory locks are session-scoped, so they
+# need a dedicated long-lived connection per leader, plus they're invisible
+# from outside SQL. The leader_locks table is observable, debuggable, and
+# survives pool-connection churn.
+
+async def try_lead(name: str, holder_id: str, ttl_seconds: int = 300) -> bool:
+    """
+    Atomically acquire OR renew leadership of `name` for `ttl_seconds`.
+    Returns True iff after this call, `holder_id` holds the lock.
+
+    Behaviour matrix:
+      • No existing row              → INSERT, this holder wins.
+      • Existing row, expired        → UPDATE to this holder, win.
+      • Existing row held by SAME id → UPDATE (renew), win.
+      • Existing row held by OTHER + not expired → no change, lose.
+    """
+    if not _pool:
+        # No DB → can't coordinate. Best to assume sole leadership so
+        # standalone-DB-less mode keeps periodic jobs running.
+        return True
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO leader_locks (name, holder, acquired_at, expires_at)
+                VALUES ($1, $2, NOW(), NOW() + ($3 || ' seconds')::interval)
+                ON CONFLICT (name) DO UPDATE
+                  SET holder      = EXCLUDED.holder,
+                      acquired_at = NOW(),
+                      expires_at  = EXCLUDED.expires_at
+                  WHERE leader_locks.expires_at < NOW()
+                     OR leader_locks.holder = EXCLUDED.holder
+                """,
+                name, holder_id, str(int(ttl_seconds)),
+            )
+        # asyncpg returns 'INSERT 0 N' or 'UPDATE N'. N=1 means we own it.
+        try:
+            count = int(result.split()[-1])
+        except Exception:
+            return False
+        return count == 1
+    except Exception as e:
+        print(f"[db] try_lead({name!r}) error: {e}")
+        return False
+
+
+async def release_leader(name: str, holder_id: str) -> None:
+    """
+    Voluntary release — clears the row if this holder still owns it.
+    Idempotent; safe to call from a finally block on graceful shutdown.
+    Optional: the TTL handles crashes; this just frees the slot sooner.
+    """
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM leader_locks WHERE name=$1 AND holder=$2",
+                name, holder_id,
+            )
+    except Exception as e:
+        print(f"[db] release_leader({name!r}) error: {e}")
+
+
+async def list_leader_locks() -> list[dict]:
+    """Snapshot of who holds what — for /env-check style diagnostics."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT name, holder, acquired_at, expires_at FROM leader_locks ORDER BY name"
+            )
+        return [
+            {
+                "name":        r["name"],
+                "holder":      r["holder"],
+                "acquired_at": r["acquired_at"].isoformat() if r["acquired_at"] else "",
+                "expires_at":  r["expires_at"].isoformat()  if r["expires_at"]  else "",
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] list_leader_locks error: {e}")
+        return []

@@ -1,6 +1,23 @@
 [build]
 builder = "nixpacks"
-# nixpacks.toml inside backend/ handles all build steps explicitly
+# nixpacks.toml inside backend/ handles all build steps explicitly.
 
 [deploy]
-startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+# Web service start command. Runs DB migrations before the app boots so
+# a fresh deploy applies any pending schema changes atomically.
+#
+# To deploy a SECOND service for the worker (recommended once you start
+# scaling), create a new Railway service from the same repo and set its
+# start command to:
+#   alembic upgrade head && python worker.py
+# Then on the WEB service add env vars:
+#   ENABLE_DRAINERS=false
+#   ENABLE_PERIODIC=false
+# Leaving them on is also safe (leader-elected), just wastes a couple of
+# DB round-trips per minute.
+startCommand = "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT"
+
+# Restart policy: any non-zero exit (including OOM kill, signal) is
+# retried. Healthcheck is /health (already implemented in main.py).
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

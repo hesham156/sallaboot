@@ -18,6 +18,7 @@ Storage:
 
 import datetime
 import database as db
+import realtime as _rt
 
 # ── Bot toggles ────────────────────────────────────────────────────────────────
 # Global toggle: hot-cached in memory but the DB (app_settings table) is the
@@ -25,16 +26,25 @@ import database as db
 _bot_globally_enabled: bool = True
 
 # ── Conversations dict: session_id → conv dict ─────────────────────────────────
+# Hot per-process cache. Each FastAPI worker has its own copy. The DB is the
+# source of truth: every flush goes through database.save_conversation, and
+# the periodic flusher reads from conversations.dirty_at (a column we added
+# in Phase 1) rather than a process-local set. This is what makes
+# horizontal scaling safe — instance A's mark_dirty is visible to instance B.
 _conversations: dict[str, dict] = {}
-
-# Sessions that have been mutated since the last periodic flush
-# mark_dirty() must be at module level so mutation functions below can call it
-_dirty_sessions: set[str] = set()
 
 
 def mark_dirty(session_id: str):
-    """Mark a session as needing a DB sync on the next periodic flush."""
-    _dirty_sessions.add(session_id)
+    """
+    Mark a session as needing a flush. Persisted to the DB (sets
+    conversations.dirty_at) so the periodic flusher across all instances
+    can pick it up, not just the one that did the mutation.
+
+    The DB write is fire-and-forget — losing a dirty mark is acceptable
+    because the next mutation re-sets it, and the next add_message already
+    awaits a full save.
+    """
+    db.fire(db.mark_conversation_dirty(session_id))
 
 
 def _now() -> str:
@@ -269,9 +279,33 @@ async def add_message(session_id: str, role: str, content: str, store_id: str = 
     # AWAIT the DB write — guarantees persistence before returning to caller
     try:
         await db.save_conversation(session_id, conv.get("store_id", store_id), conv)
+        # The full conversation is now on disk → clear the dirty flag.
+        await db.clear_conversation_dirty([session_id])
     except Exception as exc:
         # Log loudly but don't break the chat flow if DB is temporarily down
         print(f"[conversation_store] ❌ Failed to persist message for {session_id!r}: {exc}")
+
+    # ── Realtime fanout ──────────────────────────────────────────────────
+    # Notify any live SSE clients (widget + admin dashboard) that this
+    # session just gained a message. Best-effort: realtime.publish never
+    # raises, just logs. The DB is already the source of truth.
+    sid_store = conv.get("store_id", store_id)
+    payload = {
+        "session_id": session_id,
+        "store_id":   sid_store,
+        "role":       role,
+        "ts":         msg["ts"],
+        # Trim the body — full text is queried by the SSE client via the
+        # conversation detail endpoint. NOTIFY payload caps at 8KB so
+        # passing the entire message would break on long ones.
+        "preview":    (content or "")[:200],
+    }
+    # Per-session channel — the widget for THIS session listens here so
+    # it gets admin replies and bot toggles in real time.
+    await _rt.publish(f"session:{session_id}", f"{role}_message", payload)
+    # Per-store channel — the admin dashboard listens here so all
+    # conversations under this store light up live.
+    await _rt.publish(f"store:{sid_store}", "new_message", payload)
 
     return msg
 
@@ -524,6 +558,7 @@ async def flush(session_id: str):
         return
     try:
         await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
+        await db.clear_conversation_dirty([session_id])
     except Exception as exc:
         print(f"[conversation_store] ❌ Failed to flush {session_id!r}: {exc}")
 
@@ -536,38 +571,52 @@ async def flush_all() -> int:
     Returns number of conversations saved.
     """
     saved = 0
+    flushed_ids: list[str] = []
     for sid, conv in list(_conversations.items()):
         try:
             await db.save_conversation(sid, conv.get("store_id", "default"), conv)
             saved += 1
+            flushed_ids.append(sid)
         except Exception as exc:
             print(f"[conversation_store] ❌ flush_all failed for {sid!r}: {exc}")
+    if flushed_ids:
+        await db.clear_conversation_dirty(flushed_ids)
     return saved
 
 
 
 async def flush_dirty() -> int:
     """
-    Persist only sessions that were mutated since the last flush_dirty() call.
-    Called by the periodic background loop every 5 minutes as a safety net.
-    Returns number of sessions flushed.
+    Persist sessions flagged dirty in the DB (conversations.dirty_at IS NOT
+    NULL). Called by the periodic background loop every 5 minutes as a
+    safety net for mutations that didn't go through add_message.
+
+    Cross-instance safe: the DB column is shared. The session may have been
+    marked dirty by another instance — we'll still see it. We only flush
+    sessions whose data we have in memory (the DB already has the latest
+    state for the others; clearing their dirty_at is harmless).
     """
-    if not _dirty_sessions:
+    sids = await db.fetch_dirty_sessions(limit=200)
+    if not sids:
         return 0
-    to_flush = list(_dirty_sessions)
-    _dirty_sessions.clear()
     saved = 0
-    for sid in to_flush:
+    cleared: list[str] = []
+    for sid in sids:
         conv = _conversations.get(sid)
         if not conv:
+            # Not in our in-memory cache. Either another instance has it
+            # (and will flush it) or the row already has the freshest data.
+            # Clear the flag either way — leaving it set would loop forever.
+            cleared.append(sid)
             continue
         try:
             await db.save_conversation(sid, conv.get("store_id", "default"), conv)
             saved += 1
+            cleared.append(sid)
         except Exception as exc:
-            # Re-mark dirty so next cycle retries it
-            _dirty_sessions.add(sid)
             print(f"[conversation_store] ❌ flush_dirty failed for {sid!r}: {exc}")
+    if cleared:
+        await db.clear_conversation_dirty(cleared)
     return saved
 
 

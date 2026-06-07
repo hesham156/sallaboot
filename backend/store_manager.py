@@ -17,6 +17,7 @@ import datetime
 from pathlib import Path
 
 import database as db
+import crypto as _crypto
 
 DATA_DIR = Path(__file__).parent / "data" / "stores"
 
@@ -61,6 +62,9 @@ def load_all_stores() -> dict:
         if tp.exists():
             try:
                 tokens = json.loads(tp.read_text(encoding="utf-8"))
+                # Decrypt secrets in place — file format mirrors the DB
+                # JSONB blob, so the same crypto helpers apply.
+                tokens = _crypto.decrypt_store_blob(tokens)
             except Exception:
                 pass
 
@@ -215,8 +219,12 @@ def register_store(
 
     try:
         _store_dir(store_id)
+        # Encrypt secrets before writing to disk — same boundary as
+        # database.save_store. Dev who accidentally commits the data/
+        # dir leaks ciphertext, not raw API keys.
+        encrypted_for_disk = _crypto.encrypt_store_blob(tokens)
         _tokens_path(store_id).write_text(
-            json.dumps(tokens, ensure_ascii=False, indent=2),
+            json.dumps(encrypted_for_disk, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         print(f"[store_manager] Saved store {store_id!r}: {tokens['store_name']}")
@@ -390,8 +398,10 @@ def set_ai_config(store_id: str, config: dict):
 
     try:
         _store_dir(store_id)
+        encrypted_for_disk = _crypto.encrypt_store_blob(tokens)
         _tokens_path(store_id).write_text(
-            json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(encrypted_for_disk, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
         print(f"[store_manager] AI config updated for {store_id!r}")
     except Exception as e:
@@ -417,8 +427,10 @@ def set_admin_password(store_id: str, password_hash: str):
 
     try:
         _store_dir(store_id)
+        encrypted_for_disk = _crypto.encrypt_store_blob(tokens)
         _tokens_path(store_id).write_text(
-            json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(encrypted_for_disk, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
         print(f"[store_manager] Password updated for {store_id!r}")
     except Exception as e:

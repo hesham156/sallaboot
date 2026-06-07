@@ -4,7 +4,7 @@ import {
   Button, Input, Spinner, Textarea, Avatar,
   Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
 } from '@heroui/react'
-import { api, ConvSummary, Conversation, Message } from '../../api'
+import { api, ConvSummary, Conversation, Message, openAdminStream } from '../../api'
 
 interface Props { storeId: string }
 
@@ -144,6 +144,41 @@ export default function Conversations({ storeId }: Props) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight
     }
   }, [selected?.messages])
+
+  // ── Live updates via SSE (Phase 3) ──────────────────────────────────────
+  // Replaces the previous "refresh on storeId change only" behaviour. Now:
+  //   • new_conversation → reload the list so the new row appears at top
+  //   • new_message      → if the message is for the OPEN conversation,
+  //                        refresh its detail; otherwise just refresh the
+  //                        list (it'll resort newest-first and mark unread)
+  //   • bot_toggle/rating → reload list (badges/stars need the new value)
+  //
+  // We keep selectedId/storeId in refs so the SSE handler closures don't
+  // capture stale values — otherwise a slow reload would refresh a
+  // conversation that's no longer open.
+  const selectedIdRef = useRef<string | null>(null)
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+
+  useEffect(() => {
+    if (!storeId) return
+    const close = openAdminStream(storeId, {
+      onMessage: (ev) => {
+        if (ev.session_id === selectedIdRef.current) {
+          // Open conversation got a new message — pull the full detail.
+          api.getConversation(storeId, ev.session_id)
+            .then(setSelected)
+            .catch(() => { /* user just navigated away — ignore */ })
+        }
+        // Always refresh the list (preview + unread badge change).
+        loadConversations()
+      },
+      onNewConversation: () => { loadConversations() },
+      onRating:          () => { loadConversations() },
+      onBotToggle:       () => { loadConversations() },
+    })
+    return close
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId])
 
   // Auto-open the requested session after the list loads.
   useEffect(() => {

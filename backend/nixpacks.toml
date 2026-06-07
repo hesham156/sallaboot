@@ -8,5 +8,9 @@ cmds = [
   "/opt/venv/bin/pip install -r requirements.txt"
 ]
 
+# `alembic upgrade head` runs as part of the start command so a fresh
+# instance applies any pending schema changes before serving traffic.
+# Operators can override START_CMD to switch this service to the worker
+# role (e.g. `python worker.py`) without rebuilding the image.
 [start]
-cmd = "/opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT"
+cmd = "/opt/venv/bin/alembic upgrade head && /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT"

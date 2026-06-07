@@ -1,0 +1,14 @@
+# Test-only deps. Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+# httpx provides AsyncClient; already pinned in requirements.txt — listed
+# explicitly so dev installs without the runtime file still get it.
+httpx>=0.27.0
+# testcontainers spins up an ephemeral Postgres in Docker. Used when
+# TEST_DATABASE_URL is not set. If Docker isn't available, integration
+# tests are skipped (see tests/conftest.py).
+testcontainers[postgres]>=4.7.0
+# Coverage is optional but cheap to install.
+pytest-cov>=5.0.0

@@ -33,6 +33,7 @@ import asyncio
 import datetime as dt
 import httpx
 import store_manager as sm
+import database as db
 
 # ── Resend sender ──────────────────────────────────────────────────────────────
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
@@ -213,10 +214,18 @@ def save_settings(store_id: str, settings: dict) -> None:
 
 async def notify(store_id: str, event: str, ctx: dict) -> None:
     """
-    Fire notifications for a store event. Fire-and-forget safe (never raises).
+    Schedule notification delivery for a store event.
 
-    event: "new_conversation" | "abandoned_cart" | "low_rating"
-    ctx:   dict with event-specific keys
+    What changed in Phase 1: this function no longer sends — it ENQUEUES into
+    the durable outbox. The drainer picks up the row and invokes
+    `deliver_outbox_row()` below. Two reasons:
+      • Surviving restarts: previously asyncio.create_task(notify(...)) lost
+        notifications if the process died before httpx finished.
+      • Backoff & DLQ: failed sends now retry with exponential backoff
+        instead of silently disappearing on the first 502 from Resend.
+
+    Never raises — failure to enqueue is logged loudly but isn't the
+    caller's problem (most call sites are deep in a webhook handler).
     """
     try:
         n = get_settings(store_id)
@@ -224,60 +233,88 @@ async def notify(store_id: str, event: str, ctx: dict) -> None:
         if not n["email_enabled"] and not n["webhook_url"]:
             return  # nothing configured
 
-        # Quiet hours check
         if n["quiet_hours_enabled"] and _in_quiet_hours(
             n["quiet_hours_start"], n["quiet_hours_end"]
         ):
             return
 
-        info       = sm.get_store_info(store_id) or {}
-        store_name = info.get("store_name") or f"متجر {store_id}"
+        # Event-type gating
+        gate_key = {
+            "new_conversation": "on_new_conversation",
+            "abandoned_cart":   "on_abandoned_cart",
+            "low_rating":       "on_low_rating",
+        }.get(event)
+        if not gate_key or not n[gate_key]:
+            return
 
-        subject = html = ""
-        wh_payload: dict = {"event": event, "store_id": store_id, "store_name": store_name}
-
-        if event == "new_conversation" and n["on_new_conversation"]:
-            subject, html = _template_new_conversation(
-                store_name     = store_name,
-                customer_name  = ctx.get("customer_name", ""),
-                session_id     = ctx.get("session_id", ""),
-                store_id       = store_id,
-                first_msg      = ctx.get("first_message", ""),
-            )
-            wh_payload.update(ctx)
-
-        elif event == "abandoned_cart" and n["on_abandoned_cart"]:
-            subject, html = _template_abandoned_cart(
-                store_name    = store_name,
-                customer_name = ctx.get("customer_name", ""),
-                cart_total    = ctx.get("cart_total", "—"),
-                store_id      = store_id,
-            )
-            wh_payload.update(ctx)
-
-        elif event == "low_rating" and n["on_low_rating"]:
-            subject, html = _template_low_rating(
-                store_name    = store_name,
-                customer_name = ctx.get("customer_name", ""),
-                rating        = int(ctx.get("rating", 1)),
-                comment       = ctx.get("comment", ""),
-                store_id      = store_id,
-            )
-            wh_payload.update(ctx)
-
-        else:
-            return  # event not configured
-
-        tasks = []
-        if n["email_enabled"] and n["email_address"] and subject:
-            tasks.append(_send_email(n["email_address"], subject, html))
-        if n["webhook_url"]:
-            tasks.append(_send_webhook(n["webhook_url"], wh_payload))
-
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            ok = sum(1 for r in results if r is True)
-            print(f"[notifications] {event} → {ok}/{len(tasks)} channels notified for store {store_id!r}")
+        # Always enqueue the smallest payload that the drainer can rebuild
+        # from. Templates are rebuilt at delivery time so a per-store rename
+        # picked up by the drainer reflects fresh store_name.
+        await db.outbox_enqueue(
+            kind     = "notify_event",
+            store_id = store_id,
+            payload  = {"event": event, "ctx": ctx},
+        )
 
     except Exception as exc:
-        print(f"[notifications] Unexpected error in notify({event}): {exc}")
+        print(f"[notifications] enqueue error for {event}: {exc}")
+
+
+async def deliver_outbox_row(store_id: str, payload: dict) -> None:
+    """
+    Drainer-side delivery for a 'notify_event' outbox row. Raises on send
+    failure (caught by the drainer → retry with backoff or DLQ). Returns
+    normally when every configured channel succeeded OR when none were
+    applicable at delivery time (settings were turned off since enqueue).
+    """
+    event = payload.get("event", "")
+    ctx   = payload.get("ctx", {}) or {}
+
+    n = get_settings(store_id)
+    if not n["email_enabled"] and not n["webhook_url"]:
+        return  # nothing configured — silent ok
+
+    info       = sm.get_store_info(store_id) or {}
+    store_name = info.get("store_name") or f"متجر {store_id}"
+
+    subject = html = ""
+    wh_payload: dict = {"event": event, "store_id": store_id, "store_name": store_name}
+
+    if event == "new_conversation":
+        subject, html = _template_new_conversation(
+            store_name    = store_name,
+            customer_name = ctx.get("customer_name", ""),
+            session_id    = ctx.get("session_id", ""),
+            store_id      = store_id,
+            first_msg     = ctx.get("first_message", ""),
+        )
+    elif event == "abandoned_cart":
+        subject, html = _template_abandoned_cart(
+            store_name    = store_name,
+            customer_name = ctx.get("customer_name", ""),
+            cart_total    = ctx.get("cart_total", "—"),
+            store_id      = store_id,
+        )
+    elif event == "low_rating":
+        subject, html = _template_low_rating(
+            store_name    = store_name,
+            customer_name = ctx.get("customer_name", ""),
+            rating        = int(ctx.get("rating", 1)),
+            comment       = ctx.get("comment", ""),
+            store_id      = store_id,
+        )
+    else:
+        return  # unknown event → silent ok
+
+    wh_payload.update(ctx)
+
+    errors: list[str] = []
+    if n["email_enabled"] and n["email_address"] and subject:
+        if not await _send_email(n["email_address"], subject, html):
+            errors.append("email")
+    if n["webhook_url"]:
+        if not await _send_webhook(n["webhook_url"], wh_payload):
+            errors.append("webhook")
+    if errors:
+        # Drainer treats this as a retryable failure
+        raise RuntimeError(f"channels failed: {','.join(errors)}")

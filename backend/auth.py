@@ -1,7 +1,8 @@
 """
-Admin authentication — no external dependencies.
+Admin authentication.
 - HMAC-SHA256 signed tokens (like JWT but without python-jose/PyJWT)
-- SHA-256 + salt password hashing
+- Argon2id password hashing (was salted SHA-256 — legacy hashes still verify
+  and are transparently upgraded on next successful login).
 """
 
 import os
@@ -12,6 +13,28 @@ import json
 import time
 import secrets
 from typing import Optional
+
+# argon2-cffi: required for new password hashes. Install via requirements.txt.
+# If the package is missing we fall back to legacy SHA-256 so an emergency
+# deploy without the dep still boots (auth still works for existing accounts).
+try:
+    from argon2 import PasswordHasher
+    from argon2.exceptions import VerifyMismatchError, InvalidHashError, VerificationError
+    # Conservative parameters — fast enough for interactive login (< 60 ms on
+    # a Railway shared CPU) while well above the 2024 OWASP minimum.
+    _ph = PasswordHasher(
+        time_cost=3,
+        memory_cost=64 * 1024,  # 64 MiB
+        parallelism=2,
+        hash_len=32,
+        salt_len=16,
+    )
+    _ARGON2_AVAILABLE = True
+except ImportError:
+    print("⚠️  [auth] argon2-cffi not installed — falling back to SHA-256 (insecure)")
+    _ph = None
+    _ARGON2_AVAILABLE = False
+    VerifyMismatchError = InvalidHashError = VerificationError = Exception
 
 # ── Signing secret ────────────────────────────────────────────────────────────
 # MUST be set as ADMIN_SECRET in Railway environment variables.
@@ -33,16 +56,15 @@ TOKEN_EXPIRY_SECONDS = 60 * 60 * 24 * 7  # 7 days
 
 
 # ── Password hashing ───────────────────────────────────────────────────────────
+#
+# Hash layout discrimination:
+#   • Argon2id → starts with "$argon2"     (PHC string format)
+#   • Legacy   → "<hex_salt>:<sha256_hex>" (no leading "$")
+#
+# This lets a single check_password() verify both formats without a flag.
 
-def hash_password(password: str) -> str:
-    """Return a salted SHA-256 hash string: '<salt>:<hex>'."""
-    salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return f"{salt}:{h}"
-
-
-def check_password(password: str, stored: str) -> bool:
-    """Constant-time comparison of password against stored hash."""
+def _legacy_check(password: str, stored: str) -> bool:
+    """Constant-time SHA-256+salt verify (the original scheme)."""
     if not stored or ":" not in stored:
         return False
     try:
@@ -51,6 +73,50 @@ def check_password(password: str, stored: str) -> bool:
         return hmac.compare_digest(candidate, h)
     except Exception:
         return False
+
+
+def hash_password(password: str) -> str:
+    """Hash a password with argon2id (preferred) or SHA-256+salt (fallback)."""
+    if _ARGON2_AVAILABLE and _ph is not None:
+        return _ph.hash(password)
+    # Fallback — only reached if argon2-cffi isn't installed.
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return f"{salt}:{h}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    """Verify against either argon2id or the legacy SHA-256+salt format."""
+    if not stored:
+        return False
+    if stored.startswith("$argon2") and _ARGON2_AVAILABLE and _ph is not None:
+        try:
+            _ph.verify(stored, password)
+            return True
+        except (VerifyMismatchError, InvalidHashError, VerificationError):
+            return False
+        except Exception:
+            return False
+    return _legacy_check(password, stored)
+
+
+def needs_rehash(stored: str) -> bool:
+    """
+    True if `stored` should be upgraded to a fresh argon2id hash. Call this
+    right after a successful check_password() and, if True, re-hash the
+    password and persist the new value. Used to migrate legacy SHA-256
+    entries silently as users log in.
+    """
+    if not stored:
+        return False
+    if not stored.startswith("$argon2"):
+        return _ARGON2_AVAILABLE  # legacy → upgrade if argon2 is available
+    if _ARGON2_AVAILABLE and _ph is not None:
+        try:
+            return _ph.check_needs_rehash(stored)
+        except Exception:
+            return False
+    return False
 
 
 # ── Token creation / verification ─────────────────────────────────────────────

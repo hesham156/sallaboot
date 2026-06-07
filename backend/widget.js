@@ -910,16 +910,20 @@
         statusEl.textContent = "فريق الدعم";
         statusEl.className = "status human";
       }
-      startPolling();
+      // Realtime stays open across bot/human transitions — keep this
+      // for backwards-compat (a stale poll loop is harmless if SSE is
+      // also running; both feed appendAdminLike).
+      startRealtime();
     } else {
-      // Bot re-enabled
+      // Bot re-enabled — SSE still useful (CSAT survey, future bot msgs).
       humanBannerShown = false;
       if (banner) banner.classList.remove("visible");
       if (statusEl) {
         statusEl.textContent = "متاح الآن";
         statusEl.className = "status";
       }
-      stopPolling();
+      // Don't close the SSE — we still want to receive bot follow-ups
+      // (CSAT survey, end-of-chat farewell) that the server pushes.
     }
   }
 
@@ -929,7 +933,124 @@
     setHumanMode(!botEnabled);
   }
 
-  // ── Polling (admin → widget messages) ────────────────────────────────────────
+  // ── Realtime stream (replaces polling in Phase 3) ────────────────────────────
+  // Uses SSE (EventSource) so admin replies + bot-toggle updates land in
+  // < 100ms instead of waiting for the next 3-second poll tick. Polling
+  // is kept as a fallback: if the browser blocks SSE (corporate proxy
+  // stripping text/event-stream, ancient runtime), we silently revert.
+  var streamConn = null;
+  var streamReconnectTimer = null;
+  var streamBackoff = 1000;            // ms — doubles up to 30s on each failure
+  var STREAM_BACKOFF_MAX = 30000;
+
+  function startRealtime() {
+    if (!sessionId) return;
+    // Already connected — no-op.
+    if (streamConn && streamConn.readyState !== 2 /*CLOSED*/) return;
+    // No EventSource support → fall back to polling.
+    if (typeof EventSource === "undefined") {
+      startPolling();
+      return;
+    }
+    try {
+      var url = CONFIG.apiUrl + "/chat/stream?session_id="
+              + encodeURIComponent(sessionId);
+      streamConn = new EventSource(url);
+
+      // 'connected' fires immediately on a successful handshake — reset
+      // the backoff so a clean reconnect doesn't burn budget.
+      streamConn.addEventListener("connected", function () {
+        streamBackoff = 1000;
+        // Successful SSE means polling is redundant. Stop it in case a
+        // previous fallback was running.
+        stopPolling();
+      });
+
+      // admin_message — admin replied. role 'admin' includes employee replies.
+      streamConn.addEventListener("admin_message", function (e) {
+        try {
+          var payload = JSON.parse(e.data);
+          // Server sends a 'preview' (≤200 chars) in the NOTIFY payload to
+          // stay under the 8KB Postgres limit. For the widget the preview IS
+          // the full message in 99% of cases — but if it was truncated, we
+          // re-fetch the full thread on next user send.
+          appendAdminLike(payload);
+        } catch (err) { /* malformed event — ignore */ }
+      });
+
+      // bot_toggle — admin took over (or handed back) this session.
+      streamConn.addEventListener("bot_toggle", function (e) {
+        try {
+          var payload = JSON.parse(e.data);
+          if (payload.bot_enabled && !botEnabled) {
+            botEnabled = true;
+            setHumanMode(false);
+            appendMessage("system-note", "✅ تم إعادة توصيلك بالمساعد الذكي");
+          } else if (!payload.bot_enabled && botEnabled) {
+            botEnabled = false;
+            setHumanMode(true);
+          }
+        } catch (err) { /* ignore */ }
+      });
+
+      // shutdown — server is restarting. The browser EventSource will
+      // auto-reconnect; we just acknowledge to avoid confusion.
+      streamConn.addEventListener("shutdown", function () {
+        try { streamConn.close(); } catch (e) {}
+      });
+
+      // onerror fires both when the connection drops AND on permanent
+      // failures. EventSource auto-reconnects on transient errors with
+      // its own ~3s default; we layer our own exponential backoff for
+      // the bad-network case where the browser keeps retrying instantly.
+      streamConn.onerror = function () {
+        if (streamConn && streamConn.readyState === 2 /*CLOSED*/) {
+          scheduleStreamReconnect();
+        }
+      };
+    } catch (err) {
+      // SSE constructor threw (very rare) → fall back to polling.
+      startPolling();
+    }
+  }
+
+  function scheduleStreamReconnect() {
+    if (streamReconnectTimer) return;
+    streamReconnectTimer = setTimeout(function () {
+      streamReconnectTimer = null;
+      streamBackoff = Math.min(streamBackoff * 2, STREAM_BACKOFF_MAX);
+      startRealtime();
+    }, streamBackoff);
+  }
+
+  function stopRealtime() {
+    if (streamConn) {
+      try { streamConn.close(); } catch (e) {}
+      streamConn = null;
+    }
+    if (streamReconnectTimer) {
+      clearTimeout(streamReconnectTimer);
+      streamReconnectTimer = null;
+    }
+  }
+
+  // Render an admin/bot follow-up message (extracted so both the SSE
+  // handler and the legacy poll handler share one rendering path).
+  function appendAdminLike(m) {
+    var content = m.content || m.preview || "";
+    if (!content) return;
+    var role = m.role === "bot" ? "bot" : "admin";
+    appendMessage(role, content, {
+      employee_name: m.employee_name,
+      meta:          m.meta,
+    });
+    if (!isOpen) {
+      var badge = document.getElementById("salla-chat-badge");
+      if (badge) badge.style.display = "flex";
+    }
+  }
+
+  // ── Polling (FALLBACK — kept for clients that can't open SSE) ───────────────
   function startPolling() {
     if (pollTimer) return; // already running
     pollTimer = setInterval(pollAdmin, 3000);
@@ -975,8 +1096,8 @@
         botEnabled = false;
         setHumanMode(true);
       }
-      // Returning visitor with an active thread → keep admin polling alive.
-      startPolling();
+      // Returning visitor with an active thread → open the live channel.
+      startRealtime();
       return msgs.length;
     } catch (e) {
       return 0;
