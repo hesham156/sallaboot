@@ -364,6 +364,12 @@ def _wants_html(request: _Req) -> bool:
     return not any(path.startswith(p) for p in _API_ONLY_PREFIXES)
 
 
+_SPA_SHELL_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma":        "no-cache",
+}
+
+
 @app.exception_handler(_SHTTPException)
 async def _http_exception_to_spa(request: _Req, exc: _SHTTPException):
     """
@@ -385,7 +391,8 @@ async def _http_exception_to_spa(request: _Req, exc: _SHTTPException):
             html = _ADMIN_HTML.read_text(encoding="utf-8") if _ADMIN_HTML.exists() else "<h1>404</h1>"
         # Return 200 so the browser doesn't show its own error page over
         # ours; the SPA reads the URL and renders the right error code.
-        return HTMLResponse(html, status_code=200)
+        # No-cache headers — same reason as the main SPA shell handler.
+        return HTMLResponse(html, status_code=200, headers=_SPA_SHELL_NO_CACHE_HEADERS)
 
     # Default JSON response (mirrors FastAPI's built-in handler).
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
@@ -420,7 +427,7 @@ async def _unhandled_exception_handler(request: _Req, exc: Exception):
                 "</script>"
             )
             html = html.replace("</head>", redirect_snippet + "</head>", 1)
-            return HTMLResponse(html, status_code=500)
+            return HTMLResponse(html, status_code=500, headers=_SPA_SHELL_NO_CACHE_HEADERS)
         return HTMLResponse("<h1>500</h1>", status_code=500)
 
     return JSONResponse(

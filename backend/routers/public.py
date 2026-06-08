@@ -33,13 +33,34 @@ def _serve_react_or_legacy() -> HTMLResponse:
     Mirrors the original main._serve_react_or_legacy; same file probe
     so the deploy story (no `assets/` dir → falls back to legacy) is
     unchanged.
+
+    Cache headers
+    ─────────────
+    index.html MUST NOT be cached by the browser. Each Vite build emits
+    new content-hashed chunk filenames (StoreDashboard-XYZ.js), and
+    index.html is the manifest that tells the browser which hashes to
+    request. If a CDN/browser serves yesterday's index.html, the script
+    tags reference yesterday's chunks — which the new deploy already
+    deleted → 404 → ErrorBoundary 500 page. The /assets/* files ARE
+    safe to cache (their filename includes the content hash, so a new
+    deploy means new filenames; old content stays addressable by old
+    URLs as long as the CDN keeps them).
     """
     base = Path(__file__).resolve().parents[1]
     admin_dist_idx = base / "admin-dist" / "index.html"
     admin_html     = base / "admin.html"
-    if admin_dist_idx.exists():
-        return HTMLResponse(admin_dist_idx.read_text(encoding="utf-8"))
-    return HTMLResponse(admin_html.read_text(encoding="utf-8"))
+    html = (
+        admin_dist_idx.read_text(encoding="utf-8")
+        if admin_dist_idx.exists()
+        else admin_html.read_text(encoding="utf-8")
+    )
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma":        "no-cache",
+        },
+    )
 
 
 @router.get("/", response_class=HTMLResponse)
