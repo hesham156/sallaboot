@@ -113,6 +113,54 @@ async def _chat_rate_limited(store_id: str, session_id: str, ip: str) -> str | N
         return "store"
     return None
 
+
+# ── Daily token-budget circuit breaker ────────────────────────────────────
+# Defends against LLM-cost abuse from a single compromised store. Rate
+# limits above bound requests-per-minute; this one bounds tokens-per-day,
+# so a slow drip that hides under the rate limits still gets caught.
+#
+# Resolution order for the daily budget:
+#   1. Per-store override in ai_config['daily_token_budget'] (admin can
+#      raise/lower from the dashboard).
+#   2. LLM_DAILY_TOKEN_BUDGET env var (operator's global default).
+#   3. _DEFAULT_DAILY_TOKEN_BUDGET below.
+#
+# Set the per-store override to 0 to disable the breaker for that store
+# (for a paying customer who agreed to unlimited usage).
+_DEFAULT_DAILY_TOKEN_BUDGET = 500_000
+
+
+def _daily_token_budget(store_id: str) -> int:
+    """Return the active daily token budget for `store_id`. 0 means disabled."""
+    cfg = sm.get_ai_config(store_id) or {}
+    override = cfg.get("daily_token_budget")
+    if override is not None:
+        try:
+            n = int(override)
+            return max(0, n)
+        except (TypeError, ValueError):
+            pass  # malformed override — fall through to env default
+    try:
+        return max(0, int(os.getenv("LLM_DAILY_TOKEN_BUDGET", _DEFAULT_DAILY_TOKEN_BUDGET)))
+    except ValueError:
+        return _DEFAULT_DAILY_TOKEN_BUDGET
+
+
+async def _budget_exhausted(store_id: str) -> tuple[bool, int, int]:
+    """
+    Check whether today's usage has hit the daily token budget.
+
+    Returns (exhausted, used_today, budget). exhausted is False when the
+    breaker is disabled (budget=0) or DB is unavailable (fail-open — we
+    don't want a Postgres hiccup to brick every store's chat).
+    """
+    budget = _daily_token_budget(store_id)
+    if budget <= 0 or not db.available():
+        return False, 0, budget
+    snapshot = await db.llm_usage_today(store_id)
+    used = int(snapshot.get("tokens_total", 0))
+    return used >= budget, used, budget
+
 # Store IDs that are reserved and must never be used as real Salla merchant IDs
 _RESERVED_IDS = {"super", "admin", "stores", "auth", "default"}
 
@@ -1144,6 +1192,93 @@ async def store_analytics(store_id: str):
         },
     }
 
+
+
+# ── LLM token usage + budget (circuit breaker for AI spend) ─────────────────
+@app.get("/admin/{store_id}/llm-usage")
+async def store_llm_usage(store_id: str, days: int = 7):
+    """
+    Today's tokens + recent daily history + active budget for this store.
+    Used by the admin dashboard to show:
+      • Current consumption against the daily limit
+      • Trend over the last `days` (default 7) for chart rendering
+      • The active budget value (with its source: per-store override vs env default)
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    today    = await db.llm_usage_today(store_id)
+    history  = await db.llm_usage_report(store_id, days=days)
+    budget   = _daily_token_budget(store_id)
+    override = (sm.get_ai_config(store_id) or {}).get("daily_token_budget")
+
+    used_today = int(today.get("tokens_total", 0))
+    return {
+        "store_id": store_id,
+        "today": {
+            **today,
+            "budget":           budget,
+            "remaining":        max(0, budget - used_today) if budget > 0 else None,
+            "percent_used":     round(used_today / budget * 100, 1) if budget > 0 else None,
+            "exhausted":        budget > 0 and used_today >= budget,
+        },
+        "budget": {
+            "value":         budget,
+            "source":        "store_override" if override is not None else "env_default",
+            "breaker_active": budget > 0,
+        },
+        "history": history,
+    }
+
+
+@app.put("/admin/{store_id}/llm-budget")
+async def update_llm_budget(store_id: str, request: Request):
+    """
+    Set the per-store daily token budget. Pass 0 to disable the breaker for
+    this store (paying customer with unlimited usage agreement). Pass null /
+    omit the field to fall back to the env-var default.
+
+    Body: {"daily_token_budget": int | null}
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    # Owner-only — middleware already blocks agents; managers can change
+    # most settings but the budget is a financial-risk knob, so we gate
+    # it to the store owner / super admin the same way password reset is.
+    _require_store_owner(request, store_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+
+    raw = body.get("daily_token_budget", None) if isinstance(body, dict) else None
+    cfg = dict(sm.get_ai_config(store_id) or {})
+
+    if raw is None:
+        cfg.pop("daily_token_budget", None)
+        applied = None
+    else:
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "daily_token_budget must be an integer or null")
+        if n < 0:
+            raise HTTPException(400, "daily_token_budget must be ≥ 0 (0 disables the breaker)")
+        cfg["daily_token_budget"] = n
+        applied = n
+
+    sm.set_ai_config(store_id, cfg)
+    tokens = sm.get_store_info(store_id)
+    await db.save_store(store_id, tokens)
+    await db.save_ai_config(store_id, cfg)
+
+    return {
+        "status": "ok",
+        "daily_token_budget": applied,
+        "effective_budget":   _daily_token_budget(store_id),
+    }
 
 
 # ── ROI dashboard: "how much did the bot make you" ─────────────────────────────
@@ -2337,6 +2472,29 @@ async def chat(req: ChatRequest, request: Request):
             bot_enabled=True,
         )
 
+    # ── Daily token-budget circuit breaker (LLM cost protection) ──────────
+    # Checked AFTER the orphan-store check so an unregistered store gets a
+    # specific "install the app" message instead of a generic over-budget
+    # one. Fails open when DB is down (see _budget_exhausted).
+    exhausted, used_today, budget = await _budget_exhausted(store_id)
+    if exhausted:
+        print(
+            f"[chat] 🛑 LLM budget exhausted store={store_id!r} "
+            f"used={used_today} budget={budget} — refusing"
+        )
+        err_reply = (
+            "عذراً، النظام في صيانة مؤقتة لهذا اليوم. "
+            "يرجى المحاولة لاحقاً أو التواصل مع فريق الدعم."
+        )
+        # Don't persist as a regular assistant message — it would skew the
+        # transcript. Just respond. The realtime publish stays out too;
+        # admin sees the spike in the LLM-usage dashboard instead.
+        return ChatResponse(
+            reply=err_reply,
+            session_id=session_id,
+            bot_enabled=True,
+        )
+
     try:
         reply = await agent.chat(message=req.message, session_id=session_id)
     except Exception as e:
@@ -2379,6 +2537,15 @@ async def chat(req: ChatRequest, request: Request):
             session_id=session_id,
             bot_enabled=True,   # error ≠ admin takeover; do NOT confuse the widget
         )
+
+    # Record this turn's token usage into the daily budget counter. UPSERT
+    # is single-statement; we don't await before returning to the user — but
+    # we do await here because pushing it into a background task would race
+    # with the next request and let a burst slip past the limit further.
+    _usage = getattr(agent, "last_usage", None) or {}
+    _ti, _to = int(_usage.get("in", 0)), int(_usage.get("out", 0))
+    if _ti or _to:
+        await db.llm_usage_record(store_id, _ti, _to)
 
     # Pick up any rich UI component set by the agent tools this turn
     component  = cs.pop_last_component(session_id)

@@ -308,6 +308,24 @@ async def _create_tables():
                 acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 expires_at  TIMESTAMPTZ NOT NULL
             );
+
+            -- ── LLM token usage (daily counters per store) ─────────────────
+            -- Cheap UPSERT on each /chat call so the circuit breaker can read
+            -- today's spend in a single indexed lookup. Date is UTC — the
+            -- budget resets at 00:00 UTC, not the store's local midnight,
+            -- because that's the only time we can compute consistently
+            -- across instances without per-store timezone config.
+            CREATE TABLE IF NOT EXISTS llm_usage (
+                store_id    TEXT NOT NULL,
+                usage_date  DATE NOT NULL,
+                tokens_in   BIGINT NOT NULL DEFAULT 0,
+                tokens_out  BIGINT NOT NULL DEFAULT 0,
+                requests    INT    NOT NULL DEFAULT 0,
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (store_id, usage_date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_recent
+                ON llm_usage (store_id, usage_date DESC);
         """)
 
 
@@ -1962,4 +1980,123 @@ async def list_leader_locks() -> list[dict]:
         ]
     except Exception as e:
         print(f"[db] list_leader_locks error: {e}")
+        return []
+
+
+# ── LLM token usage (daily circuit breaker) ─────────────────────────────────
+# Three calls, all cheap:
+#   • llm_usage_today(store_id)       — single-row indexed read; 0 if no row yet
+#   • llm_usage_record(store_id, ti, to) — UPSERT on (store_id, today)
+#   • llm_usage_report(store_id, days)  — 7- or 30-day chart for the admin UI
+#
+# The check happens BEFORE the LLM call and the record happens AFTER, so a
+# burst of N concurrent /chat requests can race past the limit by up to N
+# requests' worth of tokens. That's acceptable: the budget is a soft target
+# anyway (real abuse comes from sustained traffic, not a 0.5s burst).
+
+async def llm_usage_today(store_id: str) -> dict:
+    """
+    Tokens + request count consumed by `store_id` today (UTC).
+    Returns zeros when the DB is down so the breaker fails open — refusing
+    every chat because Postgres hiccupped would be worse than the abuse risk.
+    """
+    if not _pool:
+        return {"tokens_in": 0, "tokens_out": 0, "tokens_total": 0, "requests": 0}
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT tokens_in, tokens_out, requests
+                  FROM llm_usage
+                 WHERE store_id = $1 AND usage_date = (NOW() AT TIME ZONE 'UTC')::date
+                """,
+                store_id,
+            )
+        if not row:
+            return {"tokens_in": 0, "tokens_out": 0, "tokens_total": 0, "requests": 0}
+        ti = int(row["tokens_in"])
+        to = int(row["tokens_out"])
+        return {
+            "tokens_in":    ti,
+            "tokens_out":   to,
+            "tokens_total": ti + to,
+            "requests":     int(row["requests"]),
+        }
+    except Exception as e:
+        print(f"[db] llm_usage_today({store_id!r}) error: {e}")
+        return {"tokens_in": 0, "tokens_out": 0, "tokens_total": 0, "requests": 0}
+
+
+async def llm_usage_record(store_id: str, tokens_in: int, tokens_out: int) -> None:
+    """
+    UPSERT today's usage row. Never raises — a failure here would lose a
+    counter increment but should never block the user-facing reply that
+    already succeeded.
+    """
+    if not _pool or not store_id:
+        return
+    ti = max(0, int(tokens_in or 0))
+    to = max(0, int(tokens_out or 0))
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO llm_usage (store_id, usage_date, tokens_in, tokens_out, requests, updated_at)
+                VALUES ($1, (NOW() AT TIME ZONE 'UTC')::date, $2, $3, 1, NOW())
+                ON CONFLICT (store_id, usage_date) DO UPDATE
+                   SET tokens_in  = llm_usage.tokens_in  + EXCLUDED.tokens_in,
+                       tokens_out = llm_usage.tokens_out + EXCLUDED.tokens_out,
+                       requests   = llm_usage.requests   + 1,
+                       updated_at = NOW()
+                """,
+                store_id, ti, to,
+            )
+    except Exception as e:
+        print(f"[db] llm_usage_record({store_id!r}) error: {e}")
+
+
+async def llm_usage_report(store_id: str, days: int = 7) -> list[dict]:
+    """
+    Last N days of usage for the admin dashboard, newest first. Includes
+    zero-rows for missing days so the frontend can render a continuous bar
+    chart without gap-filling logic.
+    """
+    if not _pool:
+        return []
+    days = max(1, min(int(days or 7), 90))
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH dates AS (
+                    SELECT generate_series(
+                        (NOW() AT TIME ZONE 'UTC')::date - ($1::int - 1),
+                        (NOW() AT TIME ZONE 'UTC')::date,
+                        '1 day'::interval
+                    )::date AS d
+                )
+                SELECT d.d AS usage_date,
+                       COALESCE(u.tokens_in,  0) AS tokens_in,
+                       COALESCE(u.tokens_out, 0) AS tokens_out,
+                       COALESCE(u.requests,   0) AS requests
+                  FROM dates d
+                  LEFT JOIN llm_usage u
+                    ON u.store_id   = $2
+                   AND u.usage_date = d.d
+                 ORDER BY d.d DESC
+                """,
+                days, store_id,
+            )
+        return [
+            {
+                "date":         r["usage_date"].isoformat(),
+                "tokens_in":    int(r["tokens_in"]),
+                "tokens_out":   int(r["tokens_out"]),
+                "tokens_total": int(r["tokens_in"]) + int(r["tokens_out"]),
+                "requests":     int(r["requests"]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] llm_usage_report({store_id!r}) error: {e}")
         return []

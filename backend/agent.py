@@ -909,6 +909,18 @@ class PrintingAgent:
         token      = access_token or os.getenv("SALLA_ACCESS_TOKEN", "")
         self.salla = SallaClient(token, store_id=store_id) if token else None
 
+        # Token usage for the most recent chat() invocation. Accumulated
+        # across tool-use rounds; read by the /chat handler to feed the
+        # daily circuit-breaker counter.
+        self.last_usage: dict = {"in": 0, "out": 0}
+
+    def _reset_usage(self) -> None:
+        self.last_usage = {"in": 0, "out": 0}
+
+    def _add_usage(self, tokens_in: int, tokens_out: int) -> None:
+        self.last_usage["in"]  += max(0, int(tokens_in  or 0))
+        self.last_usage["out"] += max(0, int(tokens_out or 0))
+
     # ── Customer helper ──────────────────────────────────────────────────────────
     async def _ensure_salla_customer(self, session_id: str, customer: dict) -> dict:
         """
@@ -2553,6 +2565,10 @@ class PrintingAgent:
 
     # ── Chat entry point ───────────────────────────────────────────────────────
     async def chat(self, message: str, session_id: str) -> str:
+        # Zero the usage counter so the caller (chat handler) reads only the
+        # tokens this turn consumed, even after fast-path or exception paths.
+        self._reset_usage()
+
         # ── Pre-LLM fast path ────────────────────────────────────────────────
         # Try to answer greetings / stored FAQs / informational intents WITHOUT
         # calling the LLM (cheaper + faster). Strictly scoped to stable factual
@@ -2616,6 +2632,10 @@ class PrintingAgent:
                 tool_choice="auto",
                 max_tokens=1024,
             )
+
+            _u = getattr(response, "usage", None)
+            if _u:
+                self._add_usage(getattr(_u, "prompt_tokens", 0), getattr(_u, "completion_tokens", 0))
 
             msg = response.choices[0].message
 
@@ -2690,6 +2710,10 @@ class PrintingAgent:
                 tool_choice="auto",
                 max_tokens=1024,
             )
+
+            _u = getattr(response, "usage", None)
+            if _u:
+                self._add_usage(getattr(_u, "prompt_tokens", 0), getattr(_u, "completion_tokens", 0))
 
             msg = response.choices[0].message
 
@@ -2787,7 +2811,10 @@ class PrintingAgent:
                 extra_body={"cache_control": {"type": "ephemeral"}},
             )
 
-            # Log cache usage (remove in production if noisy)
+            # Log cache usage (remove in production if noisy) and feed the
+            # daily budget counter. Anthropic uses input_tokens/output_tokens
+            # (note: input_tokens already EXCLUDES the cached portion, so we
+            # don't need to subtract cache_read_input_tokens here).
             usage = getattr(response, "usage", None)
             if usage:
                 cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
@@ -2795,6 +2822,10 @@ class PrintingAgent:
                 if cache_write or cache_read:
                     print(f"[cache] write={cache_write} read={cache_read} "
                           f"saved≈{cache_read*0.9:.0f} tokens")
+                self._add_usage(
+                    getattr(usage, "input_tokens",  0),
+                    getattr(usage, "output_tokens", 0),
+                )
 
             if response.stop_reason == "tool_use" and tool_rounds < 5:
                 tool_rounds += 1
