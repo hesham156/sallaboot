@@ -10,6 +10,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 const StoresList     = lazy(() => import('./pages/StoresList'))
 const StoreDashboard = lazy(() => import('./pages/StoreDashboard'))
 const PlatformOps    = lazy(() => import('./pages/PlatformOps'))
+const AuditLog       = lazy(() => import('./pages/AuditLog'))
 const PrivacyPolicy  = lazy(() => import('./pages/PrivacyPolicy'))
 const TermsOfService = lazy(() => import('./pages/TermsOfService'))
 const DataDeletion   = lazy(() => import('./pages/DataDeletion'))
@@ -72,6 +73,14 @@ export default function App() {
             element={
               <RequireSuper>
                 <PlatformOps />
+              </RequireSuper>
+            }
+          />
+          <Route
+            path="/admin/audit-log"
+            element={
+              <RequireSuper>
+                <AuditLog />
               </RequireSuper>
             }
           />

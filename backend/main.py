@@ -114,6 +114,39 @@ async def _chat_rate_limited(store_id: str, session_id: str, ip: str) -> str | N
     return None
 
 
+# ── Audit log helpers ────────────────────────────────────────────────────
+# One thin wrapper so every sensitive write path can ship an audit row
+# with one line. Resolves the actor from the bearer token; falls back to
+# "anonymous" if the token didn't parse (shouldn't happen behind the auth
+# middleware, but defensive). Never raises — see db.audit_record.
+
+def _audit_actor(request: Request) -> str:
+    """Stable string identifier for who took this action."""
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if not claims:
+        return "anonymous"
+    if claims.get("su"):
+        return "super"   # super-admin email isn't on the token; keep label generic
+    sid = claims.get("s", "")
+    eid = claims.get("eid")
+    if eid:
+        return f"emp:{eid}@{sid}"
+    return f"store:{sid}"
+
+
+async def _audit(request: Request, action: str, *, target_store: str = "", details: dict | None = None) -> None:
+    """One-liner audit hook — call right after a sensitive write succeeds."""
+    await db.audit_record(
+        actor        = _audit_actor(request),
+        action       = action,
+        target_store = target_store,
+        details      = details or {},
+        ip           = (request.client.host if request.client else "")[:64],
+        user_agent   = request.headers.get("User-Agent", "")[:500],
+    )
+
+
 # ── Daily token-budget circuit breaker ────────────────────────────────────
 # Defends against LLM-cost abuse from a single compromised store. Rate
 # limits above bound requests-per-minute; this one bounds tokens-per-day,
@@ -501,7 +534,7 @@ async def get_ai_settings(store_id: str):
 
 
 @app.put("/admin/{store_id}/settings/ai")
-async def update_ai_settings(store_id: str, req: AIConfigRequest):
+async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Request):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     existing = sm.get_ai_config(store_id)
@@ -559,6 +592,23 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest):
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, config)
+
+    # Audit: log WHICH secret fields changed, never the values themselves.
+    # We diff against the previous config so a "no-op save" (frontend sends
+    # masked round-trip) doesn't produce a misleading audit row.
+    _changed: list[str] = []
+    for field in ("groq_api_key", "anthropic_api_key", "openai_api_key", "whatsapp_token"):
+        if (existing.get(field) or "") != (config.get(field) or ""):
+            _changed.append(field)
+    other_changes = {}
+    for field in ("ai_model", "bot_name", "store_type", "whatsapp_enabled", "whatsapp_phone_id"):
+        if (existing.get(field) or None) != (config.get(field) or None):
+            other_changes[field] = config.get(field)
+    if _changed or other_changes:
+        await _audit(request, "update_ai_settings", target_store=store_id, details={
+            "secret_fields_changed": _changed,
+            "other_changes":         other_changes,
+        })
 
     return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي ✅"}
 
@@ -867,7 +917,7 @@ async def test_pricing_calculation(store_id: str, payload: dict):
 
 # ── Settings: Change password ──────────────────────────────────────────────────
 @app.put("/admin/{store_id}/settings/password")
-async def change_store_password(store_id: str, req: PasswordChangeRequest):
+async def change_store_password(store_id: str, req: PasswordChangeRequest, request: Request):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     stored_hash = sm.get_admin_password_hash(store_id)
@@ -878,6 +928,9 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest):
     sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
     # Persist immediately to DB so password survives server restarts
     await db.save_store(store_id, sm.get_store_info(store_id))
+    # Audit: NEVER log the password itself or its hash. Just record that
+    # the action happened so a compromised account is detectable.
+    await _audit(request, "change_store_password", target_store=store_id)
     return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
 
 
@@ -1092,7 +1145,10 @@ async def store_debug(store_id: str):
         "store_id":              store_id,
         "store_name":            info.get("store_name", "—"),
         "token_present":         bool(token),
-        "token_preview":         (token[:12] + "…") if token else None,
+        # Suffix-only preview (last 4 chars) — enough to disambiguate after a
+        # rotation, doesn't expose the prefix used by anyone scraping logs /
+        # screenshots. NEVER show prefix.
+        "token_preview":         (f"…{token[-4:]}") if token else None,
         "refresh_token_present": bool(refresh),
         "cached_products":       cache.get("products_count", 0),
         "cached_categories":     len(cache.get("categories", [])),
@@ -1308,6 +1364,26 @@ async def store_analytics(store_id: str):
 
 
 # ── LLM token usage + budget (circuit breaker for AI spend) ─────────────────
+@app.get("/admin/{store_id}/audit-log")
+async def store_audit_log(store_id: str, limit: int = 200, offset: int = 0,
+                            action: str | None = None):
+    """
+    Per-store audit ledger. Middleware already enforces that the caller
+    has access to this store (owner or super); managers can read it
+    because it's read-only and useful for "who changed what" questions
+    without escalating to the owner.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    rows = await db.audit_list(
+        store_id = store_id,
+        action   = action or None,
+        limit    = limit,
+        offset   = offset,
+    )
+    return {"count": len(rows), "rows": rows}
+
+
 @app.get("/admin/{store_id}/llm-usage")
 async def store_llm_usage(store_id: str, days: int = 7):
     """
@@ -1402,6 +1478,11 @@ async def update_llm_budget(store_id: str, request: Request):
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, cfg)
+
+    await _audit(request, "set_llm_budget", target_store=store_id, details={
+        "applied":          applied,
+        "effective_budget": _daily_token_budget(store_id),
+    })
 
     return {
         "status": "ok",
@@ -2021,6 +2102,11 @@ async def create_store_employee(
     )
     if not emp_id:
         raise HTTPException(500, "تعذّر حفظ الموظف — تحقق من اتصال قاعدة البيانات")
+    await _audit(request, "employee_created", target_store=store_id, details={
+        "employee_id": int(emp_id),
+        "email":       email,
+        "role":        req.role or "agent",
+    })
     return {"id": emp_id, "name": name, "email": email, "role": req.role or "agent"}
 
 
@@ -2058,6 +2144,20 @@ async def update_store_employee(
     )
     if not ok:
         raise HTTPException(500, "تعذّر تحديث بيانات الموظف")
+    # Audit the field-level diff (no password value, just whether one was set).
+    _changes = {
+        k: v for k, v in {
+            "name":   req.name,
+            "email":  new_email,
+            "role":   req.role,
+            "active": req.active,
+            "password_changed": bool(new_password_hash) or None,
+        }.items() if v is not None
+    }
+    await _audit(request, "employee_updated", target_store=store_id, details={
+        "employee_id": employee_id,
+        "changes":     _changes,
+    })
     return {"status": "ok"}
 
 
@@ -2070,6 +2170,10 @@ async def delete_store_employee(store_id: str, employee_id: int, request: Reques
     ok = await db.delete_employee(employee_id)
     if not ok:
         raise HTTPException(500, "تعذّر حذف الموظف")
+    await _audit(request, "employee_deleted", target_store=store_id, details={
+        "employee_id": employee_id,
+        "email":       emp.get("email", ""),
+    })
     return {"status": "ok"}
 
 

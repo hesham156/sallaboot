@@ -309,6 +309,32 @@ async def _create_tables():
                 expires_at  TIMESTAMPTZ NOT NULL
             );
 
+            -- ── Audit log (sensitive admin actions) ──────────────────────
+            -- One row per security-relevant write. Designed for compliance /
+            -- post-incident review, not for high-cardinality event tracking.
+            -- Keep the payload small (≤ 4 KB) so the table stays cheap to scan.
+            --
+            -- `actor` is whoever performed the action — usually the bearer
+            -- token's subject ("store:<id>", "super:<email>", "emp:<id>").
+            -- `target_store` is the store affected (may equal actor's store
+            -- for owner-changed-own-settings, or differ for super-admin).
+            -- `action` is a stable enum-ish string (set_llm_budget,
+            -- replace_ai_key, …) so dashboards can group cheaply.
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id            BIGSERIAL PRIMARY KEY,
+                actor         TEXT NOT NULL,
+                target_store  TEXT NOT NULL DEFAULT '',
+                action        TEXT NOT NULL,
+                details       JSONB NOT NULL DEFAULT '{}'::jsonb,
+                ip            TEXT NOT NULL DEFAULT '',
+                user_agent    TEXT NOT NULL DEFAULT '',
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_store_ts
+                ON audit_log (target_store, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_audit_action_ts
+                ON audit_log (action, created_at DESC);
+
             -- ── LLM token usage (daily counters per store) ─────────────────
             -- Cheap UPSERT on each /chat call so the circuit breaker can read
             -- today's spend in a single indexed lookup. Date is UTC — the
@@ -2276,3 +2302,97 @@ async def login_failures_24h() -> int:
     except Exception as e:
         print(f"[db] login_failures_24h error: {e}")
         return 0
+
+
+# ── Audit log (sensitive admin actions) ──────────────────────────────────
+# Tiny API: write once per action, read for the audit viewer. Reads are
+# paginated by created_at (newest first). Writes NEVER raise — losing an
+# audit entry is better than failing the user's actual action because of
+# a logging issue, but a missing entry is still loud in the server logs.
+
+async def audit_record(
+    actor: str,
+    action: str,
+    *,
+    target_store: str = "",
+    details: dict | None = None,
+    ip: str = "",
+    user_agent: str = "",
+) -> None:
+    """Insert one audit row. Trim user_agent to 500 chars to keep the row small."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO audit_log (actor, target_store, action, details, ip, user_agent)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                """,
+                str(actor or "")[:200],
+                str(target_store or "")[:200],
+                str(action or "")[:100],
+                json.dumps(details or {}, ensure_ascii=False, default=str),
+                str(ip or "")[:64],
+                str(user_agent or "")[:500],
+            )
+    except Exception as e:
+        print(f"[db] audit_record({action!r}) error: {e}")
+
+
+async def audit_list(
+    *,
+    store_id: str | None = None,
+    action: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict]:
+    """
+    Newest-first list of audit rows. `store_id=None` returns all stores
+    (super-admin view); a store_id scopes to that store's own activity.
+    `action` filter is exact-match on the action enum string.
+    """
+    if not _pool:
+        return []
+    limit  = max(1, min(int(limit  or 200), 1000))
+    offset = max(0, int(offset or 0))
+    where: list[str] = []
+    params: list = []
+    if store_id is not None:
+        where.append(f"target_store = ${len(params) + 1}")
+        params.append(store_id)
+    if action:
+        where.append(f"action = ${len(params) + 1}")
+        params.append(action)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.extend([limit, offset])
+
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, actor, target_store, action, details, ip, user_agent, created_at
+                  FROM audit_log
+                  {where_sql}
+                 ORDER BY created_at DESC
+                 LIMIT ${len(params) - 1}
+                 OFFSET ${len(params)}
+                """,
+                *params,
+            )
+        return [
+            {
+                "id":           int(r["id"]),
+                "actor":        r["actor"],
+                "target_store": r["target_store"],
+                "action":       r["action"],
+                "details":      _coerce_jsonb(r["details"]),
+                "ip":           r["ip"],
+                "user_agent":   r["user_agent"],
+                "created_at":   (r["created_at"].isoformat() + "Z") if r["created_at"] else "",
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] audit_list error: {e}")
+        return []

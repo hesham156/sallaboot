@@ -160,7 +160,7 @@ async def clean_db(db_pool):
         "webhook_log", "webhook_seen", "login_attempts",
         "conversations", "abandoned_carts", "uploads",
         "bot_training", "bot_orders", "employees",
-        "app_settings", "stores", "llm_usage",
+        "app_settings", "stores", "llm_usage", "audit_log",
     ]
     async with db._pool.acquire() as conn:
         await conn.execute(

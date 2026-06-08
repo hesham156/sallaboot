@@ -29,7 +29,7 @@ import auth as _auth
 # endpoints themselves).
 
 _PROTECTED_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log)"
 )
 _SUPER_PROTECTED_RE = re.compile(r"^/admin/stores$")
 
@@ -37,7 +37,7 @@ _SUPER_PROTECTED_RE = re.compile(r"^/admin/stores$")
 # Conversations / orders / abandoned-carts / info / bot status stay open
 # because that's the customer-service work they're hired to do.
 _MANAGER_ONLY_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)[^/]+/(settings|analytics|sync|products|debug|webhooks|training|brain|pricing|llm-usage|llm-budget)"
+    r"^/admin/(?!stores$|auth/)[^/]+/(settings|analytics|sync|products|debug|webhooks|training|brain|pricing|llm-usage|llm-budget|audit-log)"
 )
 # Owner-only paths (blocks BOTH agents and managers). llm-budget is here
 # because raising/lowering the daily token cap is a financial-risk knob —

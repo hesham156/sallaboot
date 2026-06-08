@@ -538,3 +538,25 @@ async def platform_ops(request: Request):
 async def admin_store_page(store_id: str):
     """Per-store admin dashboard — serves the React SPA."""
     return _serve_react_or_legacy()
+
+
+# ── Audit log viewers ────────────────────────────────────────────────────
+# Two reads. The global one is super-admin only — by definition it shows
+# rows from every store. The per-store one is the owner's own ledger.
+
+@router.get("/admin/audit-log")
+async def audit_log_global(request: Request, limit: int = 200, offset: int = 0,
+                            action: str | None = None,
+                            store_id: str | None = None):
+    """Super-admin: every sensitive action across all stores."""
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+    rows = await db.audit_list(
+        store_id = store_id or None,
+        action   = action   or None,
+        limit    = limit,
+        offset   = offset,
+    )
+    return {"count": len(rows), "rows": rows}

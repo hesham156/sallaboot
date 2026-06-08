@@ -353,6 +353,26 @@ export const api = {
   platformOps: () =>
     get<PlatformOpsSnapshot>('/admin/platform-ops'),
 
+  // Audit log readers. Super-admin gets the global view (cross-store);
+  // store-scoped owners/managers get only their own store's actions.
+  auditLogGlobal: (params: { limit?: number; offset?: number; action?: string; store_id?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (params.limit  !== undefined) q.set('limit',  String(params.limit))
+    if (params.offset !== undefined) q.set('offset', String(params.offset))
+    if (params.action)               q.set('action', params.action)
+    if (params.store_id)             q.set('store_id', params.store_id)
+    const qs = q.toString()
+    return get<{ count: number; rows: AuditRow[] }>(`/admin/audit-log${qs ? '?' + qs : ''}`)
+  },
+  auditLogStore: (storeId: string, params: { limit?: number; offset?: number; action?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (params.limit  !== undefined) q.set('limit',  String(params.limit))
+    if (params.offset !== undefined) q.set('offset', String(params.offset))
+    if (params.action)               q.set('action', params.action)
+    const qs = q.toString()
+    return get<{ count: number; rows: AuditRow[] }>(`/admin/${storeId}/audit-log${qs ? '?' + qs : ''}`)
+  },
+
   // ── LLM usage + daily budget (circuit breaker) ─────────────────────────
   // GET returns today's totals + N-day history + active budget. PUT lets
   // the store owner adjust their daily cap. Setting 0 disables the breaker
@@ -788,6 +808,23 @@ export interface WebhookEvent {
   status: string
   detail: string
   ts: string
+}
+
+// ── Audit log ──────────────────────────────────────────────────────────
+//
+// One row per sensitive admin action. `actor` is a stable string id
+// ("super" / "store:<id>" / "emp:<id>@<store>"). `details` is a
+// per-action JSON blob — never contains raw secrets.
+
+export interface AuditRow {
+  id:            number
+  actor:         string
+  target_store:  string
+  action:        string
+  details:       Record<string, unknown>
+  ip:            string
+  user_agent:    string
+  created_at:    string
 }
 
 // ── Platform Operations snapshot (super admin) ─────────────────────────
