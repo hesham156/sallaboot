@@ -20,10 +20,26 @@ import re
 import time
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 import auth as _auth
 import log as _logmod
+
+
+def _is_browser_navigation(request: Request) -> bool:
+    """
+    True when the caller looks like a person typing/pasting a URL rather
+    than the SPA's fetch() wrapper. We use this to redirect them to the
+    login screen instead of returning raw JSON 401 they can't read.
+
+    Heuristic: text/html in Accept AND it's a GET (POSTing JSON via
+    browser address bar isn't a thing). Same idea as main._wants_html
+    but localised here so the middleware doesn't depend on main.
+    """
+    if request.method != "GET":
+        return False
+    accept = (request.headers.get("Accept") or "").lower()
+    return "text/html" in accept
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -73,6 +89,11 @@ async def admin_auth_middleware(request: Request, call_next):
         token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
         claims = _auth.verify_token(token)
         if not claims:
+            # Browser-typed URL on an API endpoint → redirect to login
+            # (the SPA shell handles the rest, including the post-login
+            # navigation). Without this the user sees a raw JSON 401.
+            if _is_browser_navigation(request):
+                return RedirectResponse(url="/login", status_code=302)
             return JSONResponse({"detail": "يرجى تسجيل الدخول"}, status_code=401)
         if not claims.get("su") and claims.get("s") != store_id:
             return JSONResponse({"detail": "غير مصرح لك بالوصول"}, status_code=403)
@@ -125,6 +146,14 @@ async def admin_auth_middleware(request: Request, call_next):
         token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
         claims = _auth.verify_token(token)
         if not claims or not claims.get("su"):
+            # Browser typed /admin/stores expecting the stores page — the
+            # SPA route for that is /admin (this URL is the JSON API it
+            # calls internally). Redirect to /admin: if not logged in,
+            # the SPA's RequireSuper bounces to /login; if logged in as
+            # super, the SPA renders the page and re-fetches this same
+            # endpoint with the Bearer header attached.
+            if _is_browser_navigation(request):
+                return RedirectResponse(url="/admin", status_code=302)
             return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
 
     response = await call_next(request)
