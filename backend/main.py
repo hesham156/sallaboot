@@ -1395,6 +1395,94 @@ async def store_analytics(store_id: str):
 
 
 # ── LLM token usage + budget (circuit breaker for AI spend) ─────────────────
+# ── Support-access grants (owner controls super JIT into the dashboard) ─
+#
+# The owner explicitly opens a time-boxed window for a super admin to
+# debug / help. The auth middleware enforces "no grant = no access" on
+# every super-cross-store request, so these endpoints are the merchant's
+# only way to authorise platform-side support.
+
+@app.get("/admin/{store_id}/support-access")
+async def support_access_status(store_id: str):
+    """Return the active grant (if any) + history. Owner/manager/agent + super."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    active  = await db.support_access_active(store_id)
+    history = await db.support_access_list(store_id, limit=50)
+    return {"active": active, "history": history}
+
+
+@app.post("/admin/{store_id}/support-access")
+async def support_access_grant(store_id: str, request: Request):
+    """
+    Owner-only — grant time-boxed access to super admin.
+    Body: {"duration_minutes": int, "note": str?}
+
+    Hard ceiling 24h enforced server-side. Audited.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    _require_store_owner(request, store_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Body must be a JSON object")
+
+    try:
+        duration = int(body.get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "duration_minutes must be an integer")
+    if duration <= 0:
+        raise HTTPException(400, "duration_minutes must be > 0")
+    # Server-side ceiling — matches db._MAX_GRANT_DURATION_MINUTES.
+    if duration > 24 * 60:
+        raise HTTPException(400, "duration_minutes > 24h not allowed")
+
+    note = str(body.get("note") or "")[:500]
+
+    # Resolve who granted from the bearer claims so the audit row is real.
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    granted_by = f"emp:{claims.get('eid')}" if claims.get("eid") else "owner"
+
+    grant = await db.support_access_create(
+        store_id,
+        granted_by       = granted_by,
+        duration_minutes = duration,
+        note             = note,
+    )
+    if not grant:
+        raise HTTPException(503, "تعذّر إنشاء الإذن — تحقق من اتصال قاعدة البيانات")
+
+    await _audit(request, "support_access_granted", target_store=store_id, details={
+        "grant_id":         grant["id"],
+        "duration_minutes": duration,
+        "expires_at":       grant["expires_at"],
+        "note":             note[:120],
+    })
+    return grant
+
+
+@app.delete("/admin/{store_id}/support-access/{grant_id}")
+async def support_access_revoke_endpoint(store_id: str, grant_id: int, request: Request):
+    """Owner-only — revoke an active grant immediately."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    _require_store_owner(request, store_id)
+
+    ok = await db.support_access_revoke(grant_id, store_id)
+    if not ok:
+        raise HTTPException(404, "الإذن غير موجود أو ملغي بالفعل")
+
+    await _audit(request, "support_access_revoked", target_store=store_id, details={
+        "grant_id": grant_id,
+    })
+    return {"status": "ok"}
+
+
 @app.get("/admin/{store_id}/audit-log")
 async def store_audit_log(store_id: str, limit: int = 200, offset: int = 0,
                             action: str | None = None):

@@ -353,6 +353,19 @@ export const api = {
       payload || {},
     ),
 
+  // Support-access grants — owner controls super JIT into the dashboard.
+  // GET returns active grant + history; POST creates; DELETE revokes.
+  // Both owner and super can READ (super needs to know if access exists);
+  // only owner can mutate.
+  supportAccessStatus: (storeId: string) =>
+    get<{ active: SupportAccessGrant | null; history: SupportAccessGrant[] }>(
+      `/admin/${storeId}/support-access`,
+    ),
+  supportAccessGrant: (storeId: string, payload: { duration_minutes: number; note?: string }) =>
+    post<SupportAccessGrant>(`/admin/${storeId}/support-access`, payload),
+  supportAccessRevoke: (storeId: string, grantId: number) =>
+    req<{ status: string }>('DELETE', `/admin/${storeId}/support-access/${grantId}`),
+
   // Super-admin: platform operations snapshot
   platformOps: () =>
     get<PlatformOpsSnapshot>('/admin/platform-ops'),
@@ -812,6 +825,19 @@ export interface WebhookEvent {
   status: string
   detail: string
   ts: string
+}
+
+// ── Support-access grants ──────────────────────────────────────────────
+
+export interface SupportAccessGrant {
+  id:          number
+  store_id:    string
+  granted_by:  string             // "owner" | "emp:<id>"
+  granted_at:  string             // ISO timestamp
+  expires_at:  string
+  note:        string
+  revoked_at:  string | null
+  active?:     boolean            // present on history rows; absent on POST response
 }
 
 // ── Audit log ──────────────────────────────────────────────────────────

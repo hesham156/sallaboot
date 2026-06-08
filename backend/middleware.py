@@ -33,9 +33,15 @@ import log as _logmod
 # endpoints themselves).
 
 _PROTECTED_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log|support-access)"
 )
 _SUPER_PROTECTED_RE = re.compile(r"^/admin/stores$")
+
+# Sub-paths that a super admin can hit on a foreign store WITHOUT an
+# active grant: viewing/managing grants is how access gets enabled in
+# the first place, and conversations-list summaries are no worse than
+# the platform-ops aggregates we already expose.
+_SUPER_NO_GRANT_NEEDED_SUFFIXES = ("support-access",)
 
 # Paths that an "agent" employee MUST NOT reach (manager + owner only).
 # Conversations / orders / abandoned-carts / info / bot status stay open
@@ -63,12 +69,43 @@ async def admin_auth_middleware(request: Request, call_next):
     m = _PROTECTED_RE.match(path)
     if m:
         store_id = m.group(1)
+        sub_path = m.group(2)
         token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
         claims = _auth.verify_token(token)
         if not claims:
             return JSONResponse({"detail": "يرجى تسجيل الدخول"}, status_code=401)
         if not claims.get("su") and claims.get("s") != store_id:
             return JSONResponse({"detail": "غير مصرح لك بالوصول"}, status_code=403)
+
+        # ── Super-admin JIT access gate ────────────────────────────────
+        # Cross-store super reads now REQUIRE a time-boxed grant from the
+        # merchant. The store's owner endpoints for granting (under
+        # /support-access) are whitelisted so the merchant can actually
+        # let the super in. Auth paths aren't reached here (PROTECTED_RE
+        # excludes them already).
+        is_super_cross_store = (
+            claims.get("su") and (claims.get("s") or "") != store_id
+        )
+        if is_super_cross_store and not any(
+            sub_path == s or sub_path.startswith(s + "/")
+            for s in _SUPER_NO_GRANT_NEEDED_SUFFIXES
+        ):
+            # Import lazily — keeps middleware light at import time and
+            # avoids pulling main.py's heavy dependency tree into this
+            # module's load path.
+            import database as _db
+            grant = await _db.support_access_active(store_id)
+            if not grant:
+                # Distinct error code so the frontend can render a
+                # specific "ask the merchant" page rather than a generic
+                # 403. Localised message in 'detail_ar' for the UI.
+                return JSONResponse(
+                    {
+                        "detail":     "support_access_required",
+                        "detail_ar":  "يلزم إذن من مالك المتجر قبل الدخول.",
+                    },
+                    status_code=403,
+                )
 
         # Role-based gating (super always passes). The store owner has no
         # "eid" claim; managers have eid+er=manager; agents have eid+er=agent.

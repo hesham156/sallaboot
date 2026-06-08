@@ -309,6 +309,27 @@ async def _create_tables():
                 expires_at  TIMESTAMPTZ NOT NULL
             );
 
+            -- ── Support-access grants (super JIT into store dashboards) ──
+            -- A super admin can NOT open another store's dashboard unless
+            -- the merchant has issued a grant. Grants are time-boxed (≤24h
+            -- enforced in code) and revocable.
+            --
+            -- Read access is just "is there any non-revoked, non-expired
+            -- row for this store_id" — a single indexed lookup hot enough
+            -- to do on every super request through the auth middleware.
+            CREATE TABLE IF NOT EXISTS support_access_grants (
+                id            BIGSERIAL PRIMARY KEY,
+                store_id      TEXT NOT NULL,
+                granted_by    TEXT NOT NULL,     -- "owner" or "emp:<id>"
+                granted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at    TIMESTAMPTZ NOT NULL,
+                note          TEXT NOT NULL DEFAULT '',
+                revoked_at    TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_sag_store_active
+                ON support_access_grants (store_id, expires_at DESC)
+                WHERE revoked_at IS NULL;
+
             -- ── Audit log (sensitive admin actions) ──────────────────────
             -- One row per security-relevant write. Designed for compliance /
             -- post-incident review, not for high-cardinality event tracking.
@@ -2396,3 +2417,169 @@ async def audit_list(
     except Exception as e:
         print(f"[db] audit_list error: {e}")
         return []
+
+
+# ── Support-access grants (JIT super access into a merchant's store) ────
+#
+# Tiny API. The auth middleware checks `support_access_active(store_id)`
+# on every super-cross-store request, so the read is on the hot path.
+# It's a single-row indexed lookup that returns the soonest expiring
+# row for the store; cheap even at scale.
+
+# Hard ceiling for grant duration. The owner picks (15m / 1h / 4h / 24h)
+# from the UI but a malicious /direct POST shouldn't be able to set
+# 365 days.
+_MAX_GRANT_DURATION_MINUTES = 24 * 60
+
+
+async def support_access_create(
+    store_id: str,
+    *,
+    granted_by: str,
+    duration_minutes: int,
+    note: str = "",
+) -> dict | None:
+    """
+    Create a new grant. Returns the new row dict, or None on failure /
+    DB-down. duration_minutes is clamped to [1, _MAX_GRANT_DURATION_MINUTES].
+    """
+    if not _pool or not store_id:
+        return None
+    dur = max(1, min(int(duration_minutes or 60), _MAX_GRANT_DURATION_MINUTES))
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO support_access_grants
+                    (store_id, granted_by, expires_at, note)
+                VALUES ($1, $2, NOW() + ($3 || ' minutes')::interval, $4)
+                RETURNING id, store_id, granted_by, granted_at, expires_at, note
+                """,
+                store_id, granted_by, str(dur), (note or "")[:500],
+            )
+        if not row:
+            return None
+        return {
+            "id":           int(row["id"]),
+            "store_id":     row["store_id"],
+            "granted_by":   row["granted_by"],
+            "granted_at":   row["granted_at"].isoformat() + "Z",
+            "expires_at":   row["expires_at"].isoformat() + "Z",
+            "note":         row["note"] or "",
+            "revoked_at":   None,
+        }
+    except Exception as e:
+        print(f"[db] support_access_create error: {e}")
+        return None
+
+
+async def support_access_revoke(grant_id: int, store_id: str) -> bool:
+    """
+    Revoke a grant. Scoped to store_id so an owner can't revoke another
+    store's grant by guessing ids. Returns True on success.
+    """
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE support_access_grants
+                   SET revoked_at = NOW()
+                 WHERE id = $1 AND store_id = $2 AND revoked_at IS NULL
+                """,
+                int(grant_id), store_id,
+            )
+        # asyncpg returns 'UPDATE <rowcount>'
+        try:
+            return int(result.split()[-1]) > 0
+        except Exception:
+            return False
+    except Exception as e:
+        print(f"[db] support_access_revoke error: {e}")
+        return False
+
+
+async def support_access_active(store_id: str) -> dict | None:
+    """
+    Hot path: is there an active grant for this store? Returns the
+    earliest-expiring active grant (so the UI can show the right
+    countdown), or None.
+    """
+    if not _pool or not store_id:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, store_id, granted_by, granted_at, expires_at, note
+                  FROM support_access_grants
+                 WHERE store_id   = $1
+                   AND revoked_at IS NULL
+                   AND expires_at > NOW()
+                 ORDER BY expires_at ASC
+                 LIMIT 1
+                """,
+                store_id,
+            )
+        if not row:
+            return None
+        return {
+            "id":           int(row["id"]),
+            "store_id":     row["store_id"],
+            "granted_by":   row["granted_by"],
+            "granted_at":   row["granted_at"].isoformat() + "Z",
+            "expires_at":   row["expires_at"].isoformat() + "Z",
+            "note":         row["note"] or "",
+            "revoked_at":   None,
+        }
+    except Exception as e:
+        print(f"[db] support_access_active error: {e}")
+        return None
+
+
+async def support_access_list(store_id: str, *, limit: int = 50) -> list[dict]:
+    """
+    All grants for a store, newest first. Owner UI uses it to show
+    history (so the merchant sees who they granted to, when, and whether
+    it was used). Includes revoked + expired rows so the trail is
+    complete.
+    """
+    if not _pool:
+        return []
+    limit = max(1, min(int(limit or 50), 200))
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, store_id, granted_by, granted_at, expires_at, note, revoked_at
+                  FROM support_access_grants
+                 WHERE store_id = $1
+                 ORDER BY granted_at DESC
+                 LIMIT $2
+                """,
+                store_id, limit,
+            )
+        out = []
+        for r in rows:
+            now_active = r["revoked_at"] is None and r["expires_at"] > _utcnow()
+            out.append({
+                "id":           int(r["id"]),
+                "store_id":     r["store_id"],
+                "granted_by":   r["granted_by"],
+                "granted_at":   r["granted_at"].isoformat() + "Z",
+                "expires_at":   r["expires_at"].isoformat() + "Z",
+                "note":         r["note"] or "",
+                "revoked_at":   (r["revoked_at"].isoformat() + "Z") if r["revoked_at"] else None,
+                "active":       now_active,
+            })
+        return out
+    except Exception as e:
+        print(f"[db] support_access_list error: {e}")
+        return []
+
+
+def _utcnow():
+    """Localised helper so the comparison above stays tz-aware."""
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc)

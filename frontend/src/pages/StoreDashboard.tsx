@@ -18,6 +18,7 @@ const Brain          = lazy(() => import('./store/Brain'))
 const Training       = lazy(() => import('./store/Training'))
 const Employees      = lazy(() => import('./store/Employees'))
 const LlmUsage       = lazy(() => import('./store/LlmUsage'))
+const SupportAccess  = lazy(() => import('./store/SupportAccess'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -149,6 +150,15 @@ const NAV_ITEMS: Array<{
     roles: ['owner', 'manager'],
   },
   {
+    key: 'support-access',
+    label: 'وصول الدعم',
+    icon: ['M16 11V7a4 4 0 1 0-8 0v4', 'M5 11h14v10H5z'],
+    activeColor: 'text-orange-400',
+    activeBg: 'bg-orange-500/10',
+    activeBorder: 'border-r-orange-500',
+    roles: ['owner'],
+  },
+  {
     key: 'settings',
     label: 'الإعدادات',
     icon: ['M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', 'M15 12a3 3 0 11-6 0 3 3 0 016 0z'],
@@ -195,6 +205,10 @@ export default function StoreDashboard() {
   // Initial-load error status so we can render a real error page instead
   // of an infinite spinner. Holds the HTTP status (403, 500, …) or null.
   const [loadErrorStatus, setLoadErrorStatus] = useState<number | null>(null)
+  // Special-case: super admin tried to enter a store that didn't grant
+  // access. Distinguished from a generic 403 so we can render an
+  // actionable "ask the merchant" page instead of the styled error page.
+  const [needsSupportAccess, setNeedsSupportAccess] = useState(false)
 
   const basePath     = `/store/${storeId}`
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
@@ -208,6 +222,7 @@ export default function StoreDashboard() {
 
   async function loadStore() {
     setLoadErrorStatus(null)  // clear stale error so a retry on the same mount can recover
+    setNeedsSupportAccess(false)
     try {
       const [storeInfo, botRes, aiRes] = await Promise.all([
         api.getStoreInfo(storeId),
@@ -229,6 +244,12 @@ export default function StoreDashboard() {
           navigate('/login', { replace: true })
           return
         }
+        // The specific "super needs grant" 403 gets its own UX — the
+        // generic ErrorPage(403) doesn't tell the super what to do.
+        if (e.status === 403 && e.detail === 'support_access_required') {
+          setNeedsSupportAccess(true)
+          return
+        }
         setLoadErrorStatus(e.status)
       } else {
         setLoadErrorStatus(500)
@@ -248,6 +269,44 @@ export default function StoreDashboard() {
   function goTab(key: string) {
     navigate(key ? `${basePath}/${key}` : basePath)
     setSidebarOpen(false)   // close the mobile drawer after navigating
+  }
+
+  if (needsSupportAccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4" dir="rtl">
+        <div className="max-w-lg w-full bg-white rounded-3xl shadow-xl border border-amber-100 p-10 text-center">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-5">
+            <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 11V7a4 4 0 1 0-8 0v4" />
+              <path d="M5 11h14v10H5z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-extrabold text-slate-900">يلزم إذن من مالك المتجر</h1>
+          <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+            لا يمكنك الدخول على لوحة هذا المتجر إلا بعد أن يفتح المالك نافذة وصول محدودة بالوقت.
+            تواصل معه ليفتح <span className="font-bold">"وصول الدعم"</span> من إعدادات متجره.
+          </p>
+          <p className="mt-2 text-xs text-slate-400">
+            القرار في يد المالك. كل وصول مسجَّل ومحدّد بوقت.
+          </p>
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <button
+              onClick={() => loadStore()}
+              className="px-4 py-2 rounded-xl bg-content2 border border-divider text-sm font-semibold hover:bg-content3"
+            >
+              إعادة المحاولة
+            </button>
+            <button
+              onClick={() => navigate('/admin/platform-ops')}
+              className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:opacity-90"
+            >
+              عودة إلى لوحة العمليات
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (loadErrorStatus !== null) {
@@ -470,8 +529,9 @@ export default function StoreDashboard() {
 
             {/* Owner only */}
             {role === 'owner' && <>
-              <Route path="employees" element={<Employees storeId={storeId} />} />
-              <Route path="settings"  element={<Settings  storeId={storeId} />} />
+              <Route path="employees"      element={<Employees      storeId={storeId} />} />
+              <Route path="support-access" element={<SupportAccess  storeId={storeId} />} />
+              <Route path="settings"       element={<Settings       storeId={storeId} />} />
             </>}
 
             {/* Catch-all: redirect forbidden paths back to the dashboard root */}
