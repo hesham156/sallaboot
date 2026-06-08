@@ -1,7 +1,8 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { useNavigate, useParams, Routes, Route, useLocation } from 'react-router-dom'
 import { Avatar, Spinner } from '@heroui/react'
-import { api, StoreInfo, clearAuth, getIsSuper, getEmployee } from '../api'
+import { api, ApiError, StoreInfo, clearAuth, getIsSuper, getEmployee } from '../api'
+import ErrorPage from './ErrorPage'
 
 // Lazy-load each page so the initial bundle stays small. Heavy deps like
 // recharts (Analytics/Overview) only download when that page is opened.
@@ -181,6 +182,9 @@ export default function StoreDashboard() {
   const [loadingBot, setLoadingBot]   = useState(false)
   const [storeType, setStoreType]     = useState<'printing' | 'general'>('printing')
   const [sidebarOpen, setSidebarOpen] = useState(false)   // mobile drawer
+  // Initial-load error status so we can render a real error page instead
+  // of an infinite spinner. Holds the HTTP status (403, 500, …) or null.
+  const [loadErrorStatus, setLoadErrorStatus] = useState<number | null>(null)
 
   const basePath     = `/store/${storeId}`
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
@@ -193,6 +197,7 @@ export default function StoreDashboard() {
   useEffect(() => { loadStore() }, [storeId])
 
   async function loadStore() {
+    setLoadErrorStatus(null)  // clear stale error so a retry on the same mount can recover
     try {
       const [storeInfo, botRes, aiRes] = await Promise.all([
         api.getStoreInfo(storeId),
@@ -202,7 +207,23 @@ export default function StoreDashboard() {
       setStore(storeInfo)
       setBotEnabled(botRes.bot_globally_enabled)
       if (aiRes?.store_type) setStoreType(aiRes.store_type === 'printing' ? 'printing' : 'general')
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      // Surface the failure as a real error page rather than letting the
+      // loading spinner spin forever. 401 = token invalid/expired — kick
+      // the user back to /login so they re-authenticate; 403/404/etc.
+      // get the matching styled error page.
+      if (e instanceof ApiError) {
+        if (e.status === 401) {
+          clearAuth()
+          navigate('/login', { replace: true })
+          return
+        }
+        setLoadErrorStatus(e.status)
+      } else {
+        setLoadErrorStatus(500)
+      }
+    }
   }
 
   async function toggleBot() {
@@ -217,6 +238,10 @@ export default function StoreDashboard() {
   function goTab(key: string) {
     navigate(key ? `${basePath}/${key}` : basePath)
     setSidebarOpen(false)   // close the mobile drawer after navigating
+  }
+
+  if (loadErrorStatus !== null) {
+    return <ErrorPage code={loadErrorStatus} />
   }
 
   if (!store) {

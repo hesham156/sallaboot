@@ -44,6 +44,26 @@ export function clearAuth() {
 
 // ── Core fetch wrapper ─────────────────────────────────────────────────────────
 
+/**
+ * Thrown by req() on any non-2xx response. Carries the HTTP status so
+ * callers can react differently to 401 (kick to login), 403 (no-access
+ * page), 429 (back off), etc., without parsing the message text.
+ *
+ * The default toString preserves the Arabic detail message so existing
+ * `e.message`-based error displays still work — this class is additive,
+ * not breaking.
+ */
+export class ApiError extends Error {
+  status: number
+  detail: string
+  constructor(status: number, detail: string) {
+    super(detail || `HTTP ${status}`)
+    this.name   = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
 async function req<T>(
   method: string,
   url: string,
@@ -63,7 +83,7 @@ async function req<T>(
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    throw new ApiError(res.status, err.detail || `HTTP ${res.status}`)
   }
   return res.json()
 }
