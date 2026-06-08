@@ -2110,3 +2110,169 @@ async def llm_usage_report(store_id: str, days: int = 7) -> list[dict]:
     except Exception as e:
         print(f"[db] llm_usage_report({store_id!r}) error: {e}")
         return []
+
+
+# ── Platform Operations aggregates (super-admin dashboard) ───────────────
+# Surface read-only operational metrics so the platform owner can see the
+# health of every store + queue at a glance. No customer data, no
+# secrets — just counters, error counts, and top-N error lists.
+#
+# All queries are scoped to "today" (UTC) where time-based, so a single
+# refresh of the dashboard shows current-day activity. Functions tolerate
+# DB unavailability by returning empty/zero so the page still renders the
+# operational layout instead of failing.
+
+async def llm_tokens_today_all_stores() -> dict:
+    """Platform-wide LLM totals + per-store breakdown for today."""
+    if not _pool:
+        return {"total_tokens": 0, "total_requests": 0, "per_store": []}
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT store_id,
+                       (tokens_in + tokens_out) AS tokens_total,
+                       tokens_in, tokens_out, requests
+                  FROM llm_usage
+                 WHERE usage_date = (NOW() AT TIME ZONE 'UTC')::date
+                 ORDER BY (tokens_in + tokens_out) DESC
+                """,
+            )
+        total_tok = sum(int(r["tokens_total"]) for r in rows)
+        total_req = sum(int(r["requests"])     for r in rows)
+        return {
+            "total_tokens":   total_tok,
+            "total_requests": total_req,
+            "per_store": [
+                {
+                    "store_id":     r["store_id"],
+                    "tokens_total": int(r["tokens_total"]),
+                    "tokens_in":    int(r["tokens_in"]),
+                    "tokens_out":   int(r["tokens_out"]),
+                    "requests":     int(r["requests"]),
+                }
+                for r in rows
+            ],
+        }
+    except Exception as e:
+        print(f"[db] llm_tokens_today_all_stores error: {e}")
+        return {"total_tokens": 0, "total_requests": 0, "per_store": []}
+
+
+async def conversations_active_today() -> dict:
+    """
+    Active conversations + estimated message count today.
+
+    "Active" = conversation row touched today (updated_at::date == today).
+    "Messages today" is an approximation — we count rows where the
+    last_activity in the JSONB blob falls on today. Accurate per-message
+    timestamps would need a normalised messages table; we don't have one
+    yet and adding it for a dashboard counter would be over-engineering.
+    """
+    if not _pool:
+        return {"active_sessions": 0, "messages_today_estimate": 0}
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) AS active_sessions,
+                    COALESCE(SUM(jsonb_array_length(data->'messages')), 0) AS msg_sum
+                  FROM conversations
+                 WHERE updated_at::date = (NOW() AT TIME ZONE 'UTC')::date
+                """,
+            )
+        return {
+            "active_sessions":         int(row["active_sessions"]) if row else 0,
+            "messages_today_estimate": int(row["msg_sum"])         if row else 0,
+        }
+    except Exception as e:
+        print(f"[db] conversations_active_today error: {e}")
+        return {"active_sessions": 0, "messages_today_estimate": 0}
+
+
+async def webhook_error_counts(window_hours: int = 24) -> dict:
+    """
+    Webhook errors in the last `window_hours`. Two slices: total count
+    and a per-store top-N. Status 'rejected' covers signature failures.
+    """
+    if not _pool:
+        return {"errors_24h": 0, "signature_failures_24h": 0, "top_stores": []}
+    window_hours = max(1, min(int(window_hours or 24), 168))  # 1h–1w
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT
+                    SUM(CASE WHEN status IN ('error', 'rejected') THEN 1 ELSE 0 END)::int AS errors,
+                    SUM(CASE WHEN sig_status LIKE 'signature_%' AND status='rejected' THEN 1 ELSE 0 END)::int AS sig_fails
+                  FROM webhook_log
+                 WHERE created_at >= NOW() - INTERVAL '{window_hours} hours'
+                """,
+            )
+            top = await conn.fetch(
+                f"""
+                SELECT store_id, COUNT(*) AS n
+                  FROM webhook_log
+                 WHERE status IN ('error', 'rejected')
+                   AND created_at >= NOW() - INTERVAL '{window_hours} hours'
+                   AND store_id <> ''
+                 GROUP BY store_id
+                 ORDER BY n DESC
+                 LIMIT 5
+                """,
+            )
+        return {
+            "errors_24h":             int(row["errors"]    or 0) if row else 0,
+            "signature_failures_24h": int(row["sig_fails"] or 0) if row else 0,
+            "top_stores": [
+                {"store_id": r["store_id"], "errors": int(r["n"])}
+                for r in top
+            ],
+        }
+    except Exception as e:
+        print(f"[db] webhook_error_counts error: {e}")
+        return {"errors_24h": 0, "signature_failures_24h": 0, "top_stores": []}
+
+
+async def outbox_dead_top_stores(limit: int = 5) -> list[dict]:
+    """Stores whose outbox has dead rows — they need operator attention."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT store_id, COUNT(*) AS n
+                  FROM outbox
+                 WHERE status = 'dead'
+                   AND store_id IS NOT NULL AND store_id <> ''
+                 GROUP BY store_id
+                 ORDER BY n DESC
+                 LIMIT $1
+                """,
+                int(limit),
+            )
+        return [{"store_id": r["store_id"], "dead": int(r["n"])} for r in rows]
+    except Exception as e:
+        print(f"[db] outbox_dead_top_stores error: {e}")
+        return []
+
+
+async def login_failures_24h() -> int:
+    """Count failed login attempts in the last 24h (for the security card)."""
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*) AS n
+                  FROM login_attempts
+                 WHERE created_at >= NOW() - INTERVAL '24 hours'
+                """,
+            )
+        return int(row["n"]) if row else 0
+    except Exception as e:
+        print(f"[db] login_failures_24h error: {e}")
+        return 0

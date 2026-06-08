@@ -349,6 +349,10 @@ export const api = {
       payload || {},
     ),
 
+  // Super-admin: platform operations snapshot
+  platformOps: () =>
+    get<PlatformOpsSnapshot>('/admin/platform-ops'),
+
   // ── LLM usage + daily budget (circuit breaker) ─────────────────────────
   // GET returns today's totals + N-day history + active budget. PUT lets
   // the store owner adjust their daily cap. Setting 0 disables the breaker
@@ -784,6 +788,49 @@ export interface WebhookEvent {
   status: string
   detail: string
   ts: string
+}
+
+// ── Platform Operations snapshot (super admin) ─────────────────────────
+//
+// Read-only operational metrics for the platform owner. NEVER contains
+// raw secrets — token_status is a coarse bucket, provider is a label.
+
+export interface PlatformOpsStoreRow {
+  store_id:        string
+  store_name:      string
+  connected_at:    string
+  last_activity:   string
+  bot_enabled:     boolean
+  channels:        { widget: boolean; whatsapp: boolean }
+  token_status:    'valid' | 'expiring' | 'expired' | 'unknown'
+  provider:        string  // 'groq' | 'anthropic' | 'openai' | '—'
+  products_count:  number
+  tokens_today:    number
+  budget:          number
+  percent_used:    number | null
+}
+
+export interface PlatformOpsSnapshot {
+  totals: {
+    stores_registered:    number
+    stores_active_today:  number
+    messages_today:       number
+    tokens_today:         number
+    llm_requests_today:   number
+  }
+  queues: {
+    inbox:  Record<string, number>   // pending/processing/done/failed/dead
+    outbox: Record<string, number>
+  }
+  errors: {
+    webhook_errors_24h:       number
+    webhook_sig_failures_24h: number
+    login_failures_24h:       number
+  }
+  near_budget:       Array<{ store_id: string; store_name: string; tokens_today: number; budget: number; percent_used: number }>
+  top_error_stores:  Array<{ store_id: string; errors: number }>
+  outbox_dead_top:   Array<{ store_id: string; dead: number }>
+  stores:            PlatformOpsStoreRow[]
 }
 
 // ── LLM usage / daily budget ───────────────────────────────────────────

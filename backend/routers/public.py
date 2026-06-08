@@ -366,6 +366,174 @@ async def admin_list_stores():
     return {"stores": sm.list_stores()}
 
 
+# ── Platform Operations dashboard (super-admin) ──────────────────────────
+# Aggregate health snapshot for the platform owner. NO customer data, NO
+# secrets — counters, error counts, top-N error lists. Authorised inline
+# (rather than via middleware regex) because the path is at the same
+# level as /admin/stores and follows the same auth pattern.
+
+import asyncio as _asyncio
+
+
+def _store_uses_widget(s: dict) -> bool:
+    """Conservative heuristic: a registered store always supports widget."""
+    return bool(s.get("store_id"))
+
+
+def _store_uses_whatsapp(s: dict) -> bool:
+    ai = s.get("ai_config") or {}
+    return bool(ai.get("whatsapp_enabled") and (ai.get("whatsapp_token") or "").strip())
+
+
+def _token_status_label(s: dict) -> str:
+    """Coarse buckets for the dashboard chip — never reveals the token."""
+    exp = (s.get("expires_at") or "").strip()
+    if not exp:
+        return "unknown"
+    try:
+        import datetime as _dtt
+        when = _dtt.datetime.fromisoformat(exp.replace("Z", ""))
+    except Exception:
+        return "unknown"
+    delta = (when - _dtt.datetime.utcnow()).total_seconds()
+    if delta < 0:
+        return "expired"
+    if delta < 86_400 * 2:    # < 2 days
+        return "expiring"
+    return "valid"
+
+
+@router.get("/admin/platform-ops")
+async def platform_ops(request: Request):
+    """
+    Super-admin operational snapshot.
+
+    Sections:
+      • totals      — active store count, conv/msg counters, token totals
+      • queues      — inbox + outbox status counts (pending/failed/dead)
+      • errors      — webhook errors (24h), failed logins, sig failures
+      • near_budget — stores at ≥ 80% of their daily LLM budget
+      • top_errors  — stores with the most webhook errors / dead outbox rows
+      • stores      — one row per registered store with status flags +
+                      coarse token status (no actual tokens / keys)
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    if not db.available():
+        raise HTTPException(503, "قاعدة البيانات غير متصلة")
+
+    # Run independent aggregates in parallel — saves ~half a second on a
+    # slow DB. asyncio.gather propagates exceptions so each call's own
+    # error handler keeps it from killing the whole snapshot.
+    (
+        inbox_counts,
+        outbox_counts,
+        tokens_today,
+        active_convs,
+        webhook_errors,
+        outbox_dead_top,
+        login_fails,
+    ) = await _asyncio.gather(
+        db.inbox_count_by_status(),
+        db.outbox_count_by_status(),
+        db.llm_tokens_today_all_stores(),
+        db.conversations_active_today(),
+        db.webhook_error_counts(window_hours=24),
+        db.outbox_dead_top_stores(limit=5),
+        db.login_failures_24h(),
+    )
+
+    # Per-store rows — registry is in-memory so this is cheap.
+    stores_raw = sm.list_stores()
+    today_by_store = {p["store_id"]: p for p in tokens_today["per_store"]}
+
+    # Resolve effective budget the same way main._daily_token_budget does,
+    # without importing main (would create a circular import).
+    import os as _os
+    try:
+        env_budget = max(0, int(_os.getenv("LLM_DAILY_TOKEN_BUDGET", "500000")))
+    except ValueError:
+        env_budget = 500_000
+
+    near_budget: list[dict] = []
+    store_rows:  list[dict] = []
+    for s in stores_raw:
+        sid = s["store_id"]
+        # Coarse store metadata only — never the raw access_token or keys.
+        ai_cfg   = s.get("ai_config") or {}
+        override = ai_cfg.get("daily_token_budget")
+        try:
+            store_budget = int(override) if override is not None else env_budget
+        except (TypeError, ValueError):
+            store_budget = env_budget
+        used = int((today_by_store.get(sid) or {}).get("tokens_total", 0))
+        pct  = (used / store_budget * 100.0) if store_budget > 0 else None
+
+        # Coarse provider label — names which AI provider is configured,
+        # but NEVER the key. "—" when nothing configured (env-fallback or
+        # unconfigured store).
+        if ai_cfg.get("groq_api_key"):       provider = "groq"
+        elif ai_cfg.get("anthropic_api_key"): provider = "anthropic"
+        elif ai_cfg.get("openai_api_key"):    provider = "openai"
+        else:                                  provider = "—"
+
+        row = {
+            "store_id":      sid,
+            "store_name":    s.get("store_name") or "",
+            "connected_at":  s.get("connected_at") or "",
+            "last_activity": s.get("last_sync") or s.get("connected_at") or "",
+            "bot_enabled":   bool(s.get("bot_enabled", True)),
+            "channels": {
+                "widget":   _store_uses_widget(s),
+                "whatsapp": _store_uses_whatsapp(s),
+            },
+            "token_status":  _token_status_label(s),
+            "provider":      provider,
+            "products_count": int(s.get("products_count") or 0),
+            "tokens_today":   used,
+            "budget":         store_budget,
+            "percent_used":   round(pct, 1) if pct is not None else None,
+        }
+        store_rows.append(row)
+
+        if pct is not None and pct >= 80:
+            near_budget.append({
+                "store_id":     sid,
+                "store_name":   s.get("store_name") or "",
+                "tokens_today": used,
+                "budget":       store_budget,
+                "percent_used": round(pct, 1),
+            })
+
+    near_budget.sort(key=lambda r: r["percent_used"], reverse=True)
+
+    return {
+        "totals": {
+            "stores_registered": len(stores_raw),
+            "stores_active_today": active_convs["active_sessions"],
+            "messages_today":      active_convs["messages_today_estimate"],
+            "tokens_today":        tokens_today["total_tokens"],
+            "llm_requests_today":  tokens_today["total_requests"],
+        },
+        "queues": {
+            "inbox":  inbox_counts,
+            "outbox": outbox_counts,
+        },
+        "errors": {
+            "webhook_errors_24h":      webhook_errors["errors_24h"],
+            "webhook_sig_failures_24h": webhook_errors["signature_failures_24h"],
+            "login_failures_24h":      login_fails,
+        },
+        "near_budget":     near_budget,
+        "top_error_stores": webhook_errors["top_stores"],
+        "outbox_dead_top":  outbox_dead_top,
+        "stores": store_rows,
+    }
+
+
 @router.get("/admin/{store_id}", response_class=HTMLResponse)
 async def admin_store_page(store_id: str):
     """Per-store admin dashboard — serves the React SPA."""

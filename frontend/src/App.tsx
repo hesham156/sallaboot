@@ -9,6 +9,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 // Lazy-load the authenticated app shells so the login screen loads fast.
 const StoresList     = lazy(() => import('./pages/StoresList'))
 const StoreDashboard = lazy(() => import('./pages/StoreDashboard'))
+const PlatformOps    = lazy(() => import('./pages/PlatformOps'))
 const PrivacyPolicy  = lazy(() => import('./pages/PrivacyPolicy'))
 const TermsOfService = lazy(() => import('./pages/TermsOfService'))
 const DataDeletion   = lazy(() => import('./pages/DataDeletion'))
@@ -63,6 +64,14 @@ export default function App() {
             element={
               <RequireSuper>
                 <StoresList />
+              </RequireSuper>
+            }
+          />
+          <Route
+            path="/admin/platform-ops"
+            element={
+              <RequireSuper>
+                <PlatformOps />
               </RequireSuper>
             }
           />
