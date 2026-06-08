@@ -130,12 +130,16 @@ export const api = {
   // Realtime stream ticket — exchanged for a short-lived token because
   // EventSource can't send custom headers. POST is authenticated by the
   // current bearer; the returned ticket is consumed by openAdminStream.
-  streamTicket: (storeId: string) =>
-    post<{ ticket: string; ttl_seconds: number }>(
-      `/admin/${storeId}/stream/ticket`,
-    ),
-  getConversation: (storeId: string, sessionId: string) =>
-    get<Conversation>(`/admin/${storeId}/conversations/${sessionId}`),
+  streamTicket: (storeId: string, reason?: string) => {
+    const qs = reason ? `?reason=${encodeURIComponent(reason)}` : ''
+    return post<{ ticket: string; ttl_seconds: number }>(
+      `/admin/${storeId}/stream/ticket${qs}`,
+    )
+  },
+  getConversation: (storeId: string, sessionId: string, reason?: string) => {
+    const qs = reason ? `?reason=${encodeURIComponent(reason)}` : ''
+    return get<Conversation>(`/admin/${storeId}/conversations/${sessionId}${qs}`)
+  },
   adminReply: (storeId: string, sessionId: string, message: string) =>
     post(`/admin/${storeId}/conversations/${sessionId}/reply`, { message }),
   takeover: (storeId: string, sessionId: string) =>
@@ -957,6 +961,7 @@ const STREAM_BACKOFF_MAX_MS = 30_000
 export function openAdminStream(
   storeId: string,
   handlers: AdminStreamHandlers,
+  options: { reason?: string } = {},
 ): () => void {
   let es: EventSource | null = null
   let backoff = 1_000
@@ -967,12 +972,16 @@ export function openAdminStream(
     if (closed) return
     let ticket: string
     try {
-      const r = await api.streamTicket(storeId) as { ticket: string }
+      // `reason` is only needed when a super admin opens a stream for a
+      // store they don't own. Owner/employee calls leave it undefined
+      // and pay no per-request cost.
+      const r = await api.streamTicket(storeId, options.reason) as { ticket: string }
       ticket = r.ticket
     } catch {
-      // Bearer expired or store_id mismatch — schedule a retry. The
-      // caller (Conversations page) typically catches the auth error
-      // on its next API call and routes the user back to /login.
+      // Bearer expired, store_id mismatch, OR (super admin + missing
+      // reason). Schedule a retry — the page's first explicit fetch will
+      // surface the actual error (reason_required) and prompt the user;
+      // a subsequent re-open call from the page can pass the reason in.
       scheduleReconnect()
       return
     }

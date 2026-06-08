@@ -10,12 +10,14 @@ import { api, ApiError, AuditRow, getIsSuper } from '../api'
 /* ─────────────────────────── Helpers ────────────────────────────────── */
 
 const ACTION_LABEL: Record<string, { label: string; color: 'success' | 'warning' | 'danger' | 'primary' | 'default' }> = {
-  set_llm_budget:        { label: 'تعديل حد الميزانية',  color: 'warning' },
-  update_ai_settings:    { label: 'تحديث إعدادات الذكاء', color: 'warning' },
-  change_store_password: { label: 'تغيير كلمة المرور',   color: 'danger'  },
-  employee_created:      { label: 'إضافة موظف',          color: 'primary' },
-  employee_updated:      { label: 'تعديل موظف',          color: 'default' },
-  employee_deleted:      { label: 'حذف موظف',            color: 'danger'  },
+  set_llm_budget:            { label: 'تعديل حد الميزانية',    color: 'warning' },
+  update_ai_settings:        { label: 'تحديث إعدادات الذكاء',  color: 'warning' },
+  change_store_password:     { label: 'تغيير كلمة المرور',     color: 'danger'  },
+  employee_created:          { label: 'إضافة موظف',            color: 'primary' },
+  employee_updated:          { label: 'تعديل موظف',            color: 'default' },
+  employee_deleted:          { label: 'حذف موظف',              color: 'danger'  },
+  super_viewed_conversation: { label: 'فتح محادثة عميل (مدير)', color: 'warning' },
+  super_opened_stream:       { label: 'فتح تدفق مباشر (مدير)',  color: 'warning' },
 }
 
 function fmtTs(iso: string): string {
@@ -60,6 +62,13 @@ function summariseDetails(action: string, details: Record<string, unknown>): str
       return String(details.email || details.employee_id || '—')
     case 'change_store_password':
       return 'تم تغيير كلمة مرور المتجر'
+    case 'super_viewed_conversation': {
+      const reason = String(details.reason || '').slice(0, 80)
+      const sid    = String(details.session_id || '').slice(0, 8)
+      return reason ? `${reason} · session: ${sid}…` : `session: ${sid}…`
+    }
+    case 'super_opened_stream':
+      return String(details.reason || '—').slice(0, 100)
     default:
       // Fallback: short JSON for unknown actions so a new action type
       // still renders sensibly without a code change.

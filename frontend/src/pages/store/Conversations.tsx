@@ -4,7 +4,7 @@ import {
   Button, Input, Spinner, Textarea, Avatar,
   Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
 } from '@heroui/react'
-import { api, ConvSummary, Conversation, Message, openAdminStream } from '../../api'
+import { api, ApiError, ConvSummary, Conversation, Message, openAdminStream } from '../../api'
 
 interface Props { storeId: string }
 
@@ -123,6 +123,48 @@ export default function Conversations({ storeId }: Props) {
   const [search, setSearch] = useState('')
   const messagesRef = useRef<HTMLDivElement>(null)
 
+  // ── Access-reason gating (super admin cross-store reads) ────────────────
+  // The backend rejects /admin/{store}/conversations/{sid} from a super
+  // admin who hasn't justified the access. We cache the reason once per
+  // page mount so the prompt only fires the first time, then the same
+  // reason is reused for every subsequent fetch on this store.
+  //
+  // Reason caching is intentionally per-mount (NOT localStorage): an
+  // auditor leaving the page and coming back triggers a fresh prompt,
+  // making each new session show up clearly in the audit log.
+  const [accessReason, setAccessReason]         = useState<string>('')
+  const [reasonModalOpen, setReasonModalOpen]   = useState(false)
+  const [reasonDraft, setReasonDraft]           = useState('')
+  const reasonResolverRef = useRef<((r: string | null) => void) | null>(null)
+
+  /** Show the modal and resolve with the entered reason (or null on cancel). */
+  function promptReason(): Promise<string | null> {
+    setReasonDraft('')
+    setReasonModalOpen(true)
+    return new Promise<string | null>((resolve) => {
+      reasonResolverRef.current = resolve
+    })
+  }
+
+  /**
+   * Fetch a conversation, transparently handling the
+   * `reason_required` 403 from the backend by prompting the user once
+   * and caching their answer for subsequent calls on this mount.
+   */
+  async function fetchConv(sessionId: string): Promise<Conversation> {
+    try {
+      return await api.getConversation(storeId, sessionId, accessReason || undefined)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403 && e.detail === 'reason_required') {
+        const r = await promptReason()
+        if (!r) throw e   // user cancelled — propagate the original error
+        setAccessReason(r)
+        return api.getConversation(storeId, sessionId, r)
+      }
+      throw e
+    }
+  }
+
   // End-conversation modal
   const DEFAULT_FAREWELL =
     'شكراً لتواصلكم معنا 🌷\nإذا كان لديكم أي استفسار آخر لا تترددوا بالتواصل معنا.\nنتمنى لكم يوماً سعيداً.'
@@ -161,11 +203,15 @@ export default function Conversations({ storeId }: Props) {
 
   useEffect(() => {
     if (!storeId) return
+    // Pass any cached access reason — needed for super-admin cross-store
+    // streams, ignored by the backend for owner/employee tickets. Stream
+    // re-opens when accessReason changes so the first fetch's prompt
+    // also enables realtime updates without an extra dialog.
     const close = openAdminStream(storeId, {
       onMessage: (ev) => {
         if (ev.session_id === selectedIdRef.current) {
           // Open conversation got a new message — pull the full detail.
-          api.getConversation(storeId, ev.session_id)
+          fetchConv(ev.session_id)
             .then(setSelected)
             .catch(() => { /* user just navigated away — ignore */ })
         }
@@ -175,10 +221,10 @@ export default function Conversations({ storeId }: Props) {
       onNewConversation: () => { loadConversations() },
       onRating:          () => { loadConversations() },
       onBotToggle:       () => { loadConversations() },
-    })
+    }, { reason: accessReason || undefined })
     return close
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId])
+  }, [storeId, accessReason])
 
   // Auto-open the requested session after the list loads.
   useEffect(() => {
@@ -192,7 +238,7 @@ export default function Conversations({ storeId }: Props) {
       // fall back to fetching by id directly.
       setSelectedId(requestedSession)
       setDetailLoading(true)
-      api.getConversation(storeId, requestedSession)
+      fetchConv(requestedSession)
         .then(setSelected)
         .catch(console.error)
         .finally(() => setDetailLoading(false))
@@ -218,7 +264,7 @@ export default function Conversations({ storeId }: Props) {
     setSelectedId(c.session_id)
     setDetailLoading(true)
     try {
-      const detail = await api.getConversation(storeId, c.session_id)
+      const detail = await fetchConv(c.session_id)
       setSelected(detail)
     } catch (e) { console.error(e) }
     finally { setDetailLoading(false) }
@@ -230,7 +276,7 @@ export default function Conversations({ storeId }: Props) {
     try {
       await api.adminReply(storeId, selected.session_id, replyText.trim())
       setReplyText('')
-      const updated = await api.getConversation(storeId, selected.session_id)
+      const updated = await fetchConv(selected.session_id)
       setSelected(updated)
     } finally { setSending(false) }
   }
@@ -238,7 +284,7 @@ export default function Conversations({ storeId }: Props) {
   async function handleTakeover() {
     if (!selected) return
     await api.takeover(storeId, selected.session_id)
-    const updated = await api.getConversation(storeId, selected.session_id)
+    const updated = await fetchConv(selected.session_id)
     setSelected(updated)
     loadConversations()
   }
@@ -246,7 +292,7 @@ export default function Conversations({ storeId }: Props) {
   async function handleHandback() {
     if (!selected) return
     await api.handback(storeId, selected.session_id)
-    const updated = await api.getConversation(storeId, selected.session_id)
+    const updated = await fetchConv(selected.session_id)
     setSelected(updated)
     loadConversations()
   }
@@ -265,7 +311,7 @@ export default function Conversations({ storeId }: Props) {
         farewell:  farewell.trim() || undefined,
         skip_csat: skipCsat,
       })
-      const updated = await api.getConversation(storeId, selected.session_id)
+      const updated = await fetchConv(selected.session_id)
       setSelected(updated)
       loadConversations()
       setEndOpen(false)
@@ -701,6 +747,80 @@ export default function Conversations({ storeId }: Props) {
                   startContent={<Icon paths={['M5 13l4 4L19 7']} size={13} />}
                 >
                   إنهاء وإرسال
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* ════════════════ ACCESS-REASON MODAL (super admin) ════════════════ */}
+      {/* Shown only when the backend returns 403 reason_required, which
+          only fires for a super admin reading a store that isn't theirs.
+          Store owners + employees never see this. */}
+      <Modal
+        isOpen={reasonModalOpen}
+        onOpenChange={(open) => {
+          // Treat backdrop-close / ESC as cancellation: resolve null so
+          // the awaiting fetchConv knows to abort with the original error.
+          setReasonModalOpen(open)
+          if (!open && reasonResolverRef.current) {
+            reasonResolverRef.current(null)
+            reasonResolverRef.current = null
+          }
+        }}
+        placement="center"
+        backdrop="blur"
+        size="md"
+        isDismissable={false}
+      >
+        <ModalContent>
+          {(close) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1" dir="rtl">
+                <span className="text-base font-bold">سبب فتح المحادثة</span>
+                <span className="text-xs text-slate-500 font-normal">
+                  لأنك تفتح محادثات متجر آخر، نسجّل سبب الوصول مع الوقت في
+                  سجل المراجعة. سيظهر السبب لمالك المتجر لاحقاً عند المراجعة.
+                </span>
+              </ModalHeader>
+              <ModalBody dir="rtl">
+                <Textarea
+                  autoFocus
+                  label="السبب"
+                  placeholder="مثلاً: متابعة بلاغ #4221 — دعم فني"
+                  value={reasonDraft}
+                  onValueChange={setReasonDraft}
+                  variant="bordered"
+                  minRows={2}
+                  maxRows={5}
+                  description="مطلوب 5 أحرف على الأقل."
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button
+                  variant="light"
+                  onPress={() => {
+                    reasonResolverRef.current?.(null)
+                    reasonResolverRef.current = null
+                    setReasonModalOpen(false)
+                    close()
+                  }}
+                >
+                  إلغاء
+                </Button>
+                <Button
+                  color="primary"
+                  isDisabled={reasonDraft.trim().length < 5}
+                  onPress={() => {
+                    const r = reasonDraft.trim()
+                    reasonResolverRef.current?.(r)
+                    reasonResolverRef.current = null
+                    setReasonModalOpen(false)
+                    close()
+                  }}
+                >
+                  تأكيد وفتح
                 </Button>
               </ModalFooter>
             </>

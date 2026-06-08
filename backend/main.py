@@ -147,6 +147,30 @@ async def _audit(request: Request, action: str, *, target_store: str = "", detai
     )
 
 
+def _super_viewing_other_store(request: Request, store_id: str) -> bool:
+    """
+    True when a super-admin token is being used to access a store that
+    isn't the super's own. The middleware already verified the token, but
+    it grants su=true unrestricted access — this helper is how individual
+    endpoints opt into stricter "must justify cross-store access" rules.
+
+    The store's actual owner / employees pass through this check (s claim
+    matches store_id), no friction added.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if not claims.get("su"):
+        return False
+    return (claims.get("s") or "") != store_id
+
+
+# Minimum justification length. Short enough that "Bug #4221" works,
+# long enough to filter "k", ".", etc. Tune up if audit reviewers want
+# fuller explanations.
+_REASON_MIN_LENGTH = 5
+_REASON_MAX_LENGTH = 500
+
+
 # ── Daily token-budget circuit breaker ────────────────────────────────────
 # Defends against LLM-cost abuse from a single compromised store. Rate
 # limits above bound requests-per-minute; this one bounds tokens-per-day,
@@ -1696,7 +1720,37 @@ async def all_conversations_superadmin(
 
 
 @app.get("/admin/{store_id}/conversations/{session_id}")
-async def store_conversation_detail(store_id: str, session_id: str):
+async def store_conversation_detail(
+    store_id: str,
+    session_id: str,
+    request: Request,
+    reason: str = "",
+):
+    """
+    Return a single conversation's full transcript.
+
+    Cross-store reads by a super admin (e.g. for support / abuse review)
+    REQUIRE a written justification via ?reason=… and are audited. The
+    store's actual owner and employees pass through without friction —
+    it's their own data.
+    """
+    if _super_viewing_other_store(request, store_id):
+        reason_clean = (reason or "").strip()
+        if len(reason_clean) < _REASON_MIN_LENGTH:
+            # Client-side error code (not Arabic text) so the frontend can
+            # detect this specific 403 and prompt the user for a reason
+            # without parsing localised strings.
+            raise HTTPException(403, "reason_required")
+        await _audit(
+            request,
+            "super_viewed_conversation",
+            target_store=store_id,
+            details={
+                "session_id": session_id,
+                "reason":     reason_clean[:_REASON_MAX_LENGTH],
+            },
+        )
+
     await cs.restore_to_memory(session_id)
     cs.mark_admin_read(session_id)
     conv = cs.all_conversations().get(session_id)
@@ -2967,12 +3021,17 @@ def _consume_stream_ticket(ticket: str, store_id: str) -> bool:
 
 
 @app.post("/admin/{store_id}/stream/ticket")
-async def admin_stream_ticket(store_id: str, request: Request):
+async def admin_stream_ticket(store_id: str, request: Request, reason: str = ""):
     """
     Exchange a Bearer token (in the Authorization header) for a single-use
     stream ticket. The admin SPA calls this right before opening the
     EventSource. The auth middleware has already validated the bearer for
     this store_id by the time we get here.
+
+    Cross-store live-stream subscriptions by a super admin are gated the
+    same way as the conversation-detail read: ?reason=… required + audited.
+    A long-lived SSE connection to another store's traffic is at least as
+    privacy-sensitive as a one-shot conversation read.
     """
     # auth middleware already ran for /admin/{store_id}/* paths — but
     # this specific route uses 'stream' which isn't in the regex (it
@@ -2983,6 +3042,18 @@ async def admin_stream_ticket(store_id: str, request: Request):
         raise HTTPException(401, "يرجى تسجيل الدخول")
     if not claims.get("su") and claims.get("s") != store_id:
         raise HTTPException(403, "غير مصرح لك بالوصول")
+
+    if _super_viewing_other_store(request, store_id):
+        reason_clean = (reason or "").strip()
+        if len(reason_clean) < _REASON_MIN_LENGTH:
+            raise HTTPException(403, "reason_required")
+        await _audit(
+            request,
+            "super_opened_stream",
+            target_store=store_id,
+            details={"reason": reason_clean[:_REASON_MAX_LENGTH]},
+        )
+
     return {"ticket": _issue_stream_ticket(store_id), "ttl_seconds": _TICKET_TTL_SECONDS}
 
 
