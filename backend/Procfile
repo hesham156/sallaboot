@@ -1,3 +1,2 @@
 web:    alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT
 worker: alembic upgrade head && python worker.py
-release: alembic upgrade head
