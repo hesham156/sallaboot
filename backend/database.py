@@ -17,12 +17,31 @@ Usage:
 import os
 import json
 import asyncio
+import datetime as _dt
 import asyncpg
 from typing import Optional
 
 import crypto as _crypto
 
 _pool: Optional[asyncpg.Pool] = None
+
+
+def _iso_z(dt) -> str:
+    """
+    Render a datetime as a JS-parseable ISO-8601 UTC string.
+
+    asyncpg returns TIMESTAMPTZ columns as tz-aware datetimes; calling
+    `.isoformat() + "Z"` on those produces `…+00:00Z`, which JavaScript's
+    Date constructor rejects as Invalid Date. This helper always returns
+    a clean `…T…Z` form regardless of whether the input is tz-aware or
+    naive (legacy code paths that produced naive datetimes were assumed
+    to already be UTC, so the same tail char is correct).
+    """
+    if not dt:
+        return ""
+    if getattr(dt, "tzinfo", None) is None:
+        return dt.isoformat() + "Z"
+    return dt.astimezone(_dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 # ── Init & schema ──────────────────────────────────────────────────────────────
@@ -404,7 +423,7 @@ async def list_training(store_id: str) -> list[dict]:
                 "file_name":  r["file_name"] or "",
                 "size_chars": int(r["size_chars"] or 0),
                 "enabled":    bool(r["enabled"]),
-                "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else "",
+                "created_at": _iso_z(r["created_at"]),
             }
             for r in rows
         ]
@@ -497,7 +516,7 @@ async def list_employees(store_id: str) -> list[dict]:
                 "email":      r["email"],
                 "role":       r["role"] or "agent",
                 "active":     bool(r["active"]),
-                "created_at": r["created_at"].isoformat() + "Z" if r["created_at"] else "",
+                "created_at": _iso_z(r["created_at"]),
             }
             for r in rows
         ]
@@ -550,7 +569,7 @@ async def get_employee(emp_id: int) -> dict | None:
             "password_hash": row["password_hash"],
             "role":          row["role"] or "agent",
             "active":        bool(row["active"]),
-            "created_at":    row["created_at"].isoformat() + "Z" if row["created_at"] else "",
+            "created_at":    _iso_z(row["created_at"]),
         }
     except Exception as e:
         print(f"[db] get_employee error: {e}")
@@ -579,7 +598,7 @@ async def get_employee_by_email(store_id: str, email: str) -> dict | None:
             "password_hash": row["password_hash"],
             "role":          row["role"] or "agent",
             "active":        bool(row["active"]),
-            "created_at":    row["created_at"].isoformat() + "Z" if row["created_at"] else "",
+            "created_at":    _iso_z(row["created_at"]),
         }
     except Exception as e:
         print(f"[db] get_employee_by_email error: {e}")
@@ -821,7 +840,7 @@ async def get_webhook_log(store_id: str | None = None, limit: int = 200) -> list
                     limit,
                 )
         return [
-            {k: (v.isoformat() + "Z" if k == "created_at" and v else v) for k, v in dict(r).items()}
+            {k: (_iso_z(v) if k == "created_at" and v else v) for k, v in dict(r).items()}
             for r in rows
         ]
     except Exception as e:
@@ -2410,7 +2429,7 @@ async def audit_list(
                 "details":      _coerce_jsonb(r["details"]),
                 "ip":           r["ip"],
                 "user_agent":   r["user_agent"],
-                "created_at":   (r["created_at"].isoformat() + "Z") if r["created_at"] else "",
+                "created_at":   _iso_z(r["created_at"]),
             }
             for r in rows
         ]
@@ -2463,8 +2482,8 @@ async def support_access_create(
             "id":           int(row["id"]),
             "store_id":     row["store_id"],
             "granted_by":   row["granted_by"],
-            "granted_at":   row["granted_at"].isoformat() + "Z",
-            "expires_at":   row["expires_at"].isoformat() + "Z",
+            "granted_at":   _iso_z(row["granted_at"]),
+            "expires_at":   _iso_z(row["expires_at"]),
             "note":         row["note"] or "",
             "revoked_at":   None,
         }
@@ -2528,8 +2547,8 @@ async def support_access_active(store_id: str) -> dict | None:
             "id":           int(row["id"]),
             "store_id":     row["store_id"],
             "granted_by":   row["granted_by"],
-            "granted_at":   row["granted_at"].isoformat() + "Z",
-            "expires_at":   row["expires_at"].isoformat() + "Z",
+            "granted_at":   _iso_z(row["granted_at"]),
+            "expires_at":   _iso_z(row["expires_at"]),
             "note":         row["note"] or "",
             "revoked_at":   None,
         }
@@ -2567,10 +2586,10 @@ async def support_access_list(store_id: str, *, limit: int = 50) -> list[dict]:
                 "id":           int(r["id"]),
                 "store_id":     r["store_id"],
                 "granted_by":   r["granted_by"],
-                "granted_at":   r["granted_at"].isoformat() + "Z",
-                "expires_at":   r["expires_at"].isoformat() + "Z",
+                "granted_at":   _iso_z(r["granted_at"]),
+                "expires_at":   _iso_z(r["expires_at"]),
                 "note":         r["note"] or "",
-                "revoked_at":   (r["revoked_at"].isoformat() + "Z") if r["revoked_at"] else None,
+                "revoked_at":   _iso_z(r["revoked_at"]) or None,
                 "active":       now_active,
             })
         return out
