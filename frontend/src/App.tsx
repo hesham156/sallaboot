@@ -26,15 +26,14 @@ function RequireSuper({ children }: { children: JSX.Element }) {
   return children
 }
 
-// Store dashboard is for store owners only — super admins are blocked
+// Store dashboard — owner OR super admin (super sees an "impersonation"
+// banner so they don't forget the access is logged). We do NOT block
+// super here: their use case is exactly to drop into a store to debug
+// or help a merchant. Sensitive reads (customer conversations, live
+// streams) are gated separately with reason + audit.
 function RequireStoreOwner({ children }: { children: JSX.Element }) {
   const token = getToken()
-  const isSuper = getIsSuper()
   if (!token) return <Navigate to="/login" replace />
-  // Super admins shouldn't land on a per-store dashboard — show them a 403
-  // with a "Home" button instead of silently redirecting (so they understand
-  // why their request didn't go through).
-  if (isSuper) return <ErrorPage code={403} />
   return children
 }
 

@@ -417,6 +417,36 @@ export default function StoreDashboard() {
 
       {/* ════════════ MAIN CONTENT ════════════ */}
       <main className="mr-0 md:mr-60 pt-14 md:pt-0 flex-1 min-h-screen overflow-y-auto">
+        {/* Impersonation banner — sticks above the page content so the
+            super admin never forgets they're operating in someone else's
+            store. Customer-conversation reads still require a written
+            reason on top of this. */}
+        {getIsSuper() && (
+          <div
+            className="sticky top-0 z-20 bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between gap-3"
+            dir="rtl"
+          >
+            <div className="flex items-center gap-2 text-amber-800 text-xs">
+              <Icon paths={['M12 9v4', 'M12 17h.01', 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z']} size={14} className="flex-shrink-0" />
+              <span>
+                تتصفّح <b>{store.store_name}</b> كمدير عام —
+                التغييرات الحساسة وقراءة المحادثات تُسجَّل في
+                <button
+                  onClick={() => navigate('/admin/audit-log')}
+                  className="underline mx-1 hover:text-amber-900"
+                >
+                  سجل المراجعة
+                </button>
+              </span>
+            </div>
+            <button
+              onClick={() => navigate('/admin/platform-ops')}
+              className="text-xs font-bold text-amber-700 hover:text-amber-900 whitespace-nowrap"
+            >
+              ← عودة إلى لوحة العمليات
+            </button>
+          </div>
+        )}
         <Suspense fallback={
           <div className="flex items-center justify-center min-h-screen">
             <Spinner size="lg" color="primary" label="جاري التحميل..." />

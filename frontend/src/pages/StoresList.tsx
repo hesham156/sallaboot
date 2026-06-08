@@ -458,6 +458,14 @@ export default function StoresList() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
+                      <Tooltip content="فتح لوحة المتجر">
+                        <button
+                          onClick={() => navigate(`/store/${s.store_id}`)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 hover:bg-sky-500/20 transition-colors"
+                        >
+                          <Icon paths={['M15 12H3', 'M13 18l6-6-6-6']} size={13} />
+                        </button>
+                      </Tooltip>
                       <Tooltip content="إعادة تعيين كلمة المرور">
                         <button
                           onClick={() => handleReset(s.store_id)}
