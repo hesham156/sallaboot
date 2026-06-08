@@ -323,6 +323,112 @@ import middleware as _mw
 _mw.register(app)
 
 
+# ── Browser-friendly error pages ─────────────────────────────────────────
+# Two cases the SPA needs to handle for the user:
+#
+#   1. A wrong URL typed in the browser (or a stale bookmark to a route
+#      we no longer expose). FastAPI's default 404 returns JSON, which
+#      shows as plain text in a browser — ugly. Serve the SPA shell so
+#      React's BrowserRouter renders the styled 404 page instead.
+#
+#   2. An unexpected backend exception. Same idea: HTML clients see the
+#      styled 500 page, JSON clients keep getting structured detail.
+#
+# Heuristic: if Accept contains text/html AND the path doesn't look like
+# an API/asset surface, serve the shell. Everything else gets the original
+# JSON response. We can't trust path prefix alone — /admin/foo can be both
+# (the SPA shell at /admin/{id} AND API routes under /admin/{id}/...). The
+# Accept header is the real discriminator.
+
+from fastapi import Request as _Req
+from fastapi.exceptions import HTTPException as _FHTTPException
+from starlette.exceptions import HTTPException as _SHTTPException
+
+
+# Prefixes that are ALWAYS APIs/assets — never serve SPA shell here even
+# for HTML accept, because a confused browser hitting /chat or /webhook/...
+# should see the underlying error, not a 200 OK with HTML.
+_API_ONLY_PREFIXES = (
+    "/chat", "/webhook/", "/whatsapp/", "/widget.js", "/file/",
+    "/upload", "/uploads/", "/assets/", "/health", "/env-check",
+    "/snippet", "/api/",
+)
+
+
+def _wants_html(request: _Req) -> bool:
+    """True if this looks like a browser navigation rather than a JSON call."""
+    accept = (request.headers.get("Accept") or "").lower()
+    if "text/html" not in accept:
+        return False
+    path = request.url.path
+    return not any(path.startswith(p) for p in _API_ONLY_PREFIXES)
+
+
+@app.exception_handler(_SHTTPException)
+async def _http_exception_to_spa(request: _Req, exc: _SHTTPException):
+    """
+    For HTML browser navigation, let the SPA render the styled error page.
+    For API callers, fall back to FastAPI's standard JSON response so
+    error.detail keeps reaching the frontend's fetch wrapper untouched.
+
+    NOTE: this fires for HTTPException AND its FastAPI subclass — Starlette's
+    base class is what gets registered, and FastAPI's subclasses match.
+    """
+    if _wants_html(request) and exc.status_code in (404, 410):
+        # Only 404/410 get the SPA shell here — for 401/403/etc we keep the
+        # JSON response so the frontend's API client can show toasts. The
+        # router-level RequireSuper/RequireStoreOwner guards already cover
+        # browser-navigation 403s with the styled page.
+        if _ADMIN_DIST_IDX.exists():
+            html = _ADMIN_DIST_IDX.read_text(encoding="utf-8")
+        else:
+            html = _ADMIN_HTML.read_text(encoding="utf-8") if _ADMIN_HTML.exists() else "<h1>404</h1>"
+        # Return 200 so the browser doesn't show its own error page over
+        # ours; the SPA reads the URL and renders the right error code.
+        return HTMLResponse(html, status_code=200)
+
+    # Default JSON response (mirrors FastAPI's built-in handler).
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: _Req, exc: Exception):
+    """
+    Backstop for unhandled exceptions — converts a would-be 500 stack
+    trace into either the SPA shell (browser) or a clean JSON 500 (API).
+    Without this, an exception that escapes a route handler shows
+    starlette's default plain-text 500 with no styling and leaks the
+    server's traceback to the user.
+    """
+    import traceback as _tb
+    print(f"[unhandled] {type(exc).__name__}: {exc}\n{_tb.format_exc()}")
+
+    if _wants_html(request):
+        if _ADMIN_DIST_IDX.exists():
+            # Inject a marker into the URL fragment so the SPA can render
+            # the 500 page without us routing through React — easiest path
+            # is to serve the shell and let the user see whatever route
+            # they were on. The ErrorBoundary doesn't help here (server
+            # error, not React error), so we redirect to /error/500 in the
+            # script tag. Simpler: just return the shell at /error/500.
+            html = _ADMIN_DIST_IDX.read_text(encoding="utf-8")
+            # Tiny inline script that rewrites history to /error/500 BEFORE
+            # the SPA hydrates, so BrowserRouter sees the right path.
+            redirect_snippet = (
+                "<script>"
+                "history.replaceState(null,'','/error/500');"
+                "</script>"
+            )
+            html = html.replace("</head>", redirect_snippet + "</head>", 1)
+            return HTMLResponse(html, status_code=500)
+        return HTMLResponse("<h1>500</h1>", status_code=500)
+
+    return JSONResponse(
+        {"detail": "Internal Server Error"},
+        status_code=500,
+    )
+
+
 # ── Models moved to models.py (re-exported via the import above) ─────────
 
 
