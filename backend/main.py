@@ -10,6 +10,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Initialise logging as early as possible so any module imported below
+# (and any error during import) lands in the formatted output rather than
+# the unformatted root logger.
+import log as _logmod
+_logmod.setup_logging()
+log = _logmod.get_logger("backend.main")
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -2655,7 +2662,12 @@ async def chat(req: ChatRequest, request: Request):
     rl_session_key = (req.session_id or "no-session")[:64]
     tripped = await _chat_rate_limited(store_id, rl_session_key, ip)
     if tripped:
-        print(f"[chat] ⛔ rate-limited axis={tripped} store={store_id!r} sid={rl_session_key!r} ip={ip}")
+        log.warning("chat_rate_limited", extra={
+            "axis":     tripped,
+            "store_id": store_id,
+            "sid":      rl_session_key,
+            "ip":       ip,
+        })
         raise HTTPException(
             429,
             "عدد رسائل كبير في وقت قصير. انتظر دقيقة وحاول مجدداً.",
@@ -2765,10 +2777,11 @@ async def chat(req: ChatRequest, request: Request):
     # one. Fails open when DB is down (see _budget_exhausted).
     exhausted, used_today, budget = await _budget_exhausted(store_id)
     if exhausted:
-        print(
-            f"[chat] 🛑 LLM budget exhausted store={store_id!r} "
-            f"used={used_today} budget={budget} — refusing"
-        )
+        log.warning("chat_budget_exhausted", extra={
+            "store_id":   store_id,
+            "used_today": used_today,
+            "budget":     budget,
+        })
         # Customer-facing copy intentionally does NOT mention budget or
         # quotas — the store doesn't want shoppers to know they hit a
         # spending limit. Frame it as a temporary assistant outage with
@@ -2790,14 +2803,16 @@ async def chat(req: ChatRequest, request: Request):
     try:
         reply = await agent.chat(message=req.message, session_id=session_id)
     except Exception as e:
-        import traceback as _tb
         err_msg  = str(e)
         err_type = type(e).__name__
-        print(
-            f"[chat] ❌ agent.chat error store={store_id!r} session={session_id!r}\n"
-            f"  {err_type}: {err_msg}\n"
-            f"{_tb.format_exc()}"
-        )
+        # logger.exception captures the traceback automatically — no need
+        # to call traceback.format_exc and concatenate.
+        log.exception("chat_agent_error", extra={
+            "store_id":   store_id,
+            "session_id": session_id,
+            "err_type":   err_type,
+            "err_msg":    err_msg[:300],
+        })
 
         # Pick a user-visible message based on error class / text.
         # Never return bot_enabled=False here — that triggers the widget's
@@ -2850,16 +2865,18 @@ async def chat(req: ChatRequest, request: Request):
             _after_pct  = (_delta["after"]  / _budget) * 100
             for _t in (80, 90, 100):
                 if _before_pct < _t <= _after_pct:
-                    # Loud log line — tagged so Railway alerts / log-search
-                    # can filter on the prefix.
-                    print(
-                        f"[llm-alert] ⚠️ store={store_id!r} crossed {_t}% — "
-                        f"used={_delta['after']}/{_budget} tokens today"
-                    )
+                    # Structured event so the platform owner can alert on
+                    # `event:"llm_budget_threshold"` in their log shipper
+                    # rather than grepping a free-text prefix.
+                    log.warning("llm_budget_threshold", extra={
+                        "store_id":     store_id,
+                        "threshold":    _t,
+                        "used_today":   _delta["after"],
+                        "daily_budget": _budget,
+                        "percent_used": round(_after_pct, 1),
+                    })
                     # Also notify the store owner via the existing channel
                     # (email/webhook configured in notifications settings).
-                    # 100% is the most urgent — schedule it through the
-                    # durable outbox so a process restart doesn't lose it.
                     try:
                         await _notif.notify(store_id, "llm_budget_warning", {
                             "threshold":     _t,
@@ -2868,7 +2885,9 @@ async def chat(req: ChatRequest, request: Request):
                             "percent_used":  round(_after_pct, 1),
                         })
                     except Exception as _exc:
-                        print(f"[llm-alert] notify enqueue failed: {_exc}")
+                        log.exception("llm_alert_notify_failed", extra={
+                            "store_id": store_id, "threshold": _t,
+                        })
 
     # Pick up any rich UI component set by the agent tools this turn
     component  = cs.pop_last_component(session_id)

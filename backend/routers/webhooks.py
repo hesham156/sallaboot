@@ -33,6 +33,9 @@ import database as db
 import notifications as _notif
 import store_manager as sm
 from store_sync import sync_store
+import log as _logmod
+
+log = _logmod.get_logger("backend.webhooks")
 
 
 router = APIRouter()
@@ -79,20 +82,22 @@ def _verify_signature(body: bytes, headers) -> tuple:
     """
     secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
     if not secret:
-        print("[webhook] ⚠️ SALLA_WEBHOOK_SECRET not set — accepting unsigned webhooks (DEV ONLY)")
+        log.warning("webhook_no_secret_dev_mode")
         return True, "no_secret_configured"
 
     sig = headers.get("X-Salla-Signature", "")
     if not sig:
         if os.getenv("WEBHOOK_ALLOW_UNSIGNED", "false").lower() == "true":
-            print("[webhook] ⚠️ Missing X-Salla-Signature — accepted (WEBHOOK_ALLOW_UNSIGNED=true)")
+            log.warning("webhook_unsigned_dev_override")
             return True, "signature_absent_dev_override"
-        print("[webhook] ⛔ Missing X-Salla-Signature — rejected (secret is configured)")
+        log.warning("webhook_signature_missing")
         return False, "signature_required_but_absent"
 
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig):
-        print(f"[webhook] ⛔ Signature mismatch — rejected (got {sig[:16]}…)")
+        # Truncate the received sig to a prefix — full sig might end up
+        # in a downstream log shipper, no need to expose it.
+        log.warning("webhook_signature_mismatch", extra={"got_prefix": sig[:16]})
         return False, f"signature_mismatch got={sig[:16]}"
 
     return True, "signature_ok"

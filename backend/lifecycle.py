@@ -33,6 +33,9 @@ import database as db
 import conversation_store as cs
 import realtime
 from store_sync import sync_store
+import log as _logmod
+
+log = _logmod.get_logger("backend.lifecycle")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -210,7 +213,7 @@ async def inbox_drain_loop() -> None:
     # _handle_whatsapp_message / _process_salla_event that live in main
     # until P2-6 moves them to routers/webhooks.py.
     await asyncio.sleep(15)
-    print(f"[inbox] 🔄 drainer started ({WORKER_ID})")
+    log.info("inbox_drainer_started", extra={"worker_id": WORKER_ID})
     while True:
         try:
             if not db.available():
@@ -227,21 +230,24 @@ async def inbox_drain_loop() -> None:
                     await _main._process_inbox_row(row)
                     await db.inbox_mark_done(inbox_id)
                 except Exception as exc:
-                    err = f"{type(exc).__name__}: {exc}"
-                    print(f"[inbox] ❌ row {inbox_id} failed attempt {row['attempts']}: {err}")
-                    await db.inbox_mark_failed(inbox_id, err, row["attempts"])
+                    log.warning("inbox_row_failed", extra={
+                        "inbox_id": inbox_id,
+                        "attempts": row["attempts"],
+                        "err":      f"{type(exc).__name__}: {exc}"[:300],
+                    })
+                    await db.inbox_mark_failed(inbox_id, f"{type(exc).__name__}: {exc}", row["attempts"])
             if len(rows) >= _INBOX_BATCH_SIZE:
                 continue
             await asyncio.sleep(1)
-        except Exception as exc:
-            print(f"[inbox] ⛔ drainer top-level error: {exc}")
+        except Exception:
+            log.exception("inbox_drainer_top_level_error")
             await asyncio.sleep(5)
 
 
 async def outbox_drain_loop() -> None:
     """Same shape as the inbox drainer, scoped to outbound side-effects."""
     await asyncio.sleep(20)
-    print(f"[outbox] 🔄 drainer started ({WORKER_ID})")
+    log.info("outbox_drainer_started", extra={"worker_id": WORKER_ID})
     while True:
         try:
             if not db.available():
@@ -258,14 +264,18 @@ async def outbox_drain_loop() -> None:
                     await _main._deliver_outbox_row(row)
                     await db.outbox_mark_sent(outbox_id)
                 except Exception as exc:
-                    err = f"{type(exc).__name__}: {exc}"
-                    print(f"[outbox] ❌ row {outbox_id} ({row['kind']}) attempt {row['attempts']}: {err}")
-                    await db.outbox_mark_failed(outbox_id, err, row["attempts"])
+                    log.warning("outbox_row_failed", extra={
+                        "outbox_id": outbox_id,
+                        "kind":      row["kind"],
+                        "attempts":  row["attempts"],
+                        "err":       f"{type(exc).__name__}: {exc}"[:300],
+                    })
+                    await db.outbox_mark_failed(outbox_id, f"{type(exc).__name__}: {exc}", row["attempts"])
             if len(rows) >= _OUTBOX_BATCH_SIZE:
                 continue
             await asyncio.sleep(1)
-        except Exception as exc:
-            print(f"[outbox] ⛔ drainer top-level error: {exc}")
+        except Exception:
+            log.exception("outbox_drainer_top_level_error")
             await asyncio.sleep(5)
 
 

@@ -1,25 +1,29 @@
 """
-HTTP middleware — auth + CORS.
+HTTP middleware — request-id, auth + CORS.
 
-Both middlewares are designed to be registered on a FastAPI app via
-`app.middleware('http')(fn)`. They were lifted from main.py during the
-Phase 2 modularisation; behaviour is unchanged.
+Three middlewares registered in order. Starlette wraps in reverse
+registration order, so the LAST registered becomes the OUTERMOST. We
+register:
+  1. request_id_middleware   (innermost — first to run on the request,
+                              last to run on the response)
+  2. admin_auth_middleware
+  3. cors_middleware         (outermost — sees every preflight + reply)
 
-Order of registration matters: Starlette wraps in reverse registration
-order, so the LAST registered becomes the OUTERMOST. In main.py we
-register admin_auth_middleware first, cors_middleware second → CORS
-wraps auth → preflight responses + auth-rejection responses both carry
-the right Access-Control headers.
+Result: CORS wraps auth (so preflight + 401/403 responses carry the
+right Access-Control headers), and BOTH are wrapped by request_id so
+even an auth-rejection log line carries the request id.
 """
 from __future__ import annotations
 
 import os
 import re
+import time
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 import auth as _auth
+import log as _logmod
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -181,10 +185,95 @@ async def cors_middleware(request: Request, call_next):
     return response
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Request-ID middleware (innermost)
+# ─────────────────────────────────────────────────────────────────────────
+
+_log = _logmod.get_logger("backend.request")
+
+# Endpoints we DON'T log per-request (high-volume, low-value). Keeps the
+# log volume sane in production. Errors and slow requests still surface
+# because each subsystem logs its own important events.
+_QUIET_PATHS = (
+    "/health",
+    "/widget.js",
+    "/assets/",
+    "/uploads/",
+    "/admin/",  # we log admin requests but only when they fail or are slow — see below
+)
+
+
+def _is_quiet_path(path: str) -> bool:
+    # Always-quiet paths: health/widget/assets — these get hit constantly.
+    if path in ("/health", "/widget.js"):
+        return True
+    if path.startswith("/assets/") or path.startswith("/uploads/"):
+        return True
+    return False
+
+
+async def request_id_middleware(request: Request, call_next):
+    """
+    Generate or echo X-Request-ID so every log line during this request
+    carries the same correlation id. Logs one summary line at the end
+    with method/path/status/duration_ms.
+
+    Honours an incoming X-Request-ID header so an upstream proxy / mobile
+    client can stitch its own logs to ours.
+    """
+    rid = request.headers.get("X-Request-ID", "").strip() or _logmod.new_request_id()
+    _logmod.set_request_id(rid)
+
+    started = time.perf_counter()
+    status_code = 500   # in case the handler crashes before returning
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception:
+        # Re-raise so the exception_handler in main.py builds the proper
+        # error response; we just want to log the failure here.
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        _log.exception(
+            "request_failed",
+            extra={
+                "method":      request.method,
+                "path":        request.url.path,
+                "duration_ms": elapsed_ms,
+            },
+        )
+        raise
+    else:
+        # Echo the id back so clients (or curl -v) can grep their logs
+        # against ours.
+        response.headers.setdefault("X-Request-ID", rid)
+
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        # Log every request EXCEPT high-volume noise (health/assets) AND
+        # successful 2xx GETs that finished fast — those add little value
+        # vs. their cost in log volume. Errors and slow requests always
+        # log so an oncall can find them.
+        path = request.url.path
+        is_quiet = _is_quiet_path(path)
+        is_error = status_code >= 400
+        is_slow  = elapsed_ms >= 500
+        if is_error or is_slow or not is_quiet:
+            _log.info(
+                "request_finished",
+                extra={
+                    "method":      request.method,
+                    "path":        path,
+                    "status":      status_code,
+                    "duration_ms": elapsed_ms,
+                },
+            )
+        return response
+
+
 def register(app) -> None:
     """
-    Register both middlewares on a FastAPI app in the correct order so
-    CORS wraps auth (last-registered = outermost in Starlette).
+    Register middlewares in the correct order. Starlette wraps in reverse
+    registration order: first registered = innermost, last = outermost.
     """
+    app.middleware("http")(request_id_middleware)
     app.middleware("http")(admin_auth_middleware)
     app.middleware("http")(cors_middleware)
