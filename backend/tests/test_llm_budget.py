@@ -143,7 +143,9 @@ async def test_chat_refuses_when_budget_exhausted(
     })
     assert r.status_code == 200
     body = r.json()
-    assert "صيانة" in body["reply"]   # the refusal text
+    # Refusal copy is friendly + non-revealing — shoppers shouldn't know the
+    # store hit a budget. We assert on a stable phrase from the message.
+    assert "غير متاح" in body["reply"]
     assert fake.called is False        # agent.chat must NOT have been invoked
 
 

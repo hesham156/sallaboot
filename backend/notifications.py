@@ -140,6 +140,43 @@ def _template_low_rating(store_name: str, customer_name: str,
     return subject, _html_wrapper("تقييم منخفض — يحتاج مراجعة", body)
 
 
+def _template_llm_budget_warning(store_name: str, store_id: str,
+                                   threshold: int, used_today: int,
+                                   daily_budget: int, percent_used: float) -> tuple[str, str]:
+    """
+    Heads-up that the daily LLM token budget is being consumed quickly.
+    Three escalating tones: 80% (yellow heads-up), 90% (orange warning),
+    100% (red — bot is now refusing).
+    """
+    if threshold >= 100:
+        emoji, headline, cta = "🛑", "حد الاستهلاك اليومي اكتمل", (
+            "البوت الآن لا يردّ تلقائياً على العملاء حتى منتصف الليل بتوقيت UTC. "
+            "ارفع الحد لو احتجت تشغيله فوراً، أو انتظر إعادة التعيين."
+        )
+    elif threshold >= 90:
+        emoji, headline, cta = "🟠", "اقتربت من حد الاستهلاك اليومي", (
+            "تبقّى أقل من 10% من ميزانية اليوم. لو الحركة عالية، اعتبر رفع الحد قبل الوصول للسقف."
+        )
+    else:
+        emoji, headline, cta = "🟡", "تنبيه استهلاك ذكاء اصطناعي", (
+            "استهلكت 80% من ميزانية اليوم. تابع المعدل من لوحة التحكم."
+        )
+
+    subject = f"{emoji} {store_name} — استخدام البوت تجاوز {threshold}%"
+    body = f"""
+<p>مرحباً،</p>
+<p>{headline} في متجر <b>{store_name}</b>.</p>
+<div class="meta">
+  <div><b>الاستخدام اليوم:</b> {used_today:,} توكن</div>
+  <div><b>الحد اليومي:</b> {daily_budget:,} توكن</div>
+  <div><b>النسبة:</b> {percent_used}%</div>
+</div>
+<p>{cta}</p>
+<a class="btn" href="{BASE_URL}/store/{store_id}/llm-usage">إدارة الاستهلاك ←</a>
+"""
+    return subject, _html_wrapper(f"تنبيه استهلاك — تجاوز {threshold}%", body)
+
+
 # ── Send helpers ───────────────────────────────────────────────────────────────
 
 async def _send_email(to: str, subject: str, html: str) -> bool:
@@ -238,13 +275,18 @@ async def notify(store_id: str, event: str, ctx: dict) -> None:
         ):
             return
 
-        # Event-type gating
+        # Event-type gating. llm_budget_warning is ALWAYS on — there's no
+        # per-store toggle because losing track of an over-budget store
+        # is worse than a noisy mailbox. If a store owner really doesn't
+        # want these, they can disable email/webhook entirely.
         gate_key = {
             "new_conversation": "on_new_conversation",
             "abandoned_cart":   "on_abandoned_cart",
             "low_rating":       "on_low_rating",
         }.get(event)
-        if not gate_key or not n[gate_key]:
+        if event == "llm_budget_warning":
+            pass  # bypass gating — always notify
+        elif not gate_key or not n[gate_key]:
             return
 
         # Always enqueue the smallest payload that the drainer can rebuild
@@ -302,6 +344,15 @@ async def deliver_outbox_row(store_id: str, payload: dict) -> None:
             rating        = int(ctx.get("rating", 1)),
             comment       = ctx.get("comment", ""),
             store_id      = store_id,
+        )
+    elif event == "llm_budget_warning":
+        subject, html = _template_llm_budget_warning(
+            store_name   = store_name,
+            store_id     = store_id,
+            threshold    = int(ctx.get("threshold", 80)),
+            used_today   = int(ctx.get("used_today", 0)),
+            daily_budget = int(ctx.get("daily_budget", 0)),
+            percent_used = float(ctx.get("percent_used", 0)),
         )
     else:
         return  # unknown event → silent ok

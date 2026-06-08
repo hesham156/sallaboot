@@ -1340,19 +1340,26 @@ async def store_llm_usage(store_id: str, days: int = 7):
 @app.put("/admin/{store_id}/llm-budget")
 async def update_llm_budget(store_id: str, request: Request):
     """
-    Set the per-store daily token budget. Pass 0 to disable the breaker for
-    this store (paying customer with unlimited usage agreement). Pass null /
-    omit the field to fall back to the env-var default.
+    Set the per-store daily token budget. Pass null / omit the field to
+    fall back to the env-var default. Pass 0 to disable the breaker —
+    SUPER ADMIN ONLY because an uncapped store can run up a four-figure
+    LLM bill before anyone notices.
 
     Body: {"daily_token_budget": int | null}
     """
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
 
-    # Owner-only — middleware already blocks agents; managers can change
-    # most settings but the budget is a financial-risk knob, so we gate
-    # it to the store owner / super admin the same way password reset is.
+    # Owner-only at minimum — middleware already blocks agents; managers
+    # are blocked too because the budget is a financial-risk knob.
     _require_store_owner(request, store_id)
+
+    # Check super status up front — used below to gate the "0 = unlimited"
+    # value. A regular store owner CAN raise/lower their budget, but they
+    # cannot remove the cap entirely.
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    is_super = bool(claims.get("su"))
 
     try:
         body = await request.json()
@@ -1371,7 +1378,16 @@ async def update_llm_budget(store_id: str, request: Request):
         except (TypeError, ValueError):
             raise HTTPException(400, "daily_token_budget must be an integer or null")
         if n < 0:
-            raise HTTPException(400, "daily_token_budget must be ≥ 0 (0 disables the breaker)")
+            raise HTTPException(400, "daily_token_budget must be ≥ 0")
+        if n == 0 and not is_super:
+            # Block store owners from disabling their own breaker — the
+            # financial risk is the platform owner's to take, not the
+            # merchant's. Super admins can still set 0 for paying customers
+            # with an unlimited-usage agreement.
+            raise HTTPException(
+                403,
+                "تعطيل حد الاستهلاك متاح للمدير العام فقط — اختر حداً أعلى بدلاً من الصفر."
+            )
         cfg["daily_token_budget"] = n
         applied = n
 
@@ -2588,9 +2604,14 @@ async def chat(req: ChatRequest, request: Request):
             f"[chat] 🛑 LLM budget exhausted store={store_id!r} "
             f"used={used_today} budget={budget} — refusing"
         )
+        # Customer-facing copy intentionally does NOT mention budget or
+        # quotas — the store doesn't want shoppers to know they hit a
+        # spending limit. Frame it as a temporary assistant outage with
+        # a clear "team will respond" path so the shopper still feels
+        # supported.
         err_reply = (
-            "عذراً، النظام في صيانة مؤقتة لهذا اليوم. "
-            "يرجى المحاولة لاحقاً أو التواصل مع فريق الدعم."
+            "عذراً، المساعد غير متاح مؤقتاً. "
+            "يمكنك ترك رسالتك وسيقوم الفريق بالرد عليك قريباً."
         )
         # Don't persist as a regular assistant message — it would skew the
         # transcript. Just respond. The realtime publish stays out too;
@@ -2651,7 +2672,38 @@ async def chat(req: ChatRequest, request: Request):
     _usage = getattr(agent, "last_usage", None) or {}
     _ti, _to = int(_usage.get("in", 0)), int(_usage.get("out", 0))
     if _ti or _to:
-        await db.llm_usage_record(store_id, _ti, _to)
+        _delta = await db.llm_usage_record(store_id, _ti, _to)
+        # Threshold-crossing alerts — fire exactly once per threshold per
+        # day per store. We do this by comparing the percentage BEFORE and
+        # AFTER this request against each cut-off. The 100% case is rare
+        # in practice (the breaker refuses earlier), but we still cover it
+        # so an over-budget burst that slipped through the race window
+        # still triggers the post-mortem alert.
+        _budget = _daily_token_budget(store_id)
+        if _budget > 0:
+            _before_pct = (_delta["before"] / _budget) * 100
+            _after_pct  = (_delta["after"]  / _budget) * 100
+            for _t in (80, 90, 100):
+                if _before_pct < _t <= _after_pct:
+                    # Loud log line — tagged so Railway alerts / log-search
+                    # can filter on the prefix.
+                    print(
+                        f"[llm-alert] ⚠️ store={store_id!r} crossed {_t}% — "
+                        f"used={_delta['after']}/{_budget} tokens today"
+                    )
+                    # Also notify the store owner via the existing channel
+                    # (email/webhook configured in notifications settings).
+                    # 100% is the most urgent — schedule it through the
+                    # durable outbox so a process restart doesn't lose it.
+                    try:
+                        await _notif.notify(store_id, "llm_budget_warning", {
+                            "threshold":     _t,
+                            "used_today":    _delta["after"],
+                            "daily_budget":  _budget,
+                            "percent_used":  round(_after_pct, 1),
+                        })
+                    except Exception as _exc:
+                        print(f"[llm-alert] notify enqueue failed: {_exc}")
 
     # Pick up any rich UI component set by the agent tools this turn
     component  = cs.pop_last_component(session_id)

@@ -348,6 +348,18 @@ export const api = {
       `/admin/${storeId}/conversations/${sessionId}/end`,
       payload || {},
     ),
+
+  // ── LLM usage + daily budget (circuit breaker) ─────────────────────────
+  // GET returns today's totals + N-day history + active budget. PUT lets
+  // the store owner adjust their daily cap. Setting 0 disables the breaker
+  // entirely — but the backend only accepts that from a super admin token.
+  getLlmUsage: (storeId: string, days = 7) =>
+    get<LlmUsageResponse>(`/admin/${storeId}/llm-usage?days=${days}`),
+  setLlmBudget: (storeId: string, dailyTokenBudget: number | null) =>
+    put<{ status: string; daily_token_budget: number | null; effective_budget: number }>(
+      `/admin/${storeId}/llm-budget`,
+      { daily_token_budget: dailyTokenBudget },
+    ),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -772,6 +784,41 @@ export interface WebhookEvent {
   status: string
   detail: string
   ts: string
+}
+
+// ── LLM usage / daily budget ───────────────────────────────────────────
+//
+// Shape mirrors /admin/{store}/llm-usage. `today.remaining` is null when
+// the breaker is disabled (budget=0); UI should show "غير محدد" in that
+// case rather than 0%.
+export interface LlmUsageToday {
+  tokens_in:    number
+  tokens_out:   number
+  tokens_total: number
+  requests:     number
+  budget:       number
+  remaining:    number | null
+  percent_used: number | null
+  exhausted:    boolean
+}
+
+export interface LlmUsageHistoryRow {
+  date:         string  // ISO date (YYYY-MM-DD)
+  tokens_in:    number
+  tokens_out:   number
+  tokens_total: number
+  requests:     number
+}
+
+export interface LlmUsageResponse {
+  store_id: string
+  today:    LlmUsageToday
+  budget: {
+    value:           number
+    source:          'store_override' | 'env_default'
+    breaker_active:  boolean
+  }
+  history: LlmUsageHistoryRow[]
 }
 
 export interface DebugInfo {

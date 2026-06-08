@@ -2027,19 +2027,25 @@ async def llm_usage_today(store_id: str) -> dict:
         return {"tokens_in": 0, "tokens_out": 0, "tokens_total": 0, "requests": 0}
 
 
-async def llm_usage_record(store_id: str, tokens_in: int, tokens_out: int) -> None:
+async def llm_usage_record(store_id: str, tokens_in: int, tokens_out: int) -> dict:
     """
-    UPSERT today's usage row. Never raises — a failure here would lose a
-    counter increment but should never block the user-facing reply that
-    already succeeded.
+    UPSERT today's usage row and return the totals before/after the
+    increment. Callers use the delta to check whether this request just
+    crossed a budget threshold (80/90/100%) so they can fire an alert
+    exactly once per crossing instead of on every subsequent request.
+
+    Never raises — a failure here would lose a counter increment but
+    should never block the user-facing reply that already succeeded.
+    Returns zeros + delta=(ti+to) on failure so the caller's threshold
+    math still works in the degraded path.
     """
-    if not _pool or not store_id:
-        return
     ti = max(0, int(tokens_in or 0))
     to = max(0, int(tokens_out or 0))
+    if not _pool or not store_id:
+        return {"before": 0, "after": ti + to, "delta": ti + to}
     try:
         async with _pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 """
                 INSERT INTO llm_usage (store_id, usage_date, tokens_in, tokens_out, requests, updated_at)
                 VALUES ($1, (NOW() AT TIME ZONE 'UTC')::date, $2, $3, 1, NOW())
@@ -2048,11 +2054,15 @@ async def llm_usage_record(store_id: str, tokens_in: int, tokens_out: int) -> No
                        tokens_out = llm_usage.tokens_out + EXCLUDED.tokens_out,
                        requests   = llm_usage.requests   + 1,
                        updated_at = NOW()
+                RETURNING (llm_usage.tokens_in + llm_usage.tokens_out) AS after_total
                 """,
                 store_id, ti, to,
             )
+        after = int(row["after_total"]) if row else (ti + to)
+        return {"before": after - (ti + to), "after": after, "delta": ti + to}
     except Exception as e:
         print(f"[db] llm_usage_record({store_id!r}) error: {e}")
+        return {"before": 0, "after": ti + to, "delta": ti + to}
 
 
 async def llm_usage_report(store_id: str, days: int = 7) -> list[dict]:

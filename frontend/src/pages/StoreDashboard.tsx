@@ -17,6 +17,7 @@ const Pricing        = lazy(() => import('./store/Pricing'))
 const Brain          = lazy(() => import('./store/Brain'))
 const Training       = lazy(() => import('./store/Training'))
 const Employees      = lazy(() => import('./store/Employees'))
+const LlmUsage       = lazy(() => import('./store/LlmUsage'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -128,6 +129,15 @@ const NAV_ITEMS: Array<{
     activeBg: 'bg-amber-500/10',
     activeBorder: 'border-r-amber-500',
     roles: ['owner'],
+  },
+  {
+    key: 'llm-usage',
+    label: 'استهلاك الذكاء',
+    icon: ['M13 10V3L4 14h7v7l9-11h-7z'],
+    activeColor: 'text-rose-400',
+    activeBg: 'bg-rose-500/10',
+    activeBorder: 'border-r-rose-500',
+    roles: ['owner', 'manager'],
   },
   {
     key: 'training',
@@ -425,6 +435,7 @@ export default function StoreDashboard() {
               <Route path="pricing"   element={<Pricing   storeId={storeId} />} />
               <Route path="brain"     element={<Brain     storeId={storeId} />} />
               <Route path="training"  element={<Training  storeId={storeId} />} />
+              <Route path="llm-usage" element={<LlmUsage  storeId={storeId} />} />
             </>}
 
             {/* Owner only */}
