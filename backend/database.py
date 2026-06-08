@@ -1709,7 +1709,7 @@ async def outbox_claim_batch(worker_id: str, limit: int = 20) -> list[dict]:
                     WHERE status IN ('pending', 'failed')
                       AND next_attempt_at <= NOW()
                     ORDER BY next_attempt_at
-                    LIMIT $2
+                    LIMIT $1
                     FOR UPDATE SKIP LOCKED
                 )
                 UPDATE outbox o
@@ -1719,7 +1719,7 @@ async def outbox_claim_batch(worker_id: str, limit: int = 20) -> list[dict]:
                  WHERE o.id = cte.id
               RETURNING o.id, o.kind, o.store_id, o.payload, o.attempts
                 """,
-                worker_id, limit,
+                limit,
             )
         return [
             {
