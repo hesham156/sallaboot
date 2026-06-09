@@ -308,15 +308,16 @@ async def update_notification_settings(store_id: str, req: NotificationSettingsR
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     cfg = dict(sm.get_ai_config(store_id) or {})
+    email = (req.email or req.email_address or "").strip()
     cfg.update({
         "notify_email_enabled":   bool(req.email_enabled),
-        "notify_email":           (req.email or "").strip(),
+        "notify_email":           email,
         "notify_webhook_enabled": bool(req.webhook_enabled),
         "notify_webhook_url":     (req.webhook_url or "").strip(),
-        "notify_new_conv":        bool(req.notify_new_conv),
-        "notify_low_rating":      bool(req.notify_low_rating),
+        "notify_new_conv":        bool(req.notify_new_conv or req.on_new_conversation),
+        "notify_low_rating":      bool(req.notify_low_rating or req.on_low_rating),
         "notify_llm_budget":      bool(req.notify_llm_budget),
-        "notify_abandoned_cart":  bool(req.notify_abandoned_cart),
+        "notify_abandoned_cart":  bool(req.notify_abandoned_cart or req.on_abandoned_cart),
     })
     sm.set_ai_config(store_id, cfg)
     tokens = sm.get_store_info(store_id)

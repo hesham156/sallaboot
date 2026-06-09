@@ -103,11 +103,17 @@ class TrainingTextRequest(BaseModel):
 
 class NotificationSettingsRequest(BaseModel):
     email_enabled:       bool  = False
-    email_address:       str   = ""
+    email:               str   = ""   # alias used by frontend
+    email_address:       str   = ""   # legacy alias
+    webhook_enabled:     bool  = False
     webhook_url:         str   = ""
-    on_new_conversation: bool  = True
-    on_abandoned_cart:   bool  = True
-    on_low_rating:       bool  = True
+    notify_new_conv:     bool  = True
+    notify_low_rating:   bool  = True
+    notify_llm_budget:   bool  = True
+    notify_abandoned_cart: bool = True
+    on_new_conversation: bool  = True   # legacy alias
+    on_abandoned_cart:   bool  = True   # legacy alias
+    on_low_rating:       bool  = True   # legacy alias
     quiet_hours_enabled: bool  = False
     quiet_hours_start:   int   = 22
     quiet_hours_end:     int   = 8
