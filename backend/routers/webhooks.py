@@ -488,6 +488,27 @@ async def _handle_abandoned_cart(merchant_id: str, data: dict):
         "cart_total":    f"{notification['total']} {notification['currency']}",
     }))
 
+    # WhatsApp reminder to the customer
+    phone = _extract_phone(customer) or notification["customer_phone"]
+    if phone and phone != "—":
+        cfg        = sm.get_ai_config(store_id) or {}
+        store_info = sm.get_store_info(store_id) or {}
+        store_name = store_info.get("store_name", "متجرنا")
+        name       = customer.get("name", "").strip() or "عزيزي العميل"
+        total_str  = f"{notification['total']} {notification['currency']}"
+        checkout   = notification["checkout_url"]
+
+        msg = (
+            f"مرحباً {name} 👋\n"
+            f"لاحظنا أنك تركت سلة التسوق في {store_name} بدون إتمام الطلب.\n\n"
+            f"إجمالي سلتك: *{total_str}*\n"
+        )
+        if checkout:
+            msg += f"\nأكمل طلبك الآن: {checkout}"
+        msg += "\n\nنحن هنا لمساعدتك إذا كان لديك أي استفسار 😊"
+
+        asyncio.create_task(_wa_send(store_id, cfg, phone, msg))
+
 
 async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:
     """
