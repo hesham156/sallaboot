@@ -199,7 +199,12 @@ async def _handle_product_event(event: str, merchant_id: str, data: dict):
     """
     product.* — incremental cache patch instead of full re-sync. Resets
     the per-store agent so the updated catalogue is picked up next chat.
+    product.review.added → sends a thank-you WhatsApp message to the reviewer.
     """
+    if event == "product.review.added":
+        await _handle_review_event(event, merchant_id, data)
+        return
+
     from store_sync import patch_product_in_cache
 
     store_id   = merchant_id or "default"
@@ -217,10 +222,7 @@ async def _handle_product_event(event: str, merchant_id: str, data: dict):
 
 
 async def _handle_order_event(event: str, merchant_id: str, data: dict):
-    """
-    order.* — logs the event with key fields. Could be extended to send
-    admin notifications or update the ROI ledger.
-    """
+    """order.* — logs + sends WhatsApp notifications to the customer."""
     store_id    = merchant_id or "default"
     order_id    = str(data.get("id", ""))
     order_ref   = str(data.get("reference_id", ""))
@@ -234,12 +236,210 @@ async def _handle_order_event(event: str, merchant_id: str, data: dict):
     _log_event(store_id, event, "ok", detail)
     print(f"[webhook] {event!r} — {detail}")
 
+    cfg = sm.get_ai_config(store_id) or {}
+
+    if event == "order.created":
+        await _wa_order_created(store_id, cfg, data, order_ref, total_amt, currency)
+    elif event in ("order.status.updated", "order.updated"):
+        await _wa_order_status(store_id, cfg, data, order_ref, status_name)
+    elif event in ("order.invoice.created", "invoice.created"):
+        await _wa_invoice_created(store_id, cfg, data, order_ref)
+
+
+async def _wa_order_created(store_id: str, cfg: dict, data: dict,
+                             order_ref: str, total: str, currency: str):
+    """تأكيد الطلب الجديد للعميل عبر واتساب."""
+    phone = _extract_phone(data.get("customer") or data)
+    if not phone:
+        return
+    customer = data.get("customer") or {}
+    name = customer.get("name", "") or _extract_name(customer) or "عزيزي العميل"
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "متجرنا")
+    msg = (
+        f"أهلاً {name} 😊\n"
+        f"تم استلام طلبك بنجاح في {store_name}!\n\n"
+        f"📦 رقم الطلب: #{order_ref}\n"
+        f"💰 الإجمالي: {total} {currency}\n\n"
+        f"سنُعلمك فور تجهيز طلبك وإرساله. شكراً لثقتك بنا! 🌟"
+    )
+    await _wa_send(store_id, cfg, phone, msg)
+
+
+async def _wa_order_status(store_id: str, cfg: dict, data: dict,
+                            order_ref: str, status_name: str):
+    """إشعار تحديث حالة الطلب للعميل."""
+    phone = _extract_phone(data.get("customer") or data)
+    if not phone or not status_name:
+        return
+    customer = data.get("customer") or {}
+    name = customer.get("name", "") or _extract_name(customer) or "عزيزي العميل"
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "متجرنا")
+    msg = (
+        f"أهلاً {name} 📬\n"
+        f"تحديث على طلبك #{order_ref} في {store_name}:\n\n"
+        f"الحالة الجديدة: *{status_name}*\n\n"
+        f"للاستفسار تواصل معنا في أي وقت. 😊"
+    )
+    await _wa_send(store_id, cfg, phone, msg)
+
+
+async def _wa_invoice_created(store_id: str, cfg: dict, data: dict, order_ref: str):
+    """إشعار إنشاء الفاتورة للعميل."""
+    phone = _extract_phone(data.get("customer") or data)
+    if not phone:
+        return
+    customer = data.get("customer") or {}
+    name = customer.get("name", "") or _extract_name(customer) or "عزيزي العميل"
+    invoice_url = data.get("invoice_url") or data.get("url", "")
+    store_info  = sm.get_store_info(store_id) or {}
+    store_name  = store_info.get("store_name", "متجرنا")
+    msg = (
+        f"أهلاً {name} 🧾\n"
+        f"تم إنشاء فاتورتك للطلب #{order_ref} في {store_name}.\n"
+    )
+    if invoice_url:
+        msg += f"\nيمكنك تحميل الفاتورة من هنا:\n{invoice_url}"
+    await _wa_send(store_id, cfg, phone, msg)
+
 
 async def _handle_customer_event(event: str, merchant_id: str, data: dict):
     store_id    = merchant_id or "default"
     customer_id = str(data.get("id", ""))
     _log_event(store_id, event, "ok", f"customer_id={customer_id}")
     print(f"[webhook] {event!r} customer={customer_id} store={store_id}")
+
+    if event == "customer.created":
+        await _wa_customer_welcome(store_id, data)
+
+
+async def _wa_customer_welcome(store_id: str, data: dict):
+    """Send a welcome WhatsApp message to a newly registered customer."""
+    phone = _extract_phone(data)
+    if not phone:
+        return
+    first  = (data.get("first_name") or "").strip()
+    last   = (data.get("last_name")  or "").strip()
+    name   = (first + " " + last).strip() or data.get("name", "عزيزي العميل")
+    cfg    = sm.get_ai_config(store_id) or {}
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "متجرنا")
+    msg = (
+        f"مرحباً {name} 👋\n"
+        f"أهلاً وسهلاً بك في {store_name}!\n"
+        f"يسعدنا انضمامك إلينا. إذا احتجت أي مساعدة في طلباتك أو منتجاتنا، "
+        f"فريقنا دائماً في خدمتك. 🌟"
+    )
+    await _wa_send(store_id, cfg, phone, msg)
+
+
+async def _handle_shipment_event(event: str, merchant_id: str, data: dict):
+    """shipment.created — يُعلم العميل برقم التتبع وشركة الشحن."""
+    store_id = merchant_id or "default"
+    shipment_id = str(data.get("id", ""))
+    tracking    = data.get("tracking_number") or data.get("tracking", "")
+    company     = (data.get("company") or {}).get("name", "") if isinstance(data.get("company"), dict) else str(data.get("company") or "")
+    order_id    = str(data.get("order_id", "") or (data.get("order") or {}).get("id", ""))
+    order_ref   = str((data.get("order") or {}).get("reference_id", order_id))
+
+    _log_event(store_id, event, "ok",
+               f"shipment={shipment_id}  tracking={tracking}  company={company}  order={order_ref}")
+    print(f"[webhook] {event!r} — shipment={shipment_id} order={order_ref} store={store_id}")
+
+    cfg      = sm.get_ai_config(store_id) or {}
+    customer = data.get("customer") or (data.get("order") or {}).get("customer") or {}
+    phone    = _extract_phone(customer)
+    if not phone:
+        return
+    name       = customer.get("name", "") or _extract_name(customer) or "عزيزي العميل"
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "متجرنا")
+
+    msg = (
+        f"أهلاً {name} 🚚\n"
+        f"تم شحن طلبك #{order_ref} من {store_name}!\n\n"
+    )
+    if company:
+        msg += f"شركة الشحن: {company}\n"
+    if tracking:
+        msg += f"رقم التتبع: *{tracking}*\n"
+    msg += "\nيمكنك تتبع شحنتك للاطلاع على موعد التسليم. 📦"
+    await _wa_send(store_id, cfg, phone, msg)
+
+
+async def _handle_review_event(event: str, merchant_id: str, data: dict):
+    """product.review.added — شكر العميل على تقييمه."""
+    store_id   = merchant_id or "default"
+    review_id  = str(data.get("id", ""))
+    rating     = data.get("rating", "")
+    product    = (data.get("product") or {}).get("name", "") if isinstance(data.get("product"), dict) else ""
+    customer   = data.get("customer") or {}
+
+    _log_event(store_id, event, "ok",
+               f"review={review_id}  rating={rating}  product={product}")
+    print(f"[webhook] {event!r} — review={review_id} rating={rating} store={store_id}")
+
+    cfg   = sm.get_ai_config(store_id) or {}
+    phone = _extract_phone(customer)
+    if not phone:
+        return
+    name       = customer.get("name", "") or _extract_name(customer) or "عزيزي العميل"
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "متجرنا")
+
+    stars = "⭐" * int(rating) if str(rating).isdigit() else ""
+    msg = (
+        f"شكراً جزيلاً {name}! {stars}\n"
+        f"نقدر كثيراً وقتك في تقييم تجربتك مع {store_name}.\n"
+    )
+    if product:
+        msg += f"تقييمك لـ \"{product}\" يساعدنا على التحسين المستمر. 🙏"
+    await _wa_send(store_id, cfg, phone, msg)
+
+
+# ── WhatsApp shared helpers ───────────────────────────────────────────────────
+
+def _extract_phone(data: dict) -> str:
+    """
+    Extract a dialable phone number from a Salla customer/order dict.
+    Salla sends mobile_code (+966) + mobile (5xxxxxxxx) separately.
+    Falls back to phone / mobile fields as-is.
+    """
+    if not data:
+        return ""
+    mobile_code = str(data.get("mobile_code") or "").strip().lstrip("+")
+    mobile      = str(data.get("mobile")      or "").strip()
+    if mobile_code and mobile:
+        return f"+{mobile_code}{mobile}"
+    phone = str(data.get("phone") or data.get("mobile") or "").strip()
+    # Normalize Saudi numbers without country code
+    if phone.startswith("05") and len(phone) == 10:
+        phone = "+966" + phone[1:]
+    return phone
+
+
+def _extract_name(data: dict) -> str:
+    first = (data.get("first_name") or "").strip()
+    last  = (data.get("last_name")  or "").strip()
+    return (first + " " + last).strip()
+
+
+async def _wa_send(store_id: str, cfg: dict, phone: str, text: str) -> None:
+    """Send a WhatsApp text if the store has WhatsApp configured."""
+    if not phone:
+        return
+    token    = (cfg.get("whatsapp_token")    or "").strip()
+    phone_id = (cfg.get("whatsapp_phone_id") or "").strip()
+    enabled  = bool(cfg.get("whatsapp_enabled"))
+    if not (token and phone_id and enabled):
+        return
+    import whatsapp as wa
+    try:
+        await wa.send_text(token, phone_id, phone, text)
+        print(f"[webhook] WhatsApp sent to {phone} for store {store_id!r}")
+    except Exception as exc:
+        print(f"[webhook] WhatsApp send failed for {phone}: {exc}")
 
 
 async def _handle_abandoned_cart(merchant_id: str, data: dict):
@@ -317,6 +517,9 @@ async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:
         return
     if event == "abandoned.cart":
         await _handle_abandoned_cart(merchant_id, data)
+        return
+    if event.startswith("shipment."):
+        await _handle_shipment_event(event, merchant_id, data)
         return
     if event.startswith("app."):
         await _handle_app_lifecycle(event, merchant_id, data)

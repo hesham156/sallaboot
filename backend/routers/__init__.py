@@ -11,6 +11,6 @@ Conventions:
     remain byte-identical to what was there before so existing widgets
     + the React admin SPA don't break.
   • Routers import from models, auth, database, store_manager, etc — but
-    NOT from each other. Cross-router helpers live in main.py or a
-    future services/ package.
+    NOT from each other (except deps.py which is the shared helpers module).
+  • Cross-router constants/helpers live in routers/deps.py.
 """
