@@ -1780,7 +1780,7 @@ async def store_conversations(
     Response: {total: int, conversations: [...]}
     """
     await cs.get_all_conversations_for_store(store_id)
-    return cs.summary_list(store_id, limit=limit, offset=offset)
+    return await cs.summary_list(store_id, limit=limit, offset=offset)
 
 
 # ── Super-admin: ALL conversations across every store (debug / orphan hunt) ──
@@ -1801,16 +1801,15 @@ async def all_conversations_superadmin(
         raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
 
     # summary_list(store_id=None) returns conversations from every store
-    base = cs.summary_list(store_id=None, limit=limit, offset=offset)
+    # — and now includes store_id in each row (DB-backed since Phase 3).
+    base = await cs.summary_list(store_id=None, limit=limit, offset=offset)
 
-    # Enrich each summary with the actual store_id stored in the conversation
-    all_convs = cs.all_conversations()
+    # Add the is_orphan flag — stores whose id isn't in the live
+    # registry are "orphan" (uninstalled but conversations remain).
     registered_ids = {s["store_id"] for s in sm.list_stores()}
     for s in base.get("conversations", []):
-        conv = all_convs.get(s["session_id"], {})
-        sid  = conv.get("store_id", "default")
-        s["store_id"]   = sid
-        s["is_orphan"]  = (sid == "default") or (sid not in registered_ids)
+        sid = s.get("store_id", "default")
+        s["is_orphan"] = (sid == "default") or (sid not in registered_ids)
     return base
 
 
@@ -1847,7 +1846,7 @@ async def store_conversation_detail(
         )
 
     await cs.restore_to_memory(session_id)
-    cs.mark_admin_read(session_id)
+    await cs.mark_admin_read(session_id)
     conv = cs.all_conversations().get(session_id)
     if not conv:
         raise HTTPException(404, "المحادثة غير موجودة")
@@ -1881,7 +1880,7 @@ async def store_admin_reply(
             cs.mark_dirty(session_id)
             await cs.flush(session_id)
 
-    cs.mark_admin_read(session_id)
+    await cs.mark_admin_read(session_id)
     # Learn from this correction in the background: the admin's answer is the
     # right response, captured as a pending lesson for review. Fire-and-forget
     # so it never slows the reply.
@@ -1911,8 +1910,8 @@ async def store_admin_reply(
 @app.post("/admin/{store_id}/conversations/{session_id}/takeover")
 async def store_takeover(store_id: str, session_id: str):
     await cs.restore_to_memory(session_id)
-    cs.set_session_bot(session_id, False)
-    cs.mark_admin_read(session_id)
+    await cs.set_session_bot(session_id, False)
+    await cs.mark_admin_read(session_id)
     # Persist the bot_enabled change so it survives restart
     await cs.flush(session_id)
     # Push to widget — it shows the "human took over" banner without polling.
@@ -1931,7 +1930,7 @@ async def store_takeover(store_id: str, session_id: str):
 @app.post("/admin/{store_id}/conversations/{session_id}/handback")
 async def store_handback(store_id: str, session_id: str):
     await cs.restore_to_memory(session_id)
-    cs.set_session_bot(session_id, True)
+    await cs.set_session_bot(session_id, True)
     await cs.add_message(session_id, "admin",
                    "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
                    store_id)
@@ -1994,16 +1993,24 @@ async def store_end_conversation(
         conv["messages"][-1]["employee_name"] = agent_name
         if emp:
             conv["messages"][-1]["employee_id"] = emp.get("id")
-        # Also tag the pending-for-widget entry that add_message just queued
-        if conv.get("pending_for_widget"):
-            conv["pending_for_widget"][-1]["employee_name"] = agent_name
+        # Enqueue an additional widget_outbox row carrying the employee
+        # name — add_message already enqueued one without it (DB-backed
+        # queue is append-only; we don't mutate the previous row).
+        # The widget renders the latest by ts, so the labelled one wins.
+        cs.enqueue_widget_message(session_id, {
+            "role":          "admin",
+            "content":       farewell,
+            "ts":            conv["messages"][-1]["ts"],
+            "employee_name": agent_name,
+        })
 
     # 2. Bot thank-you handoff
     thanks_line = f"شكراً لتواصلكم مع {store_name} — {bot_name} هنا إذا احتجتم أي مساعدة لاحقاً."
     await cs.add_message(session_id, "assistant", thanks_line, store_id)
-    # add_message only queues admin role for the widget — manually queue this
-    # bot follow-up so the widget polls it and renders it immediately.
-    conv["pending_for_widget"].append({
+    # add_message only enqueues admin-role rows for the widget; enqueue
+    # this bot follow-up explicitly so the widget renders it on the
+    # next /chat/stream flush-on-connect or via the live NOTIFY path.
+    cs.enqueue_widget_message(session_id, {
         "role":    "bot",
         "content": thanks_line,
         "ts":      conv["messages"][-1]["ts"],
@@ -2031,8 +2038,8 @@ async def store_end_conversation(
         }
         # Add meta to the persisted message
         conv["messages"][-1]["meta"] = csat_meta
-        # And queue for widget polling
-        conv["pending_for_widget"].append({
+        # And enqueue for widget delivery (durable, cross-replica).
+        cs.enqueue_widget_message(session_id, {
             "role":    "bot",
             "content": question,
             "ts":      conv["messages"][-1]["ts"],
@@ -2040,7 +2047,7 @@ async def store_end_conversation(
         })
 
     # 4. Hand back to the bot so the next customer message is auto-handled.
-    cs.set_session_bot(session_id, True)
+    await cs.set_session_bot(session_id, True)
     conv["ended_at"] = _dt.datetime.utcnow().isoformat()
     if agent_name:
         conv["ended_by"] = {"id": (emp or {}).get("id"), "name": agent_name}
@@ -2791,7 +2798,7 @@ async def chat(req: ChatRequest, request: Request):
             # First time seeing this customer in this session — fetch their
             # full profile from Salla and persist
             customer_data = await _fetch_salla_customer(store_id, raw_cid, req.customer_name)
-            cs.link_customer(session_id, raw_cid, customer_data)
+            await cs.link_customer(session_id, raw_cid, customer_data)
             await cs.flush(session_id)
 
     bot_on     = cs.is_bot_enabled(session_id)
@@ -2978,7 +2985,7 @@ async def chat(req: ChatRequest, request: Request):
                         })
 
     # Pick up any rich UI component set by the agent tools this turn
-    component  = cs.pop_last_component(session_id)
+    component  = await cs.pop_last_component(session_id)
     cart_count = len(cs.get_cart(session_id))
 
     # ── Fire new-conversation notification (first message only) ──────────────
@@ -3066,7 +3073,7 @@ async def chat_poll(session_id: str):
     text/event-stream, very old browsers).
     """
     await cs.restore_to_memory(session_id)
-    pending = cs.pop_pending_for_widget(session_id)
+    pending = await cs.pop_pending_for_widget(session_id)
     bot_on  = cs.is_bot_enabled(session_id)
     return {"messages": pending, "bot_enabled": bot_on}
 
@@ -3098,33 +3105,74 @@ async def chat_poll(session_id: str):
 import secrets as _secrets
 import time as _stream_time
 
-# ticket → (store_id, expires_at_unix). 5-min TTL; lazy cleanup on read.
-_STREAM_TICKETS: dict[str, tuple[str, float]] = {}
+# Stateless HMAC-signed tickets so any web replica can validate without a
+# shared in-memory store. Previously this was an in-process dict, which
+# silently broke whenever the EventSource reconnected to a different
+# replica than the one that issued the ticket.
+#
+# Format:  "<store_id>:<exp_unix>:<nonce>:<sig>"
+#   • store_id    — binds the ticket to a single store; prevents reuse
+#                   across stores even with a leaked sig.
+#   • exp_unix    — integer seconds since epoch; verified on every read.
+#   • nonce       — 12 random url-safe bytes; makes each ticket unique so
+#                   logs / telemetry can attribute connections, and so a
+#                   future single-use enforcement (via Redis SETNX) has
+#                   something to key on.
+#   • sig         — HMAC-SHA256(ADMIN_SECRET, "<store_id>:<exp>:<nonce>")
+#                   truncated to 16 hex chars (96 bits, enough for a
+#                   5-min-TTL ticket).
+#
+# Trade-off vs. the old design: tickets are NO LONGER single-use. With a
+# 5-min TTL and same-store binding this is acceptable. Re-introduce
+# single-use only if a concrete abuse case appears, and back it with
+# Redis (any per-instance dict re-introduces the original bug).
 _TICKET_TTL_SECONDS = 300
+_TICKET_SIG_LEN     = 16   # hex chars → 64 bits; bumped to 96 bits would still fit
+
+
+def _stream_ticket_sig(payload: str) -> str:
+    """HMAC the canonical ticket payload with the same key that signs admin tokens."""
+    return hmac.new(
+        _auth.ADMIN_SECRET.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()[:_TICKET_SIG_LEN]
 
 
 def _issue_stream_ticket(store_id: str) -> str:
-    """Generate a single-use ticket bound to a store_id, with TTL."""
-    # GC expired tickets opportunistically — keeps the dict small.
-    now = _stream_time.time()
-    expired = [t for t, (_, exp) in _STREAM_TICKETS.items() if exp < now]
-    for t in expired:
-        _STREAM_TICKETS.pop(t, None)
+    """
+    Issue a short-lived HMAC-signed ticket bound to `store_id`.
 
-    tok = _secrets.token_urlsafe(24)
-    _STREAM_TICKETS[tok] = (store_id, now + _TICKET_TTL_SECONDS)
-    return tok
+    Stateless: any web replica can verify without coordination. The TTL
+    is 5 minutes — long enough for the SPA to round-trip POST → SSE open,
+    short enough that a leaked ticket is useless quickly.
+    """
+    exp     = int(_stream_time.time()) + _TICKET_TTL_SECONDS
+    nonce   = _secrets.token_urlsafe(9)   # 12 url-safe chars, no padding
+    payload = f"{store_id}:{exp}:{nonce}"
+    sig     = _stream_ticket_sig(payload)
+    return f"{payload}:{sig}"
 
 
 def _consume_stream_ticket(ticket: str, store_id: str) -> bool:
-    """Validate a ticket and remove it. Single-use."""
-    entry = _STREAM_TICKETS.pop(ticket, None)
-    if entry is None:
+    """
+    Verify a ticket is well-formed, unexpired, store-bound, and signed by
+    us. Returns True on success.
+
+    Idempotent (no single-use enforcement); see the comment on
+    _TICKET_TTL_SECONDS for the rationale.
+    """
+    if not ticket or ticket.count(":") != 3:
         return False
-    bound_store, exp = entry
-    if exp < _stream_time.time():
+    try:
+        bound_store, exp_str, nonce, sig = ticket.split(":", 3)
+        exp = int(exp_str)
+    except (ValueError, TypeError):
         return False
-    return bound_store == store_id
+    if bound_store != store_id:
+        return False
+    if exp < int(_stream_time.time()):
+        return False
+    expected = _stream_ticket_sig(f"{bound_store}:{exp}:{nonce}")
+    return hmac.compare_digest(expected, sig)
 
 
 @app.post("/admin/{store_id}/stream/ticket")
@@ -3234,11 +3282,12 @@ async def chat_stream(session_id: str):
     async def event_gen():
         yield _format_sse("connected", {"session_id": session_id})
         # On reconnect, flush any messages that landed while the client
-        # was disconnected. This is the bridge between Phase 1's
-        # pending_for_widget queue and the new SSE delivery.
+        # was disconnected. Reads from widget_outbox (DB-backed) so a
+        # reconnect to a different web replica still sees the backlog
+        # produced by the replica that handled the admin reply.
         try:
             await cs.restore_to_memory(session_id)
-            pending = cs.pop_pending_for_widget(session_id)
+            pending = await cs.pop_pending_for_widget(session_id)
             for msg in pending:
                 yield _format_sse("admin_message", msg)
         except Exception as exc:

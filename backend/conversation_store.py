@@ -1,6 +1,45 @@
 """
 Central conversation store.
-Shared between the chat agent, admin endpoints, and widget polling.
+
+Phase 3 — task-scoped cache (no cross-replica state)
+─────────────────────────────────────────────────────
+Previously the module exposed a single process-wide `_conversations` dict.
+That dict survived across requests, drainers, and any other asyncio task,
+so two web replicas reading the same `session_id` saw *different*
+snapshots until the periodic flusher reconciled them. Specifically:
+
+  • `is_bot_enabled`, `get_cart`, `summary_list`, `pop_last_component`
+    returned data from the writer-replica's memory, blind to a state
+    change that happened on the other replica seconds ago.
+  • Fire-and-forget `mark_dirty()` meant a mutation could sit unflushed
+    in one process while another process answered a request from a
+    stale read.
+
+The fix: the cache is now a `contextvars.ContextVar`, populated per
+asyncio task. Each FastAPI request runs in its own task, so each request
+gets its own empty cache that's populated on demand via
+`restore_to_memory()` and discarded when the task ends. The DB is the
+*only* source of cross-task / cross-replica state.
+
+Every mutation function (cart_*, set_customer_info, link_customer,
+set_last_component, set_session_bot, mark_admin_read,
+escalate_session, clear_escalation) is now `async` and **awaits** a full
+`db.save_conversation` before returning. That makes the next request on
+any replica see the committed write.
+
+`mark_dirty()` remains as a deprecated no-op so legacy call sites don't
+break during the migration window — mutations are persisted inline, so
+the dirty_at column is effectively unused going forward. `flush_dirty()`
+also stays as a safety net for any pre-Phase-3 row that still carries
+a dirty_at value from before this deploy.
+
+Reads (get_cart, get_customer_info, is_bot_enabled, get_groq_history,
+pop_last_component, get_escalation, has_unread_user_messages) remain
+synchronous. Their contract is: callers MUST have awaited
+`restore_to_memory(session_id)` (or another function that does) earlier
+in the same task. Without that prelude the cache is empty and the
+function returns its zero value. Every endpoint that calls these
+already follows the pattern.
 
 Roles:
   user      — message from the store visitor
@@ -8,47 +47,95 @@ Roles:
   admin     — manual reply from the store admin
 
 Bot can be toggled:
-  - Globally (affects all sessions)
-  - Per-session (admin took over a specific chat)
-
-Storage:
-  - In-memory _conversations dict (primary read/write path)
-  - PostgreSQL via database.py (write-through; loaded on startup)
+  - Globally (affects all sessions; DB-persisted in app_settings)
+  - Per-store (DB-persisted in stores.tokens.bot_enabled)
+  - Per-session (DB-persisted in conversations.data.bot_enabled)
 """
 
+from __future__ import annotations
+
+import contextvars
 import datetime
+
 import database as db
 import realtime as _rt
 
-# ── Bot toggles ────────────────────────────────────────────────────────────────
-# Global toggle: hot-cached in memory but the DB (app_settings table) is the
-# source of truth. Loaded once at startup via load_globals_from_db().
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Global bot toggle (single value, DB is canonical)
+# ─────────────────────────────────────────────────────────────────────────────
+# Loaded once at startup via load_globals_from_db(). Read on the hot
+# chat path so we keep a tiny in-process cache; writes go through
+# set_bot_globally which persists.
+
 _bot_globally_enabled: bool = True
 
-# ── Conversations dict: session_id → conv dict ─────────────────────────────────
-# Hot per-process cache. Each FastAPI worker has its own copy. The DB is the
-# source of truth: every flush goes through database.save_conversation, and
-# the periodic flusher reads from conversations.dirty_at (a column we added
-# in Phase 1) rather than a process-local set. This is what makes
-# horizontal scaling safe — instance A's mark_dirty is visible to instance B.
-_conversations: dict[str, dict] = {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task-scoped conversations cache
+# ─────────────────────────────────────────────────────────────────────────────
+# ContextVar gives every asyncio task its own dict. asyncio.create_task
+# copies the parent context, so a request handler and any background
+# task it spawns share the cache — that's the right scope (they're
+# operating on behalf of the same user action).
+#
+# Background loops spawned at startup (drainers, periodic) live in
+# their own tasks → fresh cache each. The cache never accumulates
+# data from "the wrong tenant" or "the wrong request".
+
+_conversations: contextvars.ContextVar[dict[str, dict] | None] = contextvars.ContextVar(
+    "_conversations", default=None
+)
 
 
-def mark_dirty(session_id: str):
+def _cache() -> dict[str, dict]:
     """
-    Mark a session as needing a flush. Persisted to the DB (sets
-    conversations.dirty_at) so the periodic flusher across all instances
-    can pick it up, not just the one that did the mutation.
-
-    The DB write is fire-and-forget — losing a dirty mark is acceptable
-    because the next mutation re-sets it, and the next add_message already
-    awaits a full save.
+    Return the current task's conversations cache, lazily creating
+    one if this is the first access in this task. The cache is a
+    plain dict; mutations to its values are visible to subsequent
+    reads inside the same task and invisible everywhere else.
     """
-    db.fire(db.mark_conversation_dirty(session_id))
+    c = _conversations.get()
+    if c is None:
+        c = {}
+        _conversations.set(c)
+    return c
+
+
+def mark_dirty(session_id: str) -> None:  # noqa: ARG001
+    """
+    DEPRECATED — no-op since Phase 3.
+
+    Mutations now await `db.save_conversation` immediately, so there's
+    nothing to flag for later flushing. Kept as an importable name so
+    legacy call sites compile during the migration window. Safe to
+    delete once every caller has been audited.
+    """
+    return None
 
 
 def _now() -> str:
     return datetime.datetime.utcnow().isoformat()
+
+
+async def _persist(conv: dict) -> None:
+    """
+    Inline persist used by every mutation helper. Awaits the DB write,
+    clears any leftover dirty_at flag from before Phase 3. Never raises:
+    failures are logged so a flaky DB doesn't break the chat path. The
+    caller has already mutated the cache copy; if the DB write fails,
+    the cache and DB diverge until the next successful write — same
+    failure mode as the legacy mark_dirty path, but loud.
+    """
+    if not db.available():
+        return
+    sid       = conv["session_id"]
+    store_id  = conv.get("store_id", "default")
+    try:
+        await db.save_conversation(sid, store_id, conv)
+        await db.clear_conversation_dirty([sid])
+    except Exception as exc:
+        print(f"[conversation_store] ❌ persist {sid!r} failed: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,65 +143,48 @@ def _now() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_or_create(session_id: str, store_id: str = "default") -> dict:
-    if session_id not in _conversations:
-        _conversations[session_id] = {
-            "session_id": session_id,
-            "store_id": store_id,
-            "messages": [],
-            "bot_enabled": True,
-            "created_at": _now(),
-            "last_activity": _now(),
-            "pending_for_widget": [],
-            "last_admin_read": "",
+    """
+    Return the task-local cached conv dict for this session, creating
+    a fresh one if absent. Synchronous because the cache is in-process.
+    Callers that need the *DB* state must have already awaited
+    `restore_to_memory(session_id)` earlier in this task.
+    """
+    cache = _cache()
+    if session_id not in cache:
+        cache[session_id] = {
+            "session_id":         session_id,
+            "store_id":           store_id,
+            "messages":           [],
+            "bot_enabled":        True,
+            "created_at":         _now(),
+            "last_activity":      _now(),
+            # pending_for_widget moved to the widget_outbox DB table
+            # in Phase 2. Old persisted rows that still have the key
+            # are ignored on read; they age out naturally.
+            "last_admin_read":    "",
             # ── Shopping cart ──────────────────────────────────────────
-            "cart": [],             # [{product_id, name, price, currency, image, url, quantity, notes}]
-            "customer_info": {},    # {name, phone, email, city, country, avatar, gender}
-            "salla_customer_id": "", # links the conversation to a logged-in Salla customer
-            "last_component": None, # last structured component for the widget
+            "cart":               [],
+            "customer_info":      {},
+            "salla_customer_id":  "",
+            "last_component":     None,
             # ── Rating ────────────────────────────────────────────────
-            "rating": None,         # 1-5 or None
-            "rating_comment": "",
+            "rating":             None,
+            "rating_comment":     "",
         }
-    return _conversations[session_id]
+    return cache[session_id]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Customer ↔ session lookup
 # ─────────────────────────────────────────────────────────────────────────────
 
-def find_session_by_customer(store_id: str, salla_customer_id: str | int) -> str | None:
-    """
-    Return the most-recent session_id for the given Salla customer in this
-    store, or None. Used by the chat endpoint so a logged-in customer
-    re-opening the widget on a different device picks up their thread
-    instead of starting a new one.
-
-    In-memory scan — fine up to ~10K conversations. Move to a DB index
-    if/when we get past that.
-    """
-    cid = str(salla_customer_id or "").strip()
-    if not cid:
-        return None
-    matches = [
-        (sid, conv) for sid, conv in _conversations.items()
-        if str(conv.get("salla_customer_id", "")) == cid
-        and conv.get("store_id", "default") == store_id
-    ]
-    if not matches:
-        return None
-    matches.sort(key=lambda kv: kv[1].get("last_activity", ""), reverse=True)
-    return matches[0][0]
-
-
 async def find_session_by_customer_db(store_id: str, salla_customer_id: str | int) -> str | None:
     """
-    Same as find_session_by_customer but falls back to the DB when memory
-    misses (e.g. fresh process that hasn't loaded the conversation yet).
-    Returns the newest matching session_id.
+    Return the newest session_id for the given Salla customer in this
+    store, or None. DB-only since Phase 3 — the legacy in-memory scan
+    only saw the current task's cache, which is almost always empty
+    for this lookup case (it's called BEFORE the session is restored).
     """
-    in_mem = find_session_by_customer(store_id, salla_customer_id)
-    if in_mem:
-        return in_mem
     if not db.available():
         return None
     cid = str(salla_customer_id or "").strip()
@@ -126,20 +196,22 @@ async def find_session_by_customer_db(store_id: str, salla_customer_id: str | in
         print(f"[conversation_store] find_session_by_customer_db error: {exc}")
         return None
     if sid:
-        # Warm into memory for next call
+        # Warm into the task-local cache so subsequent reads in this
+        # request don't pay the DB roundtrip again.
         await restore_to_memory(sid)
     return sid
 
 
-def link_customer(session_id: str, salla_customer_id: str | int,
-                  customer_data: dict | None = None) -> None:
+async def link_customer(session_id: str, salla_customer_id: str | int,
+                        customer_data: dict | None = None) -> None:
     """
-    Attach a Salla customer to a conversation. customer_data should be the
-    /customers/{id} response normalised to:
-      {name, phone, email, city, country, avatar, gender, mobile_code}
+    Attach a Salla customer to a conversation. customer_data should be
+    the /customers/{id} response normalised to
+    `{name, phone, email, city, country, avatar, gender, mobile_code}`.
     Anything missing stays missing — never overwrites with empty strings.
+    Persists immediately so the next read on any replica sees the link.
     """
-    conv = _conversations.get(session_id)
+    conv = _cache().get(session_id)
     if not conv:
         return
     cid = str(salla_customer_id or "").strip()
@@ -151,7 +223,7 @@ def link_customer(session_id: str, salla_customer_id: str | int,
             if v:  # non-empty wins
                 info[k] = v
         conv["customer_info"] = info
-    mark_dirty(session_id)
+    await _persist(conv)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -159,11 +231,12 @@ def link_customer(session_id: str, salla_customer_id: str | int,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_cart(session_id: str) -> list:
+    """Read-through from the task-local cache. Caller must have restored."""
     return get_or_create(session_id).get("cart", [])
 
 
-def cart_add(session_id: str, item: dict):
-    """Add or update a product in the cart."""
+async def cart_add(session_id: str, item: dict) -> None:
+    """Add or update a product in the cart. Persists immediately."""
     conv = get_or_create(session_id)
     pid  = str(item.get("product_id", ""))
     for existing in conv["cart"]:
@@ -171,29 +244,29 @@ def cart_add(session_id: str, item: dict):
             existing["quantity"] = existing.get("quantity", 1) + item.get("quantity", 1)
             if item.get("notes"):
                 existing["notes"] = item["notes"]
-            mark_dirty(session_id)
+            await _persist(conv)
             return
     conv["cart"].append(item)
-    mark_dirty(session_id)
+    await _persist(conv)
 
 
-def cart_remove(session_id: str, product_id) -> bool:
-    conv = _conversations.get(session_id)
+async def cart_remove(session_id: str, product_id) -> bool:
+    conv = _cache().get(session_id)
     if not conv:
         return False
     before = len(conv["cart"])
     conv["cart"] = [i for i in conv["cart"] if str(i.get("product_id", "")) != str(product_id)]
     changed = len(conv["cart"]) < before
     if changed:
-        mark_dirty(session_id)
+        await _persist(conv)
     return changed
 
 
-def cart_clear(session_id: str):
-    conv = _conversations.get(session_id)
+async def cart_clear(session_id: str) -> None:
+    conv = _cache().get(session_id)
     if conv:
         conv["cart"] = []
-        mark_dirty(session_id)
+        await _persist(conv)
 
 
 def cart_total(session_id: str) -> float:
@@ -214,29 +287,35 @@ def get_customer_info(session_id: str) -> dict:
     return get_or_create(session_id).get("customer_info", {})
 
 
-def set_customer_info(session_id: str, info: dict):
+async def set_customer_info(session_id: str, info: dict) -> None:
     conv = get_or_create(session_id)
     conv["customer_info"].update({k: v for k, v in info.items() if v})
-    mark_dirty(session_id)
+    await _persist(conv)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Last component (widget rich UI state)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def set_last_component(session_id: str, component):
+async def set_last_component(session_id: str, component) -> None:
     conv = get_or_create(session_id)
     conv["last_component"] = component
-    mark_dirty(session_id)
+    await _persist(conv)
 
 
-def pop_last_component(session_id: str):
-    """Return and clear the last component."""
-    conv = _conversations.get(session_id)
+async def pop_last_component(session_id: str):
+    """
+    Return AND clear the last component. The clear is persisted so a
+    second /chat reply on a different replica doesn't see the same
+    component again.
+    """
+    conv = _cache().get(session_id)
     if not conv:
         return None
     comp = conv.get("last_component")
-    conv["last_component"] = None
+    if comp is not None:
+        conv["last_component"] = None
+        await _persist(conv)
     return comp
 
 
@@ -246,20 +325,22 @@ async def add_message(session_id: str, role: str, content: str, store_id: str = 
 
     role: 'user' | 'assistant' | 'admin'
 
-    store_id resolution: if a non-default store_id is passed and the existing
-    conversation is still tagged with the placeholder "default", upgrade it so
-    the conversation appears in the correct admin dashboard. Without this, a
-    conversation that was first touched by a legacy caller (no store_id) would
-    stay stuck under "default" forever — invisible to every real admin.
+    store_id resolution: if a non-default store_id is passed and the
+    existing conversation is still tagged with the placeholder
+    'default', upgrade it so the conversation appears in the correct
+    admin dashboard. Without this, a conversation that was first
+    touched by a legacy caller (no store_id) would stay stuck under
+    'default' forever — invisible to every real admin.
 
-    Persistence: this function awaits the DB write so messages reliably
-    survive deploys/restarts. Previously db.fire() (fire-and-forget) was
-    used, which silently lost data when the write failed or the server
-    restarted before the background task completed.
+    Persistence: this function awaits the DB write so messages
+    reliably survive deploys/restarts. Realtime NOTIFY fires *after*
+    the commit so SSE subscribers can fetch the full message and find
+    it.
     """
     await restore_to_memory(session_id)
     conv = get_or_create(session_id, store_id)
-    # Upgrade stale "default" tag to the real store_id passed by an explicit caller
+    # Upgrade stale "default" tag to the real store_id passed by an
+    # explicit caller.
     if store_id and store_id != "default" and conv.get("store_id", "default") == "default":
         conv["store_id"] = store_id
 
@@ -267,67 +348,60 @@ async def add_message(session_id: str, role: str, content: str, store_id: str = 
     conv["messages"].append(msg)
     conv["last_activity"] = _now()
     if role == "admin":
-        # Queue for widget polling — keep the legacy {content, ts} keys so
-        # the existing widget code keeps working, plus include role so a
-        # newer widget can branch on it.
-        conv["pending_for_widget"].append({
+        # Durable per-session queue. Replaces the legacy
+        # conv["pending_for_widget"] list which only existed in the
+        # writer replica's memory and disappeared on the way to any
+        # other replica's SSE flush-on-connect. db.fire() — losing a
+        # row here is acceptable in degraded DB mode because the
+        # realtime NOTIFY below still delivers to live SSE consumers;
+        # only the catch-up-on-reconnect path is affected.
+        db.fire(db.widget_outbox_enqueue(session_id, {
             "role":    "admin",
             "content": content,
             "ts":      msg["ts"],
-        })
+        }))
 
-    # AWAIT the DB write — guarantees persistence before returning to caller
-    try:
-        await db.save_conversation(session_id, conv.get("store_id", store_id), conv)
-        # The full conversation is now on disk → clear the dirty flag.
-        await db.clear_conversation_dirty([session_id])
-    except Exception as exc:
-        # Log loudly but don't break the chat flow if DB is temporarily down
-        print(f"[conversation_store] ❌ Failed to persist message for {session_id!r}: {exc}")
+    # AWAIT the DB write — guarantees persistence before returning.
+    await _persist(conv)
 
-    # ── Realtime fanout ──────────────────────────────────────────────────
+    # ── Realtime fanout ─────────────────────────────────────────────
     # Notify any live SSE clients (widget + admin dashboard) that this
-    # session just gained a message. Best-effort: realtime.publish never
-    # raises, just logs. The DB is already the source of truth.
+    # session just gained a message. Best-effort: realtime.publish
+    # never raises, just logs.
     sid_store = conv.get("store_id", store_id)
     payload = {
         "session_id": session_id,
         "store_id":   sid_store,
         "role":       role,
         "ts":         msg["ts"],
-        # Trim the body — full text is queried by the SSE client via the
-        # conversation detail endpoint. NOTIFY payload caps at 8KB so
-        # passing the entire message would break on long ones.
+        # Trim the body — full text is queried by the SSE client via
+        # the conversation detail endpoint. NOTIFY payload caps at 8KB
+        # so passing the entire message would break on long ones.
         "preview":    (content or "")[:200],
     }
-    # Per-session channel — the widget for THIS session listens here so
-    # it gets admin replies and bot toggles in real time.
     await _rt.publish(f"session:{session_id}", f"{role}_message", payload)
-    # Per-store channel — the admin dashboard listens here so all
-    # conversations under this store light up live.
-    await _rt.publish(f"store:{sid_store}", "new_message", payload)
+    await _rt.publish(f"store:{sid_store}",    "new_message",        payload)
 
     return msg
 
 
-# Sliding window of messages sent to the AI per request. 12 messages ≈ 6
-# full user/assistant turns — enough context for a sales conversation
-# (current need, last suggestion, cart, customer info) without re-billing
-# the whole transcript on every reply. Cart and customer state are stored
-# separately (cs.get_cart / cs.get_customer_info), so trimming history
-# does NOT lose them. Full transcript is still persisted in the DB for
-# the admin inbox.
+# Sliding window of messages sent to the AI per request. 12 messages
+# ≈ 6 full user/assistant turns — enough context for a sales
+# conversation (current need, last suggestion, cart, customer info)
+# without re-billing the whole transcript on every reply. Cart and
+# customer state are stored separately (cs.get_cart / cs.get_customer_info),
+# so trimming history does NOT lose them. Full transcript is still
+# persisted in the DB for the admin inbox.
 AI_HISTORY_TURNS = 12
 
 
 def get_groq_history(session_id: str, limit: int = AI_HISTORY_TURNS) -> list:
     """
-    Return message history in Groq/OpenAI/Anthropic format.
-    Only user + assistant messages (admin messages are not sent to the AI).
-    Trimmed to the last `limit` messages so prompt size stays bounded as
-    the conversation grows. Set `limit=0` to disable trimming.
+    Return message history in Groq/OpenAI/Anthropic format from the
+    task-local cache. Caller must have restored.
+    Only user + assistant messages (admin messages are not sent to AI).
     """
-    conv = _conversations.get(session_id, {})
+    conv = _cache().get(session_id, {})
     msgs = [
         {"role": m["role"], "content": m["content"]}
         for m in conv.get("messages", [])
@@ -335,23 +409,34 @@ def get_groq_history(session_id: str, limit: int = AI_HISTORY_TURNS) -> list:
     ]
     if limit and len(msgs) > limit:
         msgs = msgs[-limit:]
-        # Anthropic + Groq tool-use both require the window to START on a
-        # user turn (the model can't reply to its own prior assistant turn
-        # without the user message that triggered it). Drop a leading
-        # assistant message if the slice lands on one.
+        # Anthropic + Groq tool-use both require the window to START
+        # on a user turn (the model can't reply to its own prior
+        # assistant turn without the user message that triggered it).
+        # Drop a leading assistant message if the slice lands on one.
         if msgs and msgs[0]["role"] != "user":
             msgs = msgs[1:]
     return msgs
 
 
-def pop_pending_for_widget(session_id: str) -> list:
-    """Return and clear pending admin messages for the widget."""
-    conv = _conversations.get(session_id)
-    if not conv:
+async def pop_pending_for_widget(session_id: str) -> list:
+    """
+    Return and atomically mark-delivered pending widget messages for
+    this session. DB-backed so any web replica's SSE flush-on-connect
+    sees the backlog produced by any other replica's admin reply.
+    """
+    if not db.available():
         return []
-    pending = list(conv["pending_for_widget"])
-    conv["pending_for_widget"] = []
-    return pending
+    return await db.widget_outbox_claim_pending(session_id, limit=100)
+
+
+def enqueue_widget_message(session_id: str, payload: dict) -> None:
+    """
+    Direct enqueue for messages that DON'T flow through add_message
+    but still need to land in the widget — e.g. the bot follow-up +
+    CSAT survey emitted by /end. Fire-and-forget; same degraded-mode
+    behaviour as add_message's admin branch.
+    """
+    db.fire(db.widget_outbox_enqueue(session_id, payload))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -359,38 +444,39 @@ def pop_pending_for_widget(session_id: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_bot_enabled(session_id: str) -> bool:
-    """Check if bot should respond for this session.
-    Priority: per-session override → per-store toggle → global toggle.
-    Reads from the persisted store tokens, not in-memory state.
+    """
+    Resolution order: per-session override → per-store toggle → global.
+    Per-session is read from the task-local cache (caller must have
+    restored). Per-store reads `stores.tokens.bot_enabled` via
+    store_manager. Global reads the module-cached toggle.
     """
     import store_manager as sm
-    conv = _conversations.get(session_id, {})
-    # per-session override (human takeover)
+    conv = _cache().get(session_id, {})
     if not conv.get("bot_enabled", True):
         return False
-    # per-store toggle (persisted in tokens.bot_enabled)
     store_id = conv.get("store_id", "default")
     if not sm.get_store_info(store_id).get("bot_enabled", True):
         return False
-    # global toggle (persisted in app_settings)
     return _bot_globally_enabled
 
 
-def set_session_bot(session_id: str, enabled: bool):
-    get_or_create(session_id)["bot_enabled"] = enabled
-    mark_dirty(session_id)
+async def set_session_bot(session_id: str, enabled: bool) -> None:
+    conv = get_or_create(session_id)
+    conv["bot_enabled"] = enabled
+    await _persist(conv)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Admin escalation
 # ─────────────────────────────────────────────────────────────────────────────
-# A session is "escalated" when the bot decides the request needs a human
-# (un-priced material, oversized design, custom box, etc.). Escalation:
+# A session is "escalated" when the bot decides the request needs a
+# human (un-priced material, oversized design, custom box, etc.).
+# Escalation:
 #   1. Disables the bot for the session so the admin's reply is final.
 #   2. Records WHY in conv["escalation"] so the admin dashboard can
 #      surface the reason without re-reading the transcript.
-# The admin dashboard already lists sessions where bot_enabled=False, so
-# escalated chats appear in the queue automatically.
+# The admin dashboard already lists sessions where bot_enabled=False,
+# so escalated chats appear in the queue automatically.
 
 VALID_ESCALATION_REASONS = {
     "unpriced_material",     # خامة بلا سعر في الجدول
@@ -405,7 +491,7 @@ VALID_ESCALATION_REASONS = {
 }
 
 
-def escalate_session(
+async def escalate_session(
     session_id: str,
     reason: str,
     details: str = "",
@@ -415,10 +501,10 @@ def escalate_session(
     Hand the session over to the admin.
 
     - `reason` must be one of VALID_ESCALATION_REASONS (else stored as "other").
-    - `details` is what the bot would tell the admin (specs, size, qty, why
-      it can't price). Free-form Arabic text.
-    - `customer_summary` is an optional pre-built one-liner the admin sees
-      in the inbox header ("علب 22×30 سم، 800 حبة، انفربرش، يحتاج تسعير").
+    - `details` is what the bot would tell the admin (specs, size,
+      qty, why it can't price). Free-form Arabic text.
+    - `customer_summary` is an optional pre-built one-liner the admin
+      sees in the inbox header.
 
     Returns the stored escalation dict for the caller to use.
     """
@@ -433,26 +519,26 @@ def escalate_session(
     }
     conv["escalation"]   = escalation
     conv["bot_enabled"]  = False   # admin takeover
-    mark_dirty(session_id)
+    await _persist(conv)
     return escalation
 
 
 def get_escalation(session_id: str) -> dict | None:
     """Return the current escalation dict for the session, or None."""
-    conv = _conversations.get(session_id, {})
+    conv = _cache().get(session_id, {})
     esc = conv.get("escalation")
     if isinstance(esc, dict) and esc.get("reason"):
         return esc
     return None
 
 
-def clear_escalation(session_id: str):
+async def clear_escalation(session_id: str) -> None:
     """Mark the escalation as resolved (admin handled the request)."""
-    conv = _conversations.get(session_id)
+    conv = _cache().get(session_id)
     if conv and isinstance(conv.get("escalation"), dict):
-        conv["escalation"]["resolved"] = True
+        conv["escalation"]["resolved"]    = True
         conv["escalation"]["resolved_at"] = _now()
-        mark_dirty(session_id)
+        await _persist(conv)
 
 
 def get_bot_globally() -> bool:
@@ -471,8 +557,8 @@ async def set_bot_globally(enabled: bool):
 
 async def load_globals_from_db():
     """
-    Restore the global bot toggle from app_settings on startup. Called from
-    main.py's startup_event after db.init() succeeds.
+    Restore the global bot toggle from app_settings on startup. Called
+    from lifecycle.startup after db.init() succeeds.
     """
     global _bot_globally_enabled
     try:
@@ -483,7 +569,9 @@ async def load_globals_from_db():
         print(f"[conversation_store] ⚠️ Failed to load global bot toggle, defaulting to True: {exc}")
 
 
-# ── Per-store bot toggle ───────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-store bot toggle
+# ─────────────────────────────────────────────────────────────────────────────
 
 def get_store_bot(store_id: str) -> bool:
     """Return per-store bot enabled state (defaults to True). Reads from DB-backed tokens."""
@@ -504,16 +592,19 @@ def set_store_bot(store_id: str, enabled: bool):
 # Admin read tracking
 # ─────────────────────────────────────────────────────────────────────────────
 
-def mark_admin_read(session_id: str):
-    conv = _conversations.get(session_id)
+async def mark_admin_read(session_id: str) -> None:
+    conv = _cache().get(session_id)
     if conv:
         conv["last_admin_read"] = _now()
-        mark_dirty(session_id)
+        await _persist(conv)
 
 
 def has_unread_user_messages(session_id: str) -> bool:
-    """True if user sent messages after admin last read."""
-    conv = _conversations.get(session_id, {})
+    """
+    True if user sent messages after admin last read. Reads from the
+    task-local cache.
+    """
+    conv = _cache().get(session_id, {})
     last_read = conv.get("last_admin_read", "")
     for m in reversed(conv.get("messages", [])):
         if m["role"] == "user":
@@ -522,57 +613,46 @@ def has_unread_user_messages(session_id: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Query helpers
+# Rating, flush, restore
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def set_rating(session_id: str, rating: int, comment: str = ""):
-    """
-    Save a customer rating (1-5) for a conversation. Awaits the DB write.
-
-    Important: pulls the session from DB into memory first if it's not
-    already loaded. Without this, ratings submitted after a server restart
-    (when the session hasn't been re-cached yet) would silently disappear
-    because `_conversations.get(session_id)` would return None.
-    """
+    """Save a customer rating (1-5) for a conversation. Awaits the DB write."""
     await restore_to_memory(session_id)
-    conv = _conversations.get(session_id)
+    conv = _cache().get(session_id)
     if not conv:
         print(f"[conversation_store] ⚠️ set_rating: session {session_id!r} not found anywhere (DB + memory)")
         return
     conv["rating"]         = max(1, min(5, int(rating)))
     conv["rating_comment"] = comment
-    try:
-        await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
-    except Exception as exc:
-        print(f"[conversation_store] ❌ Failed to persist rating for {session_id!r}: {exc}")
+    await _persist(conv)
 
 
 async def flush(session_id: str):
     """
-    Persist any pending mutations (cart changes, customer info, last_component,
-    bot_enabled toggles) to the DB. Call after a series of state changes that
-    don't go through add_message — e.g. after a cart-only tool call.
+    Force-save the task-local cached conv to DB. Phase-3 mutations
+    persist inline, so this is mostly a no-op safety net for legacy
+    callers and edge mutations done via direct dict access on the
+    returned `get_or_create()` reference.
     """
-    conv = _conversations.get(session_id)
+    conv = _cache().get(session_id)
     if not conv:
         return
-    try:
-        await db.save_conversation(session_id, conv.get("store_id", "default"), conv)
-        await db.clear_conversation_dirty([session_id])
-    except Exception as exc:
-        print(f"[conversation_store] ❌ Failed to flush {session_id!r}: {exc}")
-
+    await _persist(conv)
 
 
 async def flush_all() -> int:
     """
-    Persist EVERY conversation in memory to the DB.
-    Used on graceful shutdown to guarantee nothing is lost.
+    Persist EVERY conversation currently in this task's cache. Used on
+    graceful shutdown to guarantee nothing is lost. Phase-3 mutations
+    already persist inline, so on a fresh shutdown this is empty —
+    kept for back-compat.
+
     Returns number of conversations saved.
     """
     saved = 0
     flushed_ids: list[str] = []
-    for sid, conv in list(_conversations.items()):
+    for sid, conv in list(_cache().items()):
         try:
             await db.save_conversation(sid, conv.get("store_id", "default"), conv)
             saved += 1
@@ -584,141 +664,159 @@ async def flush_all() -> int:
     return saved
 
 
-
 async def flush_dirty() -> int:
     """
-    Persist sessions flagged dirty in the DB (conversations.dirty_at IS NOT
-    NULL). Called by the periodic background loop every 5 minutes as a
-    safety net for mutations that didn't go through add_message.
+    Clear conversations.dirty_at for any pre-Phase-3 row still carrying
+    the flag. Phase-3 mutations persist inline, so this loop has no
+    real work to do on a freshly migrated DB — it just unflags rows so
+    the periodic loop doesn't spin on them.
 
-    Cross-instance safe: the DB column is shared. The session may have been
-    marked dirty by another instance — we'll still see it. We only flush
-    sessions whose data we have in memory (the DB already has the latest
-    state for the others; clearing their dirty_at is harmless).
+    Cross-instance safe; the dirty_at column is shared but mutations
+    are now atomic per-write.
     """
     sids = await db.fetch_dirty_sessions(limit=200)
     if not sids:
         return 0
-    saved = 0
-    cleared: list[str] = []
-    for sid in sids:
-        conv = _conversations.get(sid)
-        if not conv:
-            # Not in our in-memory cache. Either another instance has it
-            # (and will flush it) or the row already has the freshest data.
-            # Clear the flag either way — leaving it set would loop forever.
-            cleared.append(sid)
-            continue
-        try:
-            await db.save_conversation(sid, conv.get("store_id", "default"), conv)
-            saved += 1
-            cleared.append(sid)
-        except Exception as exc:
-            print(f"[conversation_store] ❌ flush_dirty failed for {sid!r}: {exc}")
-    if cleared:
-        await db.clear_conversation_dirty(cleared)
-    return saved
+    # Phase 3: rows are already at their latest state in DB. Just clear
+    # the flag so the periodic loop converges and stops finding work.
+    await db.clear_conversation_dirty(sids)
+    return len(sids)
 
 
 def all_conversations() -> dict:
-    return _conversations
+    """
+    Return the task-local cache. WARNING: this only sees conversations
+    that the current task has touched (via restore_to_memory,
+    get_or_create, etc). For a cross-task / cross-replica view, use
+    `summary_list()` or `get_all_conversations_for_store()` which read
+    from the DB.
+
+    Kept for back-compat with code that wants to scan recent items
+    inside a single request. Do not use for admin-list / cross-store
+    aggregation.
+    """
+    return _cache()
 
 
 async def restore_to_memory(session_id: str) -> bool:
-    """Restore a conversation from PostgreSQL to memory if it exists and is not already loaded."""
-    if session_id in _conversations:
+    """
+    Load a conversation from PostgreSQL into the task-local cache if
+    not already loaded in this task. Returns True if the conversation
+    is now in cache (loaded or already present), False if it doesn't
+    exist in the DB.
+
+    Idempotent within a task; cheap on cache-hit. Every entry point
+    that intends to read conv state via the sync helpers MUST await
+    this once per session_id at the start of the request.
+    """
+    cache = _cache()
+    if session_id in cache:
         return True
     if db.available():
         data = await db.load_conversation(session_id)
         if data:
-            _conversations[session_id] = data
+            cache[session_id] = data
             return True
     return False
 
 
 async def get_all_conversations_for_store(store_id: str) -> dict[str, dict]:
     """
-    Get all conversations for a specific store, combining database records
-    and active in-memory sessions (in-memory takes priority for active sessions).
+    Return all conversations for a store, DB-backed. Does NOT touch
+    the task-local cache (no warming) — callers are typically admin
+    list views that don't need to mutate.
     """
-    if db.available():
-        rows = await db.load_store_conversations(store_id, limit=2000)
-        for r in rows:
-            sid = r["session_id"]
-            if sid not in _conversations:
-                _conversations[sid] = r["data"]
-
-    return {
-        sid: conv
-        for sid, conv in _conversations.items()
-        if conv.get("store_id", "default") == store_id
-    }
+    if not db.available():
+        return {}
+    rows = await db.load_store_conversations(store_id, limit=2000)
+    return {r["session_id"]: r["data"] for r in rows}
 
 
 async def load_conversations_from_db():
     """
-    Async — restore recent conversations from PostgreSQL on startup.
-    Only called when DB is available; in-memory state takes precedence if
-    the session already exists (shouldn't happen on a cold start).
+    Phase 3 — no-op. Pre-Phase-3 this populated the process-wide
+    cache at startup. With task-scoped caching, eager loading would
+    just fill the startup task's cache (which dies immediately),
+    achieving nothing.
+
+    Kept as an importable name so lifecycle.startup() doesn't break.
+    Sessions are now loaded lazily by `restore_to_memory()` on first
+    access in each request.
     """
-    rows = await db.load_conversations(limit=2000)
-    if not rows:
-        return
-    loaded = 0
-    for row in rows:
-        sid = row["session_id"]
-        if sid in _conversations:
-            continue  # already loaded (shouldn't happen on cold start)
-        data = row["data"]
-        if not data.get("messages"):
-            continue
-        _conversations[sid] = data
-        loaded += 1
-    print(f"[conversation_store] Restored {loaded} conversation(s) from DB")
+    return None
 
 
-def summary_list(
-    store_id: str = None,
+def _summarise_row(sid: str, store_id: str, conv: dict) -> dict:
+    """Shape one DB row into the admin-list summary the SPA expects."""
+    msgs = conv.get("messages") or []
+    last = msgs[-1] if msgs else None
+    user_count = sum(1 for m in msgs if m.get("role") == "user")
+
+    last_read = conv.get("last_admin_read", "")
+    unread = False
+    for m in reversed(msgs):
+        if m.get("role") == "user":
+            unread = (m.get("ts", "") > last_read)
+            break
+
+    cust = conv.get("customer_info") or {}
+    return {
+        "session_id":          sid,
+        # Prefer the conversations.store_id column (canonical), fall
+        # back to data.store_id, fall back to 'default' (orphan).
+        "store_id":            store_id or conv.get("store_id", "default"),
+        "messages_count":      len(msgs),
+        "user_messages_count": user_count,
+        "last_message":        last,
+        "bot_enabled":         conv.get("bot_enabled", True),
+        "last_activity":       conv.get("last_activity", ""),
+        "created_at":          conv.get("created_at", ""),
+        "unread":              unread,
+        "rating":              conv.get("rating"),
+        # ── Customer identity ──
+        "salla_customer_id":   conv.get("salla_customer_id", ""),
+        "customer_name":       cust.get("name", ""),
+        "customer_phone":      cust.get("phone", ""),
+        "customer_email":      cust.get("email", ""),
+        "customer_avatar":     cust.get("avatar", ""),
+    }
+
+
+async def summary_list(
+    store_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
     """
-    Conversation summaries for admin panel list view.
-    Filter by store_id if provided; paginated via limit/offset.
+    Conversation summaries for the admin list view — DB-backed since
+    Phase 3.
+
+    Filter by store_id when provided; paginate via limit/offset. The
+    underlying DB query sorts newest-first via the existing
+    `(store_id, updated_at DESC)` index.
 
     Returns:
         {
-            "total":         int   — total conversations matching the filter,
-            "conversations": list  — slice [offset : offset+limit] sorted newest-first,
+            "total":         int,
+            "conversations": list,
         }
     """
-    result = []
-    for sid, conv in _conversations.items():
-        if store_id and conv.get("store_id", "default") != store_id:
-            continue
-        msgs = conv["messages"]
-        last = msgs[-1] if msgs else None
-        user_count = sum(1 for m in msgs if m["role"] == "user")
-        unread = has_unread_user_messages(sid)
-        cust = conv.get("customer_info") or {}
-        result.append({
-            "session_id":         sid,
-            "messages_count":     len(msgs),
-            "user_messages_count": user_count,
-            "last_message":       last,
-            "bot_enabled":        conv["bot_enabled"],
-            "last_activity":      conv["last_activity"],
-            "created_at":         conv["created_at"],
-            "unread":             unread,
-            "rating":             conv.get("rating"),
-            # ── Customer identity (for admin list view) ──
-            "salla_customer_id":  conv.get("salla_customer_id", ""),
-            "customer_name":      cust.get("name", ""),
-            "customer_phone":     cust.get("phone", ""),
-            "customer_email":     cust.get("email", ""),
-            "customer_avatar":    cust.get("avatar", ""),
-        })
+    if not db.available():
+        return {"total": 0, "conversations": []}
+
+    if store_id:
+        rows = await db.load_store_conversations(store_id, limit=2000)
+    else:
+        rows = await db.load_conversations(limit=2000)
+
+    result = [
+        _summarise_row(r["session_id"], r.get("store_id", ""), r["data"])
+        for r in rows
+    ]
+    # load_store_conversations already orders newest-first;
+    # load_conversations too. Re-sort defensively in case a future
+    # caller changes the order.
     result.sort(key=lambda x: x["last_activity"], reverse=True)
     total = len(result)
-    page  = result[offset : offset + limit] if limit > 0 else result
+    page  = result[offset: offset + limit] if limit > 0 else result
     return {"total": total, "conversations": page}

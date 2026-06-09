@@ -982,7 +982,7 @@ class PrintingAgent:
             if cid:
                 customer = dict(customer)
                 customer["salla_customer_id"] = cid
-                cs.set_customer_info(session_id, customer)
+                await cs.set_customer_info(session_id, customer)
                 await cs.flush(session_id)
                 print(f"[_ensure_salla_customer] using salla_customer_id={cid}")
             else:
@@ -1162,7 +1162,7 @@ class PrintingAgent:
                         if full:
                             cards.append(_product_card(full))
                     if cards:
-                        cs.set_last_component(session_id, {
+                        await cs.set_last_component(session_id, {
                             "type": "product_cards", "products": cards,
                         })
                 return "\n".join(lines)
@@ -1222,7 +1222,7 @@ class PrintingAgent:
 
                 # Store as component for widget
                 if session_id:
-                    cs.set_last_component(session_id, {
+                    await cs.set_last_component(session_id, {
                         "type": "product_cards",
                         "products": [_product_card(p) for p in top],
                     })
@@ -1285,7 +1285,7 @@ class PrintingAgent:
                 image  = prod.get("image", "")
                 url    = prod.get("url", "")
 
-                cs.cart_add(session_id, {
+                await cs.cart_add(session_id, {
                     "product_id": pid,
                     "name":       pname,
                     "quantity":   qty,
@@ -1299,7 +1299,7 @@ class PrintingAgent:
                 cart  = cs.get_cart(session_id)
                 total = cs.cart_total(session_id)
                 # Update component with current cart
-                cs.set_last_component(session_id, {
+                await cs.set_last_component(session_id, {
                     "type":  "cart",
                     "items": cart,
                     "total": f"{total:.2f}",
@@ -1327,7 +1327,7 @@ class PrintingAgent:
                         line += f"\n  📝 {item['notes']}"
                     lines.append(line)
                 lines.append(f"\nالإجمالي: **{total:.2f} {currency}**")
-                cs.set_last_component(session_id, {
+                await cs.set_last_component(session_id, {
                     "type":  "cart",
                     "items": cart,
                     "total": f"{total:.2f}",
@@ -1340,11 +1340,11 @@ class PrintingAgent:
                 if not session_id:
                     return "⚠️ session_id مفقود."
                 pid     = str(inputs["product_id"])
-                removed = cs.cart_remove(session_id, pid)
+                removed = await cs.cart_remove(session_id, pid)
                 if removed:
                     cart  = cs.get_cart(session_id)
                     total = cs.cart_total(session_id)
-                    cs.set_last_component(session_id, {
+                    await cs.set_last_component(session_id, {
                         "type":  "cart",
                         "items": cart,
                         "total": f"{total:.2f}",
@@ -1364,7 +1364,7 @@ class PrintingAgent:
                     "phone": inputs.get("phone", ""),
                     "email": inputs.get("email", ""),
                 }
-                cs.set_customer_info(session_id, info)
+                await cs.set_customer_info(session_id, info)
 
                 # ── Find-or-create the customer in Salla ─────────────────────────
                 # 1) Look up by phone. If found → store salla_customer_id.
@@ -1393,7 +1393,7 @@ class PrintingAgent:
                                 full = f"{c.get('first_name','')} {c.get('last_name','')}".strip()
                                 if full:
                                     enriched["name"] = full
-                            cs.set_customer_info(session_id, enriched)
+                            await cs.set_customer_info(session_id, enriched)
                             print(f"[set_customer_info] ✅ matched existing salla_id={c['id']}")
                         else:
                             # New lead — create the customer in Salla
@@ -1410,7 +1410,7 @@ class PrintingAgent:
                                 if newc.get("id"):
                                     enriched = dict(info)
                                     enriched["salla_customer_id"] = newc["id"]
-                                    cs.set_customer_info(session_id, enriched)
+                                    await cs.set_customer_info(session_id, enriched)
                                     print(f"[set_customer_info] 🆕 created salla customer "
                                           f"id={newc['id']} for session {session_id}")
                             except Exception as ce:
@@ -1517,8 +1517,8 @@ class PrintingAgent:
                                 "currency":  currency,
                                 "order_ref": order_ref,
                             }
-                            cs.set_last_component(session_id, component)
-                            cs.cart_clear(session_id)
+                            await cs.set_last_component(session_id, component)
+                            await cs.cart_clear(session_id)
                             # Persist cleared cart + checkout component before returning
                             # (protects against a crash between here and add_message)
                             await cs.flush(session_id)
@@ -1539,7 +1539,7 @@ class PrintingAgent:
                                 )
                             return reply
                         else:
-                            cs.cart_clear(session_id)
+                            await cs.cart_clear(session_id)
                             await cs.flush(session_id)
                             reply = f"✅ تم إنشاء الطلب رقم #{order_ref}. الإجمالي: {total:.2f} ريال"
                             if item_errors:
@@ -1553,7 +1553,7 @@ class PrintingAgent:
                             f"• {item['name']}: {item.get('url','—')}"
                             for item in cart if item.get("url")
                         )
-                        cs.set_last_component(session_id, {
+                        await cs.set_last_component(session_id, {
                             "type":  "checkout_fallback",
                             "items": cart,
                             "total": f"{total:.2f}",
@@ -1683,7 +1683,7 @@ class PrintingAgent:
                         _amount_to_float(total_str), currency, kind="quote")
 
                     if pay_url:
-                        cs.set_last_component(session_id, {
+                        await cs.set_last_component(session_id, {
                             "type":      "checkout",
                             "url":       pay_url,
                             "total":     total_str,
@@ -1795,7 +1795,7 @@ class PrintingAgent:
                         "email":              existing.get("email") or email,
                         "salla_customer_id":  salla_id,
                     }
-                    cs.set_customer_info(session_id, merged)
+                    await cs.set_customer_info(session_id, merged)
                     # Persist salla_customer_id immediately so checkout can use it
                     # even if the server restarts before the next message
                     await cs.flush(session_id)
@@ -2116,7 +2116,7 @@ class PrintingAgent:
 
                 # Set widget component so the frontend can show an order card
                 if session_id:
-                    cs.set_last_component(session_id, {
+                    await cs.set_last_component(session_id, {
                         "type":        "order_status",
                         "order_id":    order_id,
                         "order_ref":   order_ref,
@@ -2380,7 +2380,7 @@ class PrintingAgent:
 
                 if result.get("needs_escalation"):
                     # Auto-escalate: flat size is too large for our presses
-                    cs.escalate_session(
+                    await cs.escalate_session(
                         session_id,
                         reason="box_oversize",
                         details=(
@@ -2428,7 +2428,7 @@ class PrintingAgent:
                 details = (inputs.get("details") or "").strip()
                 summary = (inputs.get("customer_summary") or "").strip()
 
-                cs.escalate_session(
+                await cs.escalate_session(
                     session_id,
                     reason=reason,
                     details=details,
@@ -2440,7 +2440,7 @@ class PrintingAgent:
 
                 # Show a takeover banner in the widget so the customer
                 # understands why the AI suddenly stopped responding.
-                cs.set_last_component(session_id, {
+                await cs.set_last_component(session_id, {
                     "type":    "admin_takeover",
                     "reason":  reason,
                     "message": "تم تحويل طلبك لفريق المتجر للمراجعة",

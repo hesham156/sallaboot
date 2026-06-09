@@ -1,17 +1,18 @@
 """
-Phase 1 dirty-conversation tracking tests.
+Dirty-conversation tracking tests.
 
-The pre-Phase-1 design had an in-memory `_dirty_sessions: set`. Multi-
-instance deploys would split that set across processes — instance A
-marking a session dirty was invisible to instance B's periodic flusher.
+Phase 1 introduced `conversations.dirty_at` as a cross-replica
+replacement for an in-memory `_dirty_sessions: set`. Phase 3 made
+every mutation persist inline, so the dirty_at mechanism is now a
+safety net rather than the primary path. These tests verify:
 
-We replaced it with the conversations.dirty_at column. Verify:
-  • mark_dirty writes dirty_at.
-  • fetch_dirty_sessions returns the right ids in age order.
-  • clear_conversation_dirty wipes the flag.
-  • flush_dirty saves all in-memory sessions referenced by the dirty set,
-    then clears their flags.
-  • A successful add_message clears dirty_at (write-through semantics).
+  • The DB primitives (fetch_dirty_sessions / clear_conversation_dirty)
+    still behave correctly — they're called by flush_dirty.
+  • `add_message` clears dirty_at as part of its inline persist.
+  • `flush_dirty` clears any orphan dirty_at left behind by older
+    code (or by another instance still running pre-Phase-3 code).
+  • `mark_dirty` is now an importable no-op so legacy call sites
+    don't break during the migration window.
 """
 from __future__ import annotations
 
@@ -23,18 +24,21 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-async def test_mark_dirty_sets_dirty_at(clean_db):
-    """The DB column must reflect the mark_dirty call after the fire-and-forget
-    task settles. We give it a brief sleep — this is the only place in the
-    suite where async timing leaks into the test, and it's intentional."""
+async def test_mark_dirty_is_now_a_noop(clean_db):
+    """
+    Phase 3 — mutations save inline, so mark_dirty no longer sets
+    dirty_at. The function still exists as an importable name (so
+    legacy callers don't crash on import), but the DB column stays
+    untouched.
+    """
     db = clean_db
-    # Create a row first — UPDATE without a row is a silent no-op.
     await db.save_conversation("sess-x", "store-1", {"messages": []})
 
     import conversation_store as cs
     cs.mark_dirty("sess-x")
-    # mark_dirty uses db.fire (fire-and-forget). Wait briefly for the task
-    # to land. 100ms is generous; the actual UPDATE is ~5ms.
+    # Give any fire-and-forget background work a chance to land —
+    # we want to assert NOTHING happened, so the wait must be
+    # generous enough to catch a stray write.
     await asyncio.sleep(0.1)
 
     async with db._pool.acquire() as conn:
@@ -42,13 +46,14 @@ async def test_mark_dirty_sets_dirty_at(clean_db):
             "SELECT dirty_at FROM conversations WHERE session_id=$1",
             "sess-x",
         )
-    assert row["dirty_at"] is not None
+    assert row["dirty_at"] is None, \
+        "mark_dirty is meant to be a no-op since Phase 3"
 
 
 async def test_fetch_dirty_sessions_returns_in_age_order(clean_db):
     db = clean_db
     # Insert three rows manually with explicit dirty_at timestamps so we
-    # can assert on the order without sleeping between mark_dirty calls.
+    # can assert on the order without sleeping between writes.
     async with db._pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO conversations (session_id, store_id, data, dirty_at) "
@@ -87,11 +92,12 @@ async def test_clear_conversation_dirty_handles_empty_list(clean_db):
 
 async def test_add_message_clears_dirty_flag(clean_db):
     """
-    Write-through semantics: a successful add_message persists the full
-    conversation. The dirty flag therefore must be cleared.
+    Write-through semantics: a successful add_message persists the
+    full conversation and then clears dirty_at. Critical for the
+    flush_dirty safety net to converge — if add_message left the
+    flag set, the periodic loop would keep finding the same session.
     """
     db = clean_db
-    # Seed: create a row with dirty_at already set
     async with db._pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO conversations (session_id, store_id, data, dirty_at) "
@@ -99,7 +105,6 @@ async def test_add_message_clears_dirty_flag(clean_db):
         )
 
     import conversation_store as cs
-    # add_message AWAITS save + clear_conversation_dirty internally.
     await cs.add_message("s-msg", "user", "hello", "store-1")
 
     async with db._pool.acquire() as conn:
@@ -111,10 +116,13 @@ async def test_add_message_clears_dirty_flag(clean_db):
 
 async def test_flush_dirty_clears_orphan_dirty_marks(clean_db):
     """
-    Cross-instance safety: if a session was marked dirty on another
-    instance and we don't have it in our local _conversations cache,
-    flush_dirty should clear the flag anyway (the row already has the
-    latest state). Leaving it would loop forever.
+    Phase 3 — flush_dirty no longer needs to re-save sessions (every
+    mutation already saved inline). Its only job is to clear stale
+    dirty_at flags left by pre-Phase-3 code, otherwise the periodic
+    loop would spin on them forever.
+
+    Verify: a row marked dirty is unflagged after one flush_dirty()
+    call, regardless of whether we have it in cache.
     """
     db = clean_db
     async with db._pool.acquire() as conn:
@@ -124,10 +132,11 @@ async def test_flush_dirty_clears_orphan_dirty_marks(clean_db):
         )
 
     import conversation_store as cs
-    # Our in-memory cache doesn't have 'foreign-session'.
-    assert "foreign-session" not in cs._conversations
+    # Task-local cache doesn't have this session (we never loaded it).
+    assert "foreign-session" not in cs._cache()
 
-    await cs.flush_dirty()
+    cleared = await cs.flush_dirty()
+    assert cleared == 1
 
     async with db._pool.acquire() as conn:
         flag = await conn.fetchval(

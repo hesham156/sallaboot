@@ -67,6 +67,9 @@ async def capture_admin_correction(store_id: str, session_id: str, admin_text: s
         if _normalize(admin_text) in _FILLER:
             return
 
+        # Phase-3: cs.all_conversations() is now task-scoped. Ensure
+        # the session is loaded into THIS task's cache before reading.
+        await cs.restore_to_memory(session_id)
         conv = cs.all_conversations().get(session_id) or {}
         messages = conv.get("messages", [])
         question = _last_customer_question(messages)

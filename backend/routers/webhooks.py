@@ -596,7 +596,7 @@ async def handle_whatsapp_message(msg: dict):
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}
         if not info.get("phone"):
-            cs.set_customer_info(session_id, {
+            await cs.set_customer_info(session_id, {
                 "name":  msg.get("name", "") or info.get("name", ""),
                 "phone": sender,
                 "channel": "whatsapp",

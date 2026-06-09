@@ -161,7 +161,7 @@ async def clean_db(db_pool):
         "conversations", "abandoned_carts", "uploads",
         "bot_training", "bot_orders", "employees",
         "app_settings", "stores", "llm_usage", "audit_log",
-        "support_access_grants",
+        "support_access_grants", "widget_outbox",
     ]
     async with db._pool.acquire() as conn:
         await conn.execute(
@@ -196,9 +196,11 @@ async def app_client(clean_db) -> AsyncIterator:
 @pytest.fixture(autouse=True)
 def _reset_in_memory_state():
     """
-    The codebase keeps several module-level dicts (store_manager._registry,
-    conversation_store._conversations). They persist across tests and would
-    leak fixtures. Clear them before every test.
+    Reset module-level caches between tests. store_manager._registry
+    is still a plain dict. conversation_store._conversations is now a
+    ContextVar; it's task-scoped so it would already reset between
+    tests, but we still explicitly clear it to be safe under any
+    async-loop reuse patterns the runner introduces.
     """
     yield
     try:
@@ -208,7 +210,10 @@ def _reset_in_memory_state():
         pass
     try:
         import conversation_store as cs
-        cs._conversations.clear()
+        # ContextVar reset — set to an empty dict so the next test
+        # starts with a fresh, deterministic cache regardless of the
+        # event-loop / context inheritance chain pytest sets up.
+        cs._conversations.set({})
     except Exception:
         pass
 

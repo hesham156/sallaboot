@@ -114,6 +114,14 @@ async def _create_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_conv_store_upd
                 ON conversations (store_id, updated_at DESC);
+            -- Phase 3 hot-path indexes (no more in-memory cache, every
+            -- read hits the DB). See alembic 0004 for the rationale.
+            CREATE INDEX IF NOT EXISTS idx_conv_store_customer
+                ON conversations (store_id, (data->>'salla_customer_id'), updated_at DESC)
+                WHERE data->>'salla_customer_id' IS NOT NULL
+                  AND data->>'salla_customer_id' <> '';
+            CREATE INDEX IF NOT EXISTS idx_conv_updated_at
+                ON conversations (updated_at DESC);
 
             -- Abandoned carts from webhook notifications
             CREATE TABLE IF NOT EXISTS abandoned_carts (
@@ -392,6 +400,27 @@ async def _create_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_llm_usage_recent
                 ON llm_usage (store_id, usage_date DESC);
+
+            -- ── Widget outbox (per-session durable queue) ───────────────────
+            -- Replaces the in-memory conversations.data["pending_for_widget"]
+            -- array. The old design only worked when the widget reconnected
+            -- to the SAME web replica that handled the admin reply — across
+            -- replicas the queue effectively didn't exist. Persisting per
+            -- row makes the SSE flush-on-connect path correct under any
+            -- topology (multi-instance web, sticky-less LB, restart).
+            CREATE TABLE IF NOT EXISTS widget_outbox (
+                id            BIGSERIAL PRIMARY KEY,
+                session_id    TEXT NOT NULL,
+                payload       JSONB NOT NULL,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                delivered_at  TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_widget_outbox_pending
+                ON widget_outbox (session_id, created_at)
+                WHERE delivered_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_widget_outbox_delivered
+                ON widget_outbox (delivered_at)
+                WHERE delivered_at IS NOT NULL;
         """)
 
 
@@ -1886,6 +1915,138 @@ async def prune_outbox_sent(keep_last_days: int = 7) -> int:
             return 0
     except Exception as e:
         print(f"[db] prune_outbox_sent error: {e}")
+        return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Widget outbox — per-session durable queue for messages destined to the
+# widget (admin replies, post-chat bot follow-ups, CSAT prompts).
+#
+# Why this is its own table and not just `outbox`:
+#   • Routing is by session_id, not by `kind`. The generic outbox is
+#     drained by a worker; this queue is consumed inline by the per-
+#     session SSE generator on flush-on-connect.
+#   • No retry/backoff/DLQ — delivery is SSE, the only failure mode is
+#     "client disconnected", and the next reconnect replays the same
+#     pending rows.
+#   • Different cleanup policy — delivered rows are pruned after 24h
+#     instead of the outbox's 7 days.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def widget_outbox_enqueue(session_id: str, payload: dict) -> int | None:
+    """
+    Append one message for this session to the widget queue. Returns the
+    new row id, or None if DB is unavailable (caller treats None as
+    best-effort — the realtime NOTIFY will still fire for live SSE
+    clients; only the catch-up-on-reconnect path is degraded).
+    """
+    if not _pool or not session_id:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO widget_outbox (session_id, payload)
+                VALUES ($1, $2::jsonb)
+                RETURNING id
+                """,
+                session_id,
+                json.dumps(payload or {}, ensure_ascii=False, default=str),
+            )
+        return int(row["id"]) if row else None
+    except Exception as e:
+        print(f"[db] widget_outbox_enqueue({session_id!r}) error: {e}")
+        return None
+
+
+async def widget_outbox_claim_pending(session_id: str, limit: int = 100) -> list[dict]:
+    """
+    Atomic claim-and-mark for the widget's flush-on-connect path. Picks
+    up to `limit` undelivered rows for this session (oldest first), marks
+    them delivered in the same transaction, and returns the payloads.
+
+    `FOR UPDATE SKIP LOCKED` means two concurrent reconnects of the
+    same session_id don't both deliver the same message — the second
+    one gets nothing (correct: it's the same logical client).
+
+    Trade-off: marking delivered BEFORE the SSE yield means a connection
+    drop between this query and the actual yield loses those messages.
+    The alternative (mark AFTER yield) double-delivers on reconnect. We
+    accept the loss because:
+      • The realtime NOTIFY fired at the time of the original write —
+        a connected widget already saw the message live.
+      • For a disconnected widget catching up, missing one message in
+        the catch-up window is less disruptive than a duplicate.
+      • Widget reconnects are rare enough that this is a noise-level
+        edge case, not a steady-state property.
+    """
+    if not _pool or not session_id:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH cte AS (
+                    SELECT id
+                    FROM widget_outbox
+                    WHERE session_id = $1 AND delivered_at IS NULL
+                    ORDER BY created_at
+                    LIMIT $2
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE widget_outbox w
+                   SET delivered_at = NOW()
+                  FROM cte
+                 WHERE w.id = cte.id
+              RETURNING w.id, w.payload
+                """,
+                session_id, limit,
+            )
+        return [_coerce_jsonb(r["payload"]) for r in rows]
+    except Exception as e:
+        print(f"[db] widget_outbox_claim_pending({session_id!r}) error: {e}")
+        return []
+
+
+async def widget_outbox_pending_count(session_id: str) -> int:
+    """Diagnostic: how many undelivered rows are sitting for this session."""
+    if not _pool or not session_id:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS n FROM widget_outbox "
+                "WHERE session_id = $1 AND delivered_at IS NULL",
+                session_id,
+            )
+        return int(row["n"]) if row else 0
+    except Exception as e:
+        print(f"[db] widget_outbox_pending_count error: {e}")
+        return 0
+
+
+async def prune_widget_outbox_delivered(keep_last_hours: int = 24) -> int:
+    """
+    Drop widget_outbox rows whose delivered_at is older than N hours.
+    Pending rows (delivered_at IS NULL) are NEVER pruned — they would
+    represent un-delivered messages and must survive until consumed.
+    """
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM widget_outbox "
+                "WHERE delivered_at IS NOT NULL "
+                "  AND delivered_at < NOW() - ($1 || ' hours')::interval",
+                str(int(keep_last_hours)),
+            )
+        try:
+            return int(result.split()[-1])
+        except Exception:
+            return 0
+    except Exception as e:
+        print(f"[db] prune_widget_outbox_delivered error: {e}")
         return 0
 
 

@@ -172,6 +172,7 @@ async def periodic_cleanup_loop() -> None:
       • webhook_log                                                — 30d
       • webhook_inbox status='done' (dead rows kept)              — 14d
       • outbox status='done'                                       —  7d
+      • widget_outbox delivered                                    — 24h
     """
     await asyncio.sleep(300)
     while True:
@@ -182,11 +183,13 @@ async def periodic_cleanup_loop() -> None:
                 wlog   = await db.prune_webhook_log(keep_last_days=30)
                 inbox  = await db.prune_inbox_done(keep_last_days=14)
                 obox   = await db.prune_outbox_sent(keep_last_days=7)
-                if seen or logins or wlog or inbox or obox:
+                widget = await db.prune_widget_outbox_delivered(keep_last_hours=24)
+                if seen or logins or wlog or inbox or obox or widget:
                     print(
                         f"[periodic_cleanup] 🧹 Pruned: webhook_seen={seen}, "
                         f"login_attempts={logins}, webhook_log={wlog}, "
-                        f"inbox_done={inbox}, outbox_sent={obox}"
+                        f"inbox_done={inbox}, outbox_sent={obox}, "
+                        f"widget_outbox={widget}"
                     )
         except Exception as exc:
             print(f"[periodic_cleanup] ❌ Error: {exc}")
