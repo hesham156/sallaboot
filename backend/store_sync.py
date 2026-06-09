@@ -379,6 +379,18 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
             # Keep the original data (with the 401 error recorded)
 
     sm.set_cache(store_id, data)
+
+    # Update store_name in store_manager from the freshly-fetched /store/info
+    si = data.get("store_info") or {}
+    fresh_name = (si.get("name") or "").strip()
+    if fresh_name:
+        tokens = dict(sm.get_store_info(store_id) or {})
+        if tokens.get("store_name") != fresh_name:
+            tokens["store_name"] = fresh_name
+            sm.update_store_info(store_id, tokens)
+            if db.available():
+                db.fire(db.save_store(store_id, tokens))
+
     n_p = data.get("products_count", 0)
     n_c = len(data.get("categories", []))
     n_a = len(data.get("articles",   []))

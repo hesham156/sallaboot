@@ -252,6 +252,13 @@ def get_store_info(store_id: str) -> dict:
     return _registry.get(str(store_id), {}).get("tokens", {})
 
 
+def update_store_info(store_id: str, tokens: dict):
+    """Merge updated fields into an existing store's token/info dict."""
+    store_id = str(store_id)
+    if store_id in _registry:
+        _registry[store_id]["tokens"] = tokens
+
+
 # ── Cache ──────────────────────────────────────────────────────────────────────
 
 def get_cache(store_id: str) -> dict:
