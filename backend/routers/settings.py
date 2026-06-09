@@ -339,6 +339,79 @@ async def test_notification(store_id: str):
         raise HTTPException(500, f"فشل الإرسال: {e}")
 
 
+# ── WhatsApp Events ───────────────────────────────────────────────────────────
+
+_WA_EVENTS = [
+    "customer_welcome",
+    "new_order",
+    "order_status",
+    "invoice_created",
+    "shipment_created",
+    "review_added",
+    "abandoned_cart",
+    "verification_code",
+]
+
+@router.get("/admin/{store_id}/settings/whatsapp-events")
+async def get_whatsapp_events(store_id: str):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    cfg = sm.get_ai_config(store_id) or {}
+    events = {}
+    for key in _WA_EVENTS:
+        events[key] = {
+            "enabled": bool(cfg.get(f"wa_event_{key}_enabled",
+                            key not in ("invoice_created", "shipment_created",
+                                        "review_added", "verification_code"))),
+            "template": cfg.get(f"wa_event_{key}_template", ""),
+        }
+    return {"events": events}
+
+
+@router.put("/admin/{store_id}/settings/whatsapp-events/{event_key}")
+async def update_whatsapp_event(store_id: str, event_key: str, body: dict):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    if event_key not in _WA_EVENTS:
+        raise HTTPException(400, f"حدث غير معروف: {event_key!r}")
+    cfg = dict(sm.get_ai_config(store_id) or {})
+    if "enabled" in body:
+        cfg[f"wa_event_{event_key}_enabled"] = bool(body["enabled"])
+    if "template" in body:
+        cfg[f"wa_event_{event_key}_template"] = str(body["template"])
+    sm.set_ai_config(store_id, cfg)
+    await db.save_ai_config(store_id, cfg)
+    return {"status": "ok"}
+
+
+@router.post("/admin/{store_id}/settings/whatsapp-events/{event_key}/test")
+async def test_whatsapp_event(store_id: str, event_key: str, request: Request):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    if event_key not in _WA_EVENTS:
+        raise HTTPException(400, f"حدث غير معروف: {event_key!r}")
+    from routers.webhooks import process_salla_event
+
+    salla_event_map = {
+        "customer_welcome":  ("customer.created",           {"id": 0, "first_name": "اختبار", "last_name": "تجريبي", "mobile_code": "966", "mobile": "500000000"}),
+        "new_order":         ("order.created",              {"id": 0, "reference_id": "TEST-001", "total": {"amount": "100", "currency": "SAR"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
+        "order_status":      ("order.status.updated",       {"id": 0, "reference_id": "TEST-001", "status": {"name": "قيد التوصيل"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
+        "invoice_created":   ("order.invoice.created",      {"id": 0, "order": {"reference_id": "TEST-001"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
+        "shipment_created":  ("shipment.created",           {"id": 0, "tracking_number": "123456789", "company": {"name": "أرامكس"}, "order": {"reference_id": "TEST-001"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
+        "review_added":      ("product.review.added",       {"id": 0, "rating": 5, "product": {"name": "منتج اختبار"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
+        "abandoned_cart":    ("abandoned.cart",             {"id": "cart-test", "customer": {"name": "اختبار", "mobile_code": "966", "mobile": "500000000"}, "total": {"amount": "250", "currency": "SAR"}}),
+        "verification_code": (None, None),
+    }
+    salla_event, payload = salla_event_map.get(event_key, (None, None))
+    if not salla_event:
+        return {"status": "skipped", "message": "هذا الحدث يُدار بواسطة Salla مباشرة"}
+    try:
+        await process_salla_event(salla_event, store_id, payload)
+        return {"status": "ok", "message": "تم إرسال رسالة الاختبار عبر WhatsApp ✅"}
+    except Exception as e:
+        raise HTTPException(500, f"فشل الاختبار: {e}")
+
+
 # ── Pricing ───────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/settings/pricing")

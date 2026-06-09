@@ -238,6 +238,14 @@ export const api = {
   testNotification: (storeId: string) =>
     post<{ status: string; message: string }>(`/admin/${storeId}/settings/notifications/test`),
 
+  // WhatsApp Events
+  getWaEvents: (storeId: string) =>
+    get<{ events: Record<string, { enabled: boolean; template: string }> }>(`/admin/${storeId}/settings/whatsapp-events`),
+  setWaEvent: (storeId: string, eventKey: string, body: { enabled?: boolean; template?: string }) =>
+    put<{ status: string }>(`/admin/${storeId}/settings/whatsapp-events/${eventKey}`, body),
+  testWaEvent: (storeId: string, eventKey: string) =>
+    post<{ status: string; message: string }>(`/admin/${storeId}/settings/whatsapp-events/${eventKey}/test`),
+
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
