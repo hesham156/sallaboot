@@ -1635,21 +1635,37 @@ async def inbox_insert(
         return {"inserted": False, "id": None}
     try:
         async with _pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO webhook_inbox
-                    (source, event_type, dedup_key, store_id, payload, meta)
-                VALUES ($1, $2, NULLIF($3, ''), $4, $5::jsonb, $6::jsonb)
-                ON CONFLICT (source, dedup_key) DO NOTHING
-                RETURNING id
-                """,
-                source,
-                event_type or "",
-                dedup_key or "",
-                store_id or "",
-                json.dumps(payload, ensure_ascii=False, default=str),
-                json.dumps(meta or {}, ensure_ascii=False, default=str),
-            )
+            _dedup = dedup_key.strip() if dedup_key else ""
+            if _dedup:
+                # Has a dedup key — use ON CONFLICT to skip duplicates.
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO webhook_inbox
+                        (source, event_type, dedup_key, store_id, payload, meta)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+                    ON CONFLICT (source, dedup_key) WHERE dedup_key IS NOT NULL
+                    DO NOTHING
+                    RETURNING id
+                    """,
+                    source, event_type or "", _dedup,
+                    store_id or "",
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                    json.dumps(meta or {}, ensure_ascii=False, default=str),
+                )
+            else:
+                # No dedup key — always insert (no conflict possible on NULL).
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO webhook_inbox
+                        (source, event_type, dedup_key, store_id, payload, meta)
+                    VALUES ($1, $2, NULL, $3, $4::jsonb, $5::jsonb)
+                    RETURNING id
+                    """,
+                    source, event_type or "",
+                    store_id or "",
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                    json.dumps(meta or {}, ensure_ascii=False, default=str),
+                )
         if row is None:
             return {"inserted": False, "id": None}
         return {"inserted": True, "id": int(row["id"])}
