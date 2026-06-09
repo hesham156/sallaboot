@@ -100,9 +100,10 @@ function ConfigureModal({
   onClose: () => void
   onToggle: (v: boolean) => void
   onSave: (t: string) => void
-  onTest: () => void
+  onTest: (phone: string) => void
 }) {
   const [draft, setDraft] = useState(template)
+  const [testPhone, setTestPhone] = useState('')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -143,6 +144,22 @@ function ConfigureModal({
             </div>
           )}
 
+          {/* Test phone */}
+          {!def.readOnly && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-default-700">رقم الاختبار</label>
+              <input
+                type="tel"
+                value={testPhone}
+                onChange={e => setTestPhone(e.target.value)}
+                placeholder="+966 5XX XXX XXX"
+                dir="ltr"
+                className="w-full text-sm bg-content2 border border-divider rounded-xl px-4 py-2.5 text-foreground placeholder:text-default-300 focus:outline-none focus:border-primary"
+              />
+              <p className="text-xs text-default-400">الرقم اللي هتتبعتله رسالة الاختبار</p>
+            </div>
+          )}
+
           {/* Test result */}
           {testMsg && (
             <div className={`rounded-xl px-4 py-2.5 text-sm border flex items-center gap-2 ${testMsg.startsWith('✅') ? 'bg-success-50 border-success-200 text-success-700' : 'bg-danger-50 border-danger-200 text-danger-700'}`}>
@@ -163,11 +180,11 @@ function ConfigureModal({
                 {saving ? 'جاري الحفظ...' : 'حفظ'}
               </button>
               <button
-                onClick={onTest}
-                disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border border-divider rounded-xl hover:bg-content2 text-default-600 disabled:opacity-50 transition-colors"
+                onClick={() => onTest(testPhone)}
+                disabled={saving || !testPhone.trim()}
+                className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border border-divider rounded-xl hover:bg-content2 text-default-600 disabled:opacity-40 transition-colors"
               >
-                <Icon d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z M15.5 9H14V7.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z M8.5 15H10v1.5c0 .83-.67 1.5-1.5 1.5S7 17.33 7 16.5 7.67 15 8.5 15z" size={14} />
+                <Icon d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" size={14} />
                 اختبار
               </button>
             </>
@@ -208,10 +225,10 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
     setConfiguring(null)
   }
 
-  const testEvent = async (key: string) => {
+  const testEvent = async (key: string, phone: string) => {
     setTestMsg('')
     try {
-      const r = await api.testWaEvent(storeId, key)
+      const r = await api.testWaEvent(storeId, key, phone)
       setTestMsg(r.message || '✅ تم الإرسال')
     } catch {
       setTestMsg('❌ فشل الإرسال — تحقق من إعدادات WhatsApp')
@@ -294,7 +311,7 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
           onClose={() => setConfiguring(null)}
           onToggle={v => toggleEvent(activeDef.key, v)}
           onSave={t => saveTemplate(activeDef.key, t)}
-          onTest={() => testEvent(activeDef.key)}
+          onTest={(phone) => testEvent(activeDef.key, phone)}
         />
       )}
     </div>

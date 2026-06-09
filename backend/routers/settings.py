@@ -390,16 +390,47 @@ async def test_whatsapp_event(store_id: str, event_key: str, request: Request):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     if event_key not in _WA_EVENTS:
         raise HTTPException(400, f"حدث غير معروف: {event_key!r}")
-    from routers.webhooks import process_salla_event
 
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    # Parse test_phone → mobile_code + mobile
+    raw_phone = str(body.get("test_phone", "")).strip().replace(" ", "").replace("-", "")
+    if raw_phone.startswith("+"):
+        raw_phone = raw_phone[1:]
+    # Detect country code: 2-3 digits before the local number
+    if raw_phone.startswith("966"):
+        mobile_code, mobile = "966", raw_phone[3:]
+    elif raw_phone.startswith("20"):
+        mobile_code, mobile = "20",  raw_phone[2:]
+    elif raw_phone.startswith("971"):
+        mobile_code, mobile = "971", raw_phone[3:]
+    elif raw_phone.startswith("974"):
+        mobile_code, mobile = "974", raw_phone[3:]
+    elif raw_phone.startswith("965"):
+        mobile_code, mobile = "965", raw_phone[3:]
+    elif raw_phone.startswith("973"):
+        mobile_code, mobile = "973", raw_phone[3:]
+    elif raw_phone.startswith("968"):
+        mobile_code, mobile = "968", raw_phone[3:]
+    else:
+        mobile_code, mobile = "966", raw_phone  # fallback
+
+    def _customer():
+        return {"name": "اختبار تجريبي", "mobile_code": mobile_code, "mobile": mobile}
+
+    from routers.webhooks import process_salla_event
     salla_event_map = {
-        "customer_welcome":  ("customer.created",           {"id": 0, "first_name": "اختبار", "last_name": "تجريبي", "mobile_code": "966", "mobile": "500000000"}),
-        "new_order":         ("order.created",              {"id": 0, "reference_id": "TEST-001", "total": {"amount": "100", "currency": "SAR"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
-        "order_status":      ("order.status.updated",       {"id": 0, "reference_id": "TEST-001", "status": {"name": "قيد التوصيل"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
-        "invoice_created":   ("order.invoice.created",      {"id": 0, "order": {"reference_id": "TEST-001"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
-        "shipment_created":  ("shipment.created",           {"id": 0, "tracking_number": "123456789", "company": {"name": "أرامكس"}, "order": {"reference_id": "TEST-001"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
-        "review_added":      ("product.review.added",       {"id": 0, "rating": 5, "product": {"name": "منتج اختبار"}, "customer": {"mobile_code": "966", "mobile": "500000000", "name": "اختبار"}}),
-        "abandoned_cart":    ("abandoned.cart",             {"id": "cart-test", "customer": {"name": "اختبار", "mobile_code": "966", "mobile": "500000000"}, "total": {"amount": "250", "currency": "SAR"}}),
+        "customer_welcome":  ("customer.created",      {"id": 0, "first_name": "اختبار", "last_name": "تجريبي", "mobile_code": mobile_code, "mobile": mobile}),
+        "new_order":         ("order.created",         {"id": 0, "reference_id": "TEST-001", "total": {"amount": "100", "currency": "SAR"}, "customer": _customer()}),
+        "order_status":      ("order.status.updated",  {"id": 0, "reference_id": "TEST-001", "status": {"name": "قيد التوصيل"}, "customer": _customer()}),
+        "invoice_created":   ("order.invoice.created", {"id": 0, "order": {"reference_id": "TEST-001"}, "customer": _customer()}),
+        "shipment_created":  ("shipment.created",      {"id": 0, "tracking_number": "123456789", "company": {"name": "أرامكس"}, "order": {"reference_id": "TEST-001"}, "customer": _customer()}),
+        "review_added":      ("product.review.added",  {"id": 0, "rating": 5, "product": {"name": "منتج اختبار"}, "customer": _customer()}),
+        "abandoned_cart":    ("abandoned.cart",        {"id": "cart-test", "customer": {**_customer(), "name": "اختبار"}, "total": {"amount": "250", "currency": "SAR"}, "checkout_url": ""}),
         "verification_code": (None, None),
     }
     salla_event, payload = salla_event_map.get(event_key, (None, None))
@@ -407,7 +438,7 @@ async def test_whatsapp_event(store_id: str, event_key: str, request: Request):
         return {"status": "skipped", "message": "هذا الحدث يُدار بواسطة Salla مباشرة"}
     try:
         await process_salla_event(salla_event, store_id, payload)
-        return {"status": "ok", "message": "تم إرسال رسالة الاختبار عبر WhatsApp ✅"}
+        return {"status": "ok", "message": f"✅ تم إرسال رسالة الاختبار إلى +{mobile_code}{mobile}"}
     except Exception as e:
         raise HTTPException(500, f"فشل الاختبار: {e}")
 
