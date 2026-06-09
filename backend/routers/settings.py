@@ -436,6 +436,22 @@ async def test_whatsapp_event(store_id: str, event_key: str, request: Request):
     salla_event, payload = salla_event_map.get(event_key, (None, None))
     if not salla_event:
         return {"status": "skipped", "message": "هذا الحدث يُدار بواسطة Salla مباشرة"}
+
+    # Pre-flight: verify WhatsApp is configured before running the event
+    cfg      = sm.get_ai_config(store_id) or {}
+    token    = (cfg.get("whatsapp_token")    or "").strip()
+    phone_id = (cfg.get("whatsapp_phone_id") or "").strip()
+    enabled  = bool(cfg.get("whatsapp_enabled"))
+
+    if not enabled:
+        raise HTTPException(400, "WhatsApp غير مفعّل لهذا المتجر — فعّله من إعدادات WhatsApp أولاً")
+    if not token:
+        raise HTTPException(400, "whatsapp_token غير محدد — أضفه من إعدادات WhatsApp")
+    if not phone_id:
+        raise HTTPException(400, "whatsapp_phone_id غير محدد — أضفه من إعدادات WhatsApp")
+    if not (mobile or raw_phone):
+        raise HTTPException(400, "أدخل رقم الاختبار أولاً")
+
     try:
         await process_salla_event(salla_event, store_id, payload)
         return {"status": "ok", "message": f"✅ تم إرسال رسالة الاختبار إلى +{mobile_code}{mobile}"}
