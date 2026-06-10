@@ -42,8 +42,9 @@ router = APIRouter()
 
 
 # Store IDs that are reserved and must never be used as real Salla
-# merchant IDs (kept in sync with main._RESERVED_IDS).
-_RESERVED_IDS = {"super", "admin", "stores", "auth", "default"}
+# merchant IDs (kept in sync with main._RESERVED_IDS). The marketing
+# demo store ("sallabot") is also reserved — see bootstrap.py.
+_RESERVED_IDS = {"super", "admin", "stores", "auth", "default", "sallabot"}
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -1,7 +1,44 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, useScroll, useTransform, AnimatePresence, type Variants } from 'framer-motion'
 import { getToken, getIsSuper, getStoreId } from '../api'
+
+// Inject the marketing chat widget once per page mount. The widget reads
+// window.SallaChatConfig BEFORE its <script> evaluates, so we set the
+// config first then append the script. Clean up on unmount so navigating
+// to another route doesn't leave a stale widget behind.
+function useSallabotWidget() {
+  useEffect(() => {
+    const SCRIPT_ID = 'sallabot-marketing-widget'
+    if (document.getElementById(SCRIPT_ID)) return  // already loaded
+
+    // window.SallaChatConfig is the public configuration contract — see
+    // backend/widget.js for the keys it consumes.
+    ;(window as unknown as { SallaChatConfig: Record<string, unknown> }).SallaChatConfig = {
+      storeId:        'sallabot',
+      apiUrl:         window.location.origin,
+      storeName:      'سلّابوت',
+      primaryColor:   '#0d9488',  // teal-600 — matches the landing page
+      position:       'left',     // RTL → left == far from the CTA buttons
+      welcomeMessage: 'أهلاً! 👋 أنا سلّابوت. اسألني عن أي حاجة عن المنتج: المميزات، الأسعار، التثبيت، أو احجز عرض حي.',
+      placeholder:    'اكتب سؤالك...',
+    }
+
+    const s = document.createElement('script')
+    s.id    = SCRIPT_ID
+    s.src   = '/widget.js'
+    s.async = true
+    document.body.appendChild(s)
+
+    return () => {
+      // Best-effort teardown. The widget itself doesn't expose an
+      // unmount API (it's a vanilla IIFE), so we just remove the
+      // script tag — leaving the rendered button + iframe in place is
+      // fine for SPA navigation since the user might come back.
+      document.getElementById(SCRIPT_ID)?.remove()
+    }
+  }, [])
+}
 
 /* ─────────────────────────── Motion variants ─────────────────────────── */
 const EASE = [0.22, 1, 0.36, 1] as const
@@ -82,6 +119,11 @@ export default function Landing() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { scrollY } = useScroll()
   const heroY = useTransform(scrollY, [0, 500], [0, 60])
+
+  // Mount the marketing chat widget (Sallabot answering questions about
+  // itself). Backed by the "sallabot" demo store that bootstrap.py
+  // registers on the backend at startup.
+  useSallabotWidget()
 
   const loggedIn = !!getToken()
   function goDashboard() {

@@ -305,6 +305,15 @@ async def startup() -> None:
     sm.load_all_stores()
     await sm.load_from_db()
 
+    # 2b. Ensure the marketing/demo store exists so the chat widget on
+    #     the public landing page has something to talk to. Idempotent —
+    #     re-running just refreshes the knowledge-file content.
+    try:
+        import bootstrap
+        bootstrap.ensure_sallabot_store()
+    except Exception as exc:
+        log.warning("bootstrap_demo_store_failed", extra={"err": str(exc)[:200]})
+
     # 3. Restore recent conversations from DB
     await cs.load_conversations_from_db()
 
