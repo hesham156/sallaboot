@@ -41,18 +41,22 @@ def _read_knowledge() -> str:
 
 def ensure_sallabot_store() -> None:
     """
-    Register the marketing/demo store if it doesn't exist, and (always)
-    sync the knowledge file content into its custom_knowledge.
+    Register the marketing/demo store if it doesn't exist, and seed its
+    custom_knowledge from the markdown file ONLY on first install.
 
-    Why always sync the knowledge: deploying a new version of the
-    knowledge file should take effect on the next boot without any
-    manual admin action. The rest of the store state (password hash,
-    AI config keys if any were customised) is preserved by
-    register_store's existing merge logic.
+    The UI is the source of truth — once the admin edits the knowledge
+    from the Brain dashboard, those edits stick across deploys. To force
+    a reload from the file (e.g. after editing the .md), call
+    reload_knowledge_from_file() — exposed as a super-only endpoint.
+
+    Setting SALLABOT_FORCE_RELOAD_KNOWLEDGE=true in the env also forces a
+    reload at boot, useful for one-off deploys where the file content
+    changed and you want it picked up without a manual API call.
     """
     knowledge = _read_knowledge()
+    is_new    = not sm.is_registered(SALLABOT_STORE_ID)
 
-    if not sm.is_registered(SALLABOT_STORE_ID):
+    if is_new:
         # No real access token — this is a no-Salla demo store. The agent
         # already guards every self.salla.* call behind `if not self.salla`,
         # so chat works fine using only custom_knowledge.
@@ -67,10 +71,34 @@ def ensure_sallabot_store() -> None:
         )
         print(f"[bootstrap] ✅ registered demo store {SALLABOT_STORE_ID!r}")
 
-    # Always refresh the knowledge (covers code-deploy → new content)
-    if knowledge:
+    # Seed only when there's nothing to overwrite (first install, or admin
+    # explicitly cleared the knowledge). The opt-in env override exists
+    # for the deploy-then-force-reload workflow.
+    force = os.getenv("SALLABOT_FORCE_RELOAD_KNOWLEDGE", "").lower() == "true"
+    existing = brain._get_custom_knowledge(SALLABOT_STORE_ID).strip()
+    if knowledge and (not existing or force):
         brain.set_custom_knowledge(SALLABOT_STORE_ID, knowledge)
-        print(f"[bootstrap] 📚 loaded {len(knowledge)} chars of marketing knowledge")
+        why = "first install" if not existing else "FORCE env override"
+        print(f"[bootstrap] 📚 seeded {len(knowledge)} chars of marketing knowledge ({why})")
+    elif existing:
+        print(f"[bootstrap] 📚 preserved existing knowledge ({len(existing)} chars) — "
+              "UI edits stick. Set SALLABOT_FORCE_RELOAD_KNOWLEDGE=true to override.")
+
+
+def reload_knowledge_from_file() -> dict:
+    """
+    Force a fresh read of the markdown file and overwrite custom_knowledge.
+    Called by the super-admin /admin/sallabot/reload-knowledge endpoint —
+    the explicit "reset to defaults" path so the no-overwrite startup
+    behaviour above doesn't trap the admin if they want the file back.
+    """
+    if not sm.is_registered(SALLABOT_STORE_ID):
+        return {"ok": False, "error": "sallabot store not registered yet"}
+    knowledge = _read_knowledge()
+    if not knowledge:
+        return {"ok": False, "error": "knowledge file is empty or missing"}
+    brain.set_custom_knowledge(SALLABOT_STORE_ID, knowledge)
+    return {"ok": True, "loaded_chars": len(knowledge), "file": str(_KNOWLEDGE_FILE)}
 
 
 # Reserved store_ids that real Salla merchants must never claim — exposed

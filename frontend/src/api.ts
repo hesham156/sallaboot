@@ -335,6 +335,15 @@ export const api = {
   reloadFromDb: () =>
     post<{ before: number; after: number; loaded: number; message: string }>('/admin/reload-from-db'),
 
+  // Super-admin: re-seed the sallabot demo store's custom_knowledge
+  // from backend/data/sallabot_knowledge.md. Used after editing the
+  // markdown file + redeploying — bootstrap only seeds on first install
+  // so file changes need an explicit reload to override UI edits.
+  reloadSallabotKnowledge: () =>
+    post<{ status: string; loaded: number; file: string; message: string }>(
+      '/admin/sallabot/reload-knowledge',
+    ),
+
   // Super-admin: backfill owner_email for stores installed before the
   // unified login shipped. Iterates registered stores, calls Salla
   // /oauth2/user/info with the stored access_token, saves the returned

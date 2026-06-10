@@ -397,6 +397,32 @@ async def backfill_owner_emails(request: Request):
     }
 
 
+@router.post("/admin/sallabot/reload-knowledge")
+async def sallabot_reload_knowledge(request: Request):
+    """
+    Super-only: re-read backend/data/sallabot_knowledge.md and overwrite
+    the demo store's custom_knowledge. Use this after editing the .md and
+    redeploying — the regular bootstrap only seeds knowledge on first
+    install so UI edits don't get clobbered, which means file changes
+    need an explicit reload (or the SALLABOT_FORCE_RELOAD_KNOWLEDGE env).
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    import bootstrap
+    result = bootstrap.reload_knowledge_from_file()
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "reload failed"))
+    return {
+        "status":  "ok",
+        "loaded":  result["loaded_chars"],
+        "file":    result["file"],
+        "message": f"تم إعادة تحميل {result['loaded_chars']} حرف من الملف",
+    }
+
+
 @router.get("/admin/db-test")
 async def db_diagnostic(request: Request):
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
