@@ -192,6 +192,116 @@ async def send_list(
     return True
 
 
+async def send_template(
+    token: str,
+    phone_id: str,
+    to: str,
+    template_name: str,
+    language: str = "ar",
+    header_params: list[str] | None = None,
+    body_params: list[str] | None = None,
+    buttons: list[dict] | None = None,
+) -> bool:
+    """
+    Send a Meta-approved WhatsApp template message.
+
+    - header_params: list of strings for {{1}}, {{2}} … in the header component
+    - body_params:   list of strings for {{1}}, {{2}} … in the body component
+    - buttons:       list of {index, sub_type, parameters} for dynamic buttons
+
+    Returns True on success. Never raises.
+    """
+    if not (token and phone_id and to and template_name):
+        return False
+
+    components: list[dict] = []
+
+    if header_params:
+        components.append({
+            "type": "header",
+            "parameters": [{"type": "text", "text": p} for p in header_params],
+        })
+
+    if body_params:
+        components.append({
+            "type": "body",
+            "parameters": [{"type": "text", "text": p} for p in body_params],
+        })
+
+    if buttons:
+        for btn in buttons:
+            components.append({
+                "type":       "button",
+                "sub_type":   btn.get("sub_type", "quick_reply"),
+                "index":      str(btn.get("index", 0)),
+                "parameters": btn.get("parameters", []),
+            })
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type":    "individual",
+        "to":                to,
+        "type":              "template",
+        "template": {
+            "name":     template_name,
+            "language": {"code": language},
+            **({"components": components} if components else {}),
+        },
+    }
+
+    url     = f"https://graph.facebook.com/{GRAPH_VERSION}/{phone_id}/messages"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            if r.status_code >= 400:
+                print(f"[whatsapp] send_template failed {r.status_code}: {r.text[:300]}")
+                return False
+        print(f"[whatsapp] template '{template_name}' sent to {to}")
+        return True
+    except Exception as exc:
+        print(f"[whatsapp] send_template error: {exc}")
+        return False
+
+
+async def list_meta_templates(token: str, waba_id: str) -> list[dict]:
+    """
+    Fetch the store's approved templates directly from Meta Graph API.
+    Requires the WhatsApp Business Account ID (WABA ID), not the phone number ID.
+    Returns a simplified list: [{name, language, status, category, body}]
+    """
+    if not (token and waba_id):
+        return []
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{waba_id}/message_templates"
+    params = {"fields": "name,language,status,category,components", "limit": 100}
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(url, headers=headers, params=params)
+            if r.status_code != 200:
+                print(f"[whatsapp] list_meta_templates {r.status_code}: {r.text[:200]}")
+                return []
+            data = r.json().get("data", [])
+            out = []
+            for t in data:
+                body_text = ""
+                for c in t.get("components", []):
+                    if c.get("type") == "BODY":
+                        body_text = c.get("text", "")
+                out.append({
+                    "name":     t.get("name", ""),
+                    "language": t.get("language", "ar"),
+                    "status":   t.get("status", ""),
+                    "category": t.get("category", ""),
+                    "body":     body_text,
+                    "components": t.get("components", []),
+                })
+            return out
+    except Exception as exc:
+        print(f"[whatsapp] list_meta_templates error: {exc}")
+        return []
+
+
 def _split(text: str, limit: int) -> list[str]:
     if len(text) <= limit:
         return [text]

@@ -2887,3 +2887,100 @@ def _utcnow():
     """Localised helper so the comparison above stays tz-aware."""
     import datetime as _dt
     return _dt.datetime.now(_dt.timezone.utc)
+
+
+# ── WhatsApp Templates ────────────────────────────────────────────────────────
+
+async def wa_template_save(store_id: str, tpl: dict) -> dict:
+    """Upsert a template definition. Returns the saved row."""
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO whatsapp_templates
+                    (store_id, name, language, category,
+                     header_type, header_text, body_text, footer_text,
+                     buttons, variables, status, notes, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,NOW())
+                ON CONFLICT (store_id, name) DO UPDATE SET
+                    language    = EXCLUDED.language,
+                    category    = EXCLUDED.category,
+                    header_type = EXCLUDED.header_type,
+                    header_text = EXCLUDED.header_text,
+                    body_text   = EXCLUDED.body_text,
+                    footer_text = EXCLUDED.footer_text,
+                    buttons     = EXCLUDED.buttons,
+                    variables   = EXCLUDED.variables,
+                    status      = EXCLUDED.status,
+                    notes       = EXCLUDED.notes,
+                    updated_at  = NOW()
+                RETURNING id, created_at, updated_at
+                """,
+                store_id,
+                tpl["name"],
+                tpl.get("language", "ar"),
+                tpl.get("category", "MARKETING"),
+                tpl.get("header_type") or None,
+                tpl.get("header_text") or None,
+                tpl.get("body_text", ""),
+                tpl.get("footer_text") or None,
+                json.dumps(tpl.get("buttons", []), ensure_ascii=False),
+                json.dumps(tpl.get("variables", []), ensure_ascii=False),
+                tpl.get("status", "approved"),
+                tpl.get("notes") or None,
+            )
+        return {"id": int(row["id"]), **tpl}
+    except Exception as e:
+        print(f"[db] wa_template_save error: {e}")
+        return {}
+
+
+async def wa_template_list(store_id: str) -> list[dict]:
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM whatsapp_templates
+                   WHERE store_id=$1 ORDER BY created_at DESC""",
+                store_id,
+            )
+        result = []
+        for r in rows:
+            result.append({
+                "id":          int(r["id"]),
+                "name":        r["name"],
+                "language":    r["language"],
+                "category":    r["category"],
+                "header_type": r["header_type"] or "",
+                "header_text": r["header_text"] or "",
+                "body_text":   r["body_text"],
+                "footer_text": r["footer_text"] or "",
+                "buttons":     r["buttons"] or [],
+                "variables":   r["variables"] or [],
+                "status":      r["status"],
+                "notes":       r["notes"] or "",
+                "created_at":  _iso_z(r["created_at"]),
+                "updated_at":  _iso_z(r["updated_at"]),
+            })
+        return result
+    except Exception as e:
+        print(f"[db] wa_template_list error: {e}")
+        return []
+
+
+async def wa_template_delete(store_id: str, name: str) -> bool:
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                "DELETE FROM whatsapp_templates WHERE store_id=$1 AND name=$2",
+                store_id, name,
+            )
+        return r == "DELETE 1"
+    except Exception as e:
+        print(f"[db] wa_template_delete error: {e}")
+        return False

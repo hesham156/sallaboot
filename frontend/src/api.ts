@@ -91,6 +91,7 @@ async function req<T>(
 const get  = <T>(url: string) => req<T>('GET', url)
 const post = <T>(url: string, body?: unknown) => req<T>('POST', url, body)
 const put  = <T>(url: string, body?: unknown) => req<T>('PUT', url, body)
+const del  = <T>(url: string) => req<T>('DELETE', url)
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
@@ -256,6 +257,20 @@ export const api = {
     put<{ status: string }>(`/admin/${storeId}/settings/whatsapp-events/${eventKey}`, body),
   testWaEvent: (storeId: string, eventKey: string, testPhone?: string) =>
     post<{ status: string; message: string }>(`/admin/${storeId}/settings/whatsapp-events/${eventKey}/test`, { test_phone: testPhone || '' }),
+
+  // WhatsApp Templates
+  listWaTemplates: (storeId: string) =>
+    get<{ templates: WaTemplate[]; count: number }>(`/admin/${storeId}/whatsapp/templates`),
+  saveWaTemplate: (storeId: string, tpl: Partial<WaTemplate>) =>
+    post<{ status: string; template: WaTemplate }>(`/admin/${storeId}/whatsapp/templates`, tpl),
+  deleteWaTemplate: (storeId: string, name: string) =>
+    del<{ status: string }>(`/admin/${storeId}/whatsapp/templates/${name}`),
+  sendWaTemplate: (storeId: string, name: string, to: string, variables?: Record<string, string>) =>
+    post<{ status: string; message: string }>(`/admin/${storeId}/whatsapp/templates/${name}/send`, { to, variables: variables || {} }),
+  listMetaTemplates: (storeId: string) =>
+    get<{ templates: MetaTemplate[]; count: number }>(`/admin/${storeId}/whatsapp/templates/meta`),
+  importMetaTemplates: (storeId: string) =>
+    post<{ status: string; imported: number; total: number; message: string }>(`/admin/${storeId}/whatsapp/templates/import-from-meta`),
 
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
@@ -871,6 +886,33 @@ export interface WebhookEvent {
   status: string
   detail: string
   ts: string
+}
+
+export interface WaTemplate {
+  id?: number
+  store_id?: string
+  name: string
+  language: string
+  category: string
+  header_type?: string
+  header_text?: string
+  body_text: string
+  footer_text?: string
+  buttons: unknown[]
+  variables: string[]
+  status: string
+  notes?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MetaTemplate {
+  name: string
+  language: string
+  status: string
+  category: string
+  body: string
+  components: unknown[]
 }
 
 // ── Support-access grants ──────────────────────────────────────────────
