@@ -59,6 +59,12 @@ _SUPER_PROTECTED_RE = re.compile(r"^/admin/stores$")
 # the platform-ops aggregates we already expose.
 _SUPER_NO_GRANT_NEEDED_SUFFIXES = ("support-access",)
 
+# System-owned stores that have no human owner — the super admin is the
+# owner, so the JIT support-access gate doesn't make sense. Currently
+# just the demo store registered by bootstrap.py. Kept in sync with
+# routers/webhooks._RESERVED_IDS via review (small enough to duplicate).
+_SYSTEM_STORES = {"sallabot"}
+
 # Paths that an "agent" employee MUST NOT reach (manager + owner only).
 # Conversations / orders / abandoned-carts / info / bot status stay open
 # because that's the customer-service work they're hired to do.
@@ -107,6 +113,10 @@ async def admin_auth_middleware(request: Request, call_next):
         is_super_cross_store = (
             claims.get("su") and (claims.get("s") or "") != store_id
         )
+        # System-owned stores (no human owner) have no one to grant
+        # access — super is the de-facto owner. Skip the JIT gate.
+        if is_super_cross_store and store_id in _SYSTEM_STORES:
+            is_super_cross_store = False
         if is_super_cross_store and not any(
             sub_path == s or sub_path.startswith(s + "/")
             for s in _SUPER_NO_GRANT_NEEDED_SUFFIXES
