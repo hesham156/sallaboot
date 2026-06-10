@@ -122,7 +122,7 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     refresh_token = data.get("refresh_token", "")
     expires       = data.get("expires", 0)
     expires_in    = data.get("expires_in", 0)
-    store_info    = data.get("store", {})
+    store_info    = data.get("store", {}) or {}
 
     store_id = merchant_id or "default"
     if not access_token:
@@ -143,11 +143,22 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
 
     merged_info = {**store_info, "expires_at": expires_at} if expires_at else store_info
 
+    # Owner email: Salla nests it under user.email in some payloads and
+    # under store.email in others. Try both — empty fall-through is fine,
+    # the store can be email-linked later by the unified login fallback or
+    # by re-authorising.
+    user_blob   = data.get("user") or {}
+    owner_email = (
+        (user_blob.get("email")  or "").strip().lower()
+        or (store_info.get("email") or "").strip().lower()
+    )
+
     sm.register_store(
         store_id=store_id,
         access_token=access_token,
         refresh_token=refresh_token,
         store_info=merged_info,
+        owner_email=owner_email,
     )
 
     # Directly await the DB save for this critical event so data is never

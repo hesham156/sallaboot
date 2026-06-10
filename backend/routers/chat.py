@@ -110,10 +110,13 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
         access_token  = tokens["access_token"]
         refresh_token = tokens.get("refresh_token", "")
 
-        # ── 2. Resolve the REAL merchant id ──────────────────────────────
-        # Without this every install would clobber the "default" slot.
-        store_id   = ""
-        store_name = ""
+        # ── 2. Resolve the REAL merchant id + owner email ────────────────
+        # Without merchant_id every install would clobber the "default"
+        # slot. owner_email feeds the unified email/password login so the
+        # merchant can sign in without remembering their store_id.
+        store_id    = ""
+        store_name  = ""
+        owner_email = ""
         try:
             info = await get_user_info(access_token)
             data = info.get("data") or {}
@@ -122,6 +125,9 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
             if sid:
                 store_id   = str(sid)
                 store_name = merchant_blob.get("name", "") or ""
+            # `email` lives on the user blob (the authorising user), NOT on
+            # the merchant blob — see the /oauth2/user/info OAS example.
+            owner_email = (data.get("email") or "").strip().lower()
         except Exception as exc:
             log.error("oauth_user_info_failed", extra={"err": str(exc)[:200]})
 
@@ -139,6 +145,7 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
             access_token  = access_token,
             refresh_token = refresh_token,
             store_info    = {"store_name": store_name} if store_name else None,
+            owner_email   = owner_email,
         )
         if _sync_task:
             asyncio.create_task(_sync_task(store_id, access_token))

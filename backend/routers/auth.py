@@ -141,6 +141,127 @@ async def employee_login(store_id: str, req: EmployeeLoginRequest, request: Requ
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Unified email/password login
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Single endpoint the SPA calls regardless of who's logging in. We resolve
+# the account from the email alone, then verify the password.
+#
+# Resolution order is intentional:
+#   1. Super admin (env-driven, exact email match)
+#   2. Employee (globally — emails are unique per store but we don't know
+#      the store yet; if the same email exists in multiple stores we pick
+#      the newest, see db.find_employee_by_email_any_store)
+#   3. Store owner (owner_email column on stores, populated during
+#      OAuth/install)
+#
+# Returns a uniform shape so the frontend doesn't have to switch on which
+# endpoint succeeded. Same generic 401 message on every miss so callers
+# can't probe whether an email exists.
+
+@router.post("/auth/login")
+async def unified_login(req: LoginRequest, request: Request):
+    """
+    Single email+password entry point. Replaces the three legacy paths:
+      • POST /admin/auth/login                    → super admin
+      • POST /admin/{store_id}/auth/login         → store owner
+      • POST /admin/{store_id}/auth/employee-login → store employee
+
+    The legacy endpoints are kept for back-compat with old clients.
+    """
+    ip       = request.client.host if request.client else "unknown"
+    email_in = (req.email or "").strip().lower()
+    pwd_in   = req.password or ""
+
+    if not email_in or not pwd_in:
+        raise HTTPException(400, "البريد الإلكتروني وكلمة المرور مطلوبان")
+
+    # One rate-limit bucket per email — keeps an attacker from spreading
+    # attempts across accounts to bypass the per-account lockout.
+    if await _is_rate_limited(f"login:{email_in}"):
+        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
+    if await _is_rate_limited(f"login_ip:{ip}", max_attempts=20, window=300):
+        raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً من هذا الجهاز.")
+
+    generic_401 = HTTPException(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة")
+
+    # ── 1. Super admin ──────────────────────────────────────────────────
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "h456ad@gmail.com").strip().lower()
+    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
+    if super_pass == "admin":
+        print("⚠️  [auth] SUPER_ADMIN_PASSWORD is still the default 'admin' — please change it!")
+    if hmac.compare_digest(email_in, super_email):
+        if not hmac.compare_digest(pwd_in, super_pass):
+            print(f"[auth] ❌ Super login bad password from {ip}")
+            raise generic_401
+        token = _auth.create_token("super", is_super=True)
+        print(f"[auth] ✅ Super login ({email_in}) from {ip}")
+        return {
+            "token":      token,
+            "store_id":   "super",
+            "store_name": "لوحة الإدارة العامة",
+            "is_super":   True,
+            "employee":   None,
+        }
+
+    # ── 2. Employee (any store) ─────────────────────────────────────────
+    emp = await db.find_employee_by_email_any_store(email_in)
+    if emp:
+        stored_hash = emp.get("password_hash", "")
+        if not _auth.check_password(pwd_in, stored_hash):
+            print(f"[auth] ❌ Employee bad password for {email_in!r} from {ip}")
+            raise generic_401
+        store_id = emp["store_id"]
+        if _auth.needs_rehash(stored_hash):
+            try:
+                await db.update_employee(emp["id"], password_hash=_auth.hash_password(pwd_in))
+            except Exception as exc:
+                print(f"[auth] ⚠️ Employee hash upgrade failed: {exc}")
+        token = _auth.create_token(
+            store_id,
+            employee_id   = emp["id"],
+            employee_name = emp["name"],
+            employee_role = emp.get("role", "agent"),
+        )
+        info = sm.get_store_info(store_id) or {}
+        print(f"[auth] ✅ Employee login {email_in!r} for store {store_id!r}")
+        return {
+            "token":      token,
+            "store_id":   store_id,
+            "store_name": info.get("store_name", f"متجر {store_id}"),
+            "is_super":   False,
+            "employee":   {"id": emp["id"], "name": emp["name"], "role": emp.get("role", "agent")},
+        }
+
+    # ── 3. Store owner ──────────────────────────────────────────────────
+    store_id = await db.find_store_by_owner_email(email_in)
+    if store_id:
+        stored_hash = sm.get_admin_password_hash(store_id)
+        if not stored_hash or not _auth.check_password(pwd_in, stored_hash):
+            print(f"[auth] ❌ Store owner bad password for {email_in!r} ({store_id!r}) from {ip}")
+            raise generic_401
+        if _auth.needs_rehash(stored_hash):
+            try:
+                sm.set_admin_password(store_id, _auth.hash_password(pwd_in))
+            except Exception as exc:
+                print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
+        token = _auth.create_token(store_id)
+        info  = sm.get_store_info(store_id) or {}
+        print(f"[auth] ✅ Store owner login {email_in!r} ({store_id!r}) from {ip}")
+        return {
+            "token":      token,
+            "store_id":   store_id,
+            "store_name": info.get("store_name", f"متجر {store_id}"),
+            "is_super":   False,
+            "employee":   None,
+        }
+
+    # No account matches — generic 401 (don't leak which side failed)
+    print(f"[auth] ❌ No account for {email_in!r} from {ip}")
+    raise generic_401
+
+
 @router.get("/admin/{store_id}/auth/verify")
 async def verify_store_token(store_id: str, request: Request):
     """

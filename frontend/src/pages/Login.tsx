@@ -16,84 +16,43 @@ function Icon({ paths, size = 16, className = '' }: {
   )
 }
 
-type Tab = 'store' | 'employee' | 'admin'
-
+/**
+ * Single email/password login. The backend's /auth/login figures out
+ * whether this email belongs to a super admin, a store employee, or a
+ * store owner — we just submit credentials and route based on the
+ * `is_super` flag in the response.
+ */
 export default function Login() {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>('store')
 
-  // Store login fields
-  const [storeId, setStoreIdInput] = useState('')
-  const [storePass, setStorePass]  = useState('')
-
-  // Admin login fields
   const [email, setEmail]       = useState('')
-  const [adminPass, setAdminPass] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
 
-  // Employee login fields
-  const [empStoreId, setEmpStoreId] = useState('')
-  const [empEmail, setEmpEmail]     = useState('')
-  const [empPass, setEmpPass]       = useState('')
-
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
-
-  async function handleStoreLogin() {
+  async function handleSubmit() {
     if (loading) return
     setError('')
-    if (!storeId.trim()) { setError('يرجى إدخال معرّف المتجر'); return }
-    if (!storePass)      { setError('يرجى إدخال كلمة المرور'); return }
+    if (!email.trim())  { setError('يرجى إدخال البريد الإلكتروني'); return }
+    if (!password)      { setError('يرجى إدخال كلمة المرور');       return }
     setLoading(true)
     try {
-      const res = await api.storeLogin(storeId.trim(), storePass)
+      const res = await api.login(email.trim(), password)
       setToken(res.token)
       setStoreId(res.store_id)
-      setIsSuper(false)
-      navigate(`/store/${res.store_id}`, { replace: true })
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'معرّف المتجر أو كلمة المرور غير صحيحة')
-    } finally { setLoading(false) }
-  }
-
-  async function handleEmployeeLogin() {
-    if (loading) return
-    setError('')
-    if (!empStoreId.trim()) { setError('يرجى إدخال معرّف المتجر'); return }
-    if (!empEmail.trim())   { setError('يرجى إدخال البريد الإلكتروني'); return }
-    if (!empPass)           { setError('يرجى إدخال كلمة المرور'); return }
-    setLoading(true)
-    try {
-      const res = await api.employeeLogin(empStoreId.trim(), empEmail.trim(), empPass)
-      setToken(res.token)
-      setStoreId(res.store_id)
-      setIsSuper(false)
+      setIsSuper(res.is_super)
       setEmployee(res.employee)
-      navigate(`/store/${res.store_id}`, { replace: true })
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'بيانات الدخول غير صحيحة')
-    } finally { setLoading(false) }
-  }
-
-  async function handleAdminLogin() {
-    if (loading) return
-    setError('')
-    if (!email.trim()) { setError('يرجى إدخال البريد الإلكتروني'); return }
-    if (!adminPass)    { setError('يرجى إدخال كلمة المرور'); return }
-    setLoading(true)
-    try {
-      const res = await api.superLogin(email.trim(), adminPass)
-      setToken(res.token); setStoreId('super'); setIsSuper(true)
-      navigate('/admin', { replace: true })
+      navigate(res.is_super ? '/admin' : `/store/${res.store_id}`, { replace: true })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'البريد الإلكتروني أو كلمة المرور غير صحيحة')
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleSubmit =
-    tab === 'store'    ? handleStoreLogin :
-    tab === 'employee' ? handleEmployeeLogin :
-                         handleAdminLogin
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') handleSubmit() }
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSubmit()
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#f8f9fe] p-4 relative overflow-hidden" dir="rtl">
@@ -122,197 +81,54 @@ export default function Login() {
         <div className="bg-white border border-slate-200 rounded-3xl shadow-soft-lg overflow-hidden">
           <div className="h-[3px] bg-gradient-to-r from-teal-400 to-cyan-500" />
 
-          {/* Tabs */}
-          <div className="flex border-b border-slate-100">
-            <button
-              onClick={() => { setTab('store'); setError('') }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-4 text-xs sm:text-sm font-bold transition-all ${
-                tab === 'store'
-                  ? 'text-teal-600 border-b-2 border-teal-500 bg-teal-50/60'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={14} />
-              المتجر
-            </button>
-            <button
-              onClick={() => { setTab('employee'); setError('') }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-4 text-xs sm:text-sm font-bold transition-all ${
-                tab === 'employee'
-                  ? 'text-amber-600 border-b-2 border-amber-500 bg-amber-50/60'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Icon paths={['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']} size={14} />
-              موظف
-            </button>
-            <button
-              onClick={() => { setTab('admin'); setError('') }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-4 text-xs sm:text-sm font-bold transition-all ${
-                tab === 'admin'
-                  ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/60'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Icon paths="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" size={14} />
-              الإدارة
-            </button>
-          </div>
-
           <div className="p-6 sm:p-8 space-y-5">
 
-            {tab === 'employee' ? (
-              <>
-                {/* Store ID */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">معرّف المتجر</label>
-                  <Input
-                    placeholder="store-123"
-                    value={empStoreId}
-                    onValueChange={v => { setEmpStoreId(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="username"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-amber-400 focus-within:!border-amber-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
+            <div>
+              <h2 className="text-xl font-black text-slate-800 mb-1">تسجيل الدخول</h2>
+              <p className="text-xs text-slate-500">أدخل بياناتك للوصول إلى لوحتك</p>
+            </div>
 
-                {/* Email */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">بريد الموظف</label>
-                  <Input
-                    placeholder="agent@store.com"
-                    type="email"
-                    value={empEmail}
-                    onValueChange={v => { setEmpEmail(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="email"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-amber-400 focus-within:!border-amber-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
+            {/* Email */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
+              <Input
+                placeholder="you@example.com"
+                type="email"
+                value={email}
+                onValueChange={v => { setEmail(v); setError('') }}
+                variant="bordered"
+                autoComplete="email"
+                classNames={{
+                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
+                  input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
+                }}
+                onKeyDown={handleKey}
+                startContent={
+                  <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                }
+              />
+            </div>
 
-                {/* Password */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
-                  <Input
-                    placeholder="أدخل كلمة المرور"
-                    type="password"
-                    value={empPass}
-                    onValueChange={v => { setEmpPass(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="current-password"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-amber-400 focus-within:!border-amber-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
-              </>
-            ) : tab === 'store' ? (
-              <>
-                {/* Store ID */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">معرّف المتجر</label>
-                  <Input
-                    placeholder="store-123"
-                    value={storeId}
-                    onValueChange={v => { setStoreIdInput(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="username"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
-
-                {/* Password */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
-                  <Input
-                    placeholder="أدخل كلمة المرور"
-                    type="password"
-                    value={storePass}
-                    onValueChange={v => { setStorePass(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="current-password"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Email */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
-                  <Input
-                    placeholder="admin@example.com"
-                    type="email"
-                    value={email}
-                    onValueChange={v => { setEmail(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="email"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-violet-400 focus-within:!border-violet-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
-
-                {/* Password */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
-                  <Input
-                    placeholder="أدخل كلمة المرور"
-                    type="password"
-                    value={adminPass}
-                    onValueChange={v => { setAdminPass(v); setError('') }}
-                    variant="bordered"
-                    autoComplete="current-password"
-                    classNames={{
-                      inputWrapper: 'border-slate-200 hover:border-violet-400 focus-within:!border-violet-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                      input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                    }}
-                    onKeyDown={handleKey}
-                    startContent={
-                      <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
-                    }
-                  />
-                </div>
-              </>
-            )}
+            {/* Password */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
+              <Input
+                placeholder="أدخل كلمة المرور"
+                type="password"
+                value={password}
+                onValueChange={v => { setPassword(v); setError('') }}
+                variant="bordered"
+                autoComplete="current-password"
+                classNames={{
+                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
+                  input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
+                }}
+                onKeyDown={handleKey}
+                startContent={
+                  <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                }
+              />
+            </div>
 
             {/* Error */}
             {error && (
@@ -324,22 +140,18 @@ export default function Login() {
 
             {/* Submit */}
             <Button
-              className={`w-full font-bold text-base h-12 text-white shadow-lg rounded-2xl hover:opacity-95 active:scale-[0.98] transition-all ${
-                tab === 'store'
-                  ? 'bg-gradient-to-r from-teal-500 to-cyan-500 shadow-teal-500/25'
-                  : tab === 'employee'
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/25'
-                  : 'bg-gradient-to-r from-violet-500 to-purple-500 shadow-violet-500/25'
-              }`}
+              className="w-full font-bold text-base h-12 text-white shadow-lg rounded-2xl hover:opacity-95 active:scale-[0.98] transition-all bg-gradient-to-r from-teal-500 to-cyan-500 shadow-teal-500/25"
               isLoading={loading}
               onPress={handleSubmit}
             >
-              {loading
-                ? <Spinner size="sm" color="white" />
-                : tab === 'store'    ? 'دخول لوحة المتجر'
-                : tab === 'employee' ? 'دخول كموظف'
-                                     : 'دخول لوحة الإدارة'}
+              {loading ? <Spinner size="sm" /> : 'دخول'}
             </Button>
+
+            <p className="text-[11px] text-slate-400 text-center mt-1">
+              لو متجرك مش متربط بعد،
+              {' '}
+              <a href="/auth/salla" className="text-teal-600 font-bold hover:underline">ربط المتجر بـ Salla</a>
+            </p>
           </div>
         </div>
 

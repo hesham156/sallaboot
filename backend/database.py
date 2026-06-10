@@ -102,8 +102,14 @@ async def _create_tables():
                 tokens       JSONB NOT NULL DEFAULT '{}'::jsonb,
                 ai_config    JSONB NOT NULL DEFAULT '{}'::jsonb,
                 cache_data   JSONB NOT NULL DEFAULT '{}'::jsonb,
+                owner_email  TEXT,
                 updated_at   TIMESTAMPTZ DEFAULT NOW()
             );
+            -- Idempotent for older deployments that already had the table.
+            ALTER TABLE stores ADD COLUMN IF NOT EXISTS owner_email TEXT;
+            CREATE INDEX IF NOT EXISTS idx_stores_owner_email
+                ON stores (lower(owner_email))
+                WHERE owner_email IS NOT NULL;
 
             -- Conversations: full conversation state per session
             CREATE TABLE IF NOT EXISTS conversations (
@@ -1332,31 +1338,107 @@ async def list_raw_stores() -> list:
         return []
 
 
-async def save_store(store_id: str, tokens: dict):
+async def save_store(store_id: str, tokens: dict, owner_email: str = ""):
     """
     Upsert store tokens. Secrets inside the blob (access_token,
     refresh_token, ai_config.{groq,anthropic,openai,whatsapp}_*) are
     encrypted at this boundary — see crypto.encrypt_store_blob. Memory
     keeps plaintext, so existing callers reading tokens["access_token"]
     are unaffected.
+
+    owner_email is a column (not encrypted) because we need to query
+    by it during the unified email/password login. Empty string keeps
+    the existing value via COALESCE — pass it explicitly to overwrite.
     """
     if not _pool:
         return
     encrypted_blob = _crypto.encrypt_store_blob(tokens)
+    email_arg = (owner_email or "").strip().lower() or None
     try:
         async with _pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO stores (store_id, tokens, updated_at)
-                VALUES ($1, $2::jsonb, NOW())
+                INSERT INTO stores (store_id, tokens, owner_email, updated_at)
+                VALUES ($1, $2::jsonb, $3, NOW())
                 ON CONFLICT (store_id) DO UPDATE
-                  SET tokens = EXCLUDED.tokens, updated_at = NOW()
+                  SET tokens      = EXCLUDED.tokens,
+                      owner_email = COALESCE(EXCLUDED.owner_email, stores.owner_email),
+                      updated_at  = NOW()
                 """,
                 store_id,
                 json.dumps(encrypted_blob, ensure_ascii=False),
+                email_arg,
             )
     except Exception as e:
         print(f"[db] save_store({store_id!r}) error: {e}")
+
+
+async def find_store_by_owner_email(email: str) -> str | None:
+    """
+    Find the store_id whose owner_email matches (case-insensitive).
+    Returns None if no match — caller decides whether to fall through
+    to employee lookup or fail. Used by the unified /auth/login endpoint.
+    """
+    if not _pool:
+        return None
+    e = (email or "").strip().lower()
+    if not e:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT store_id FROM stores WHERE lower(owner_email) = $1 LIMIT 1",
+                e,
+            )
+        return row["store_id"] if row else None
+    except Exception as ex:
+        print(f"[db] find_store_by_owner_email error: {ex}")
+        return None
+
+
+async def find_employee_by_email_any_store(email: str) -> dict | None:
+    """
+    Find an active employee by email across ALL stores. Used by the
+    unified login endpoint — the user enters just email+password, we
+    don't know which store yet. Returns the same shape as
+    get_employee_by_email so callers can reuse downstream code.
+
+    If the same email exists in multiple stores (shouldn't happen — we
+    enforce UNIQUE(store_id, email) but not globally), we return the
+    most recently created row to favour the newest installation.
+    """
+    if not _pool:
+        return None
+    e = (email or "").strip().lower()
+    if not e:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, store_id, name, email, password_hash, role, active, created_at
+                FROM employees
+                WHERE lower(email) = $1 AND active = TRUE
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                e,
+            )
+        if not row:
+            return None
+        return {
+            "id":            int(row["id"]),
+            "store_id":      row["store_id"],
+            "name":          row["name"],
+            "email":         row["email"],
+            "password_hash": row["password_hash"],
+            "role":          row["role"] or "agent",
+            "active":        bool(row["active"]),
+            "created_at":    _iso_z(row["created_at"]),
+        }
+    except Exception as ex:
+        print(f"[db] find_employee_by_email_any_store error: {ex}")
+        return None
 
 
 async def purge_store(store_id: str) -> dict:

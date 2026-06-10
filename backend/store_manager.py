@@ -176,14 +176,29 @@ def register_store(
     access_token: str,
     refresh_token: str = "",
     store_info: dict = None,
+    owner_email: str = "",
 ):
     """
     Register or update a store, persist to DB (fire-and-forget) and JSON file.
     Called from webhook (app.store.authorize) or OAuth callback.
+
+    owner_email is the email Salla returned for the authorising user. It
+    powers the unified email/password login — without it the store owner
+    can only log in via the legacy store_id+password path.
     """
     store_id = str(store_id)
     info     = store_info or {}
     existing = _registry.get(store_id, {}).get("tokens", {})
+
+    # Owner email resolution order:
+    #   1. explicit arg (OAuth callback passes Salla's user/info email)
+    #   2. store_info["email"] (some callers nest it here)
+    #   3. existing value (preserve across re-registrations)
+    resolved_email = (
+        (owner_email or "").strip().lower()
+        or (info.get("email") or "").strip().lower()
+        or (existing.get("owner_email") or "").strip().lower()
+    )
 
     tokens = {
         "access_token":       access_token,
@@ -199,6 +214,10 @@ def register_store(
         "admin_password_hash": existing.get("admin_password_hash", ""),
         "ai_config":           existing.get("ai_config", {}),
         "bot_enabled":         info.get("bot_enabled", existing.get("bot_enabled", True)),
+        # Owner email mirrored into the tokens blob so file-only deployments
+        # see it too. The authoritative copy is the `stores.owner_email`
+        # column populated by save_store.
+        "owner_email":         resolved_email,
     }
 
     # Auto-set initial password = store_id on first registration
@@ -215,7 +234,7 @@ def register_store(
         _registry[store_id] = {"tokens": tokens, "cache": {}, "agent": None}
 
     # ── Persist: DB (primary) + JSON file (fallback) ───────────────────────────
-    db.fire(db.save_store(store_id, tokens))
+    db.fire(db.save_store(store_id, tokens, owner_email=resolved_email))
 
     try:
         _store_dir(store_id)

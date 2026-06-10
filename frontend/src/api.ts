@@ -95,14 +95,25 @@ const put  = <T>(url: string, body?: unknown) => req<T>('PUT', url, body)
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
 export const api = {
-  // Login — super admin (email + password)
+  // Unified email/password login. Backend figures out which kind of
+  // account the email belongs to (super → employee → store owner) and
+  // returns a uniform response.
+  login: (email: string, password: string) =>
+    post<{
+      token:      string
+      store_id:   string
+      store_name: string
+      is_super:   boolean
+      employee:   SessionEmployee | null
+    }>('/auth/login', { email, password }),
+
+  // Legacy login endpoints — kept so older clients still work but the
+  // SPA itself uses `login()` above.
   superLogin: (email: string, password: string) =>
     post<{ token: string; store_id: string; is_super: boolean }>(
       '/admin/auth/login',
       { email, password },
     ),
-
-  // Login — store owner (store_id + password)
   storeLogin: (storeId: string, password: string) =>
     post<{ token: string; store_id: string; store_name: string }>(
       `/admin/${storeId}/auth/login`,
