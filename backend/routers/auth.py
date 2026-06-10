@@ -24,19 +24,10 @@ import auth as _auth
 import database as db
 import store_manager as sm
 from models import EmployeeLoginRequest, LoginRequest
+from routers.deps import is_rate_limited as _is_rate_limited
 
 
 router = APIRouter()
-
-
-# ── Rate limiter passthrough ──────────────────────────────────────────────
-# Implemented in main.py (still — moves to a `services/rate_limit.py`
-# in a future phase). Imported lazily so we don't pull main at module
-# load time.
-
-async def _is_rate_limited(attempt_key: str) -> bool:
-    import main as _main
-    return await _main._is_rate_limited(attempt_key)
 
 
 @router.post("/admin/auth/login")
