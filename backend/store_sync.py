@@ -380,13 +380,27 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
 
     sm.set_cache(store_id, data)
 
-    # Update store_name in store_manager from the freshly-fetched /store/info
+    # Update store metadata in store_manager from the freshly-fetched
+    # /store/info. We refresh name, domain, avatar, and URL together so
+    # the admin dashboard's "النطاق" / "Logo" columns aren't permanently
+    # empty for stores that installed before we started capturing these.
     si = data.get("store_info") or {}
-    fresh_name = (si.get("name") or "").strip()
-    if fresh_name:
+    fresh_name   = (si.get("name")   or "").strip()
+    fresh_domain = (si.get("domain") or "").strip()
+    fresh_avatar = (si.get("avatar") or "").strip()
+    fresh_url    = (si.get("url")    or "").strip()
+    if fresh_name or fresh_domain or fresh_avatar or fresh_url:
         tokens = dict(sm.get_store_info(store_id) or {})
-        if tokens.get("store_name") != fresh_name:
-            tokens["store_name"] = fresh_name
+        changed = False
+        if fresh_name   and tokens.get("store_name")   != fresh_name:
+            tokens["store_name"]   = fresh_name;   changed = True
+        if fresh_domain and tokens.get("store_domain") != fresh_domain:
+            tokens["store_domain"] = fresh_domain; changed = True
+        if fresh_avatar and tokens.get("store_avatar") != fresh_avatar:
+            tokens["store_avatar"] = fresh_avatar; changed = True
+        if fresh_url    and tokens.get("store_url")    != fresh_url:
+            tokens["store_url"]    = fresh_url;    changed = True
+        if changed:
             sm.update_store_info(store_id, tokens)
             if db.available():
                 db.fire(db.save_store(store_id, tokens))

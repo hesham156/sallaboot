@@ -284,16 +284,55 @@ async def backfill_owner_emails(request: Request):
         raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
 
     from salla_oauth import get_user_info, refresh_access_token
+    from salla_client import SallaClient
 
     filled:  list[dict] = []
     skipped: list[dict] = []
     failed:  list[dict] = []
 
+    async def _fetch_email_and_meta(tok: str) -> tuple[str, dict]:
+        """Pull the owner email + store metadata (name/domain/avatar/url) in
+        parallel: /oauth2/user/info → email; /store/info → metadata. Returns
+        ('', {}) on per-call failure so the caller can decide whether one
+        signal is enough."""
+        email: str = ""
+        meta:  dict = {}
+        try:
+            info = await get_user_info(tok)
+            data = info.get("data") or {}
+            email = (data.get("email") or "").strip().lower()
+        except Exception as exc:
+            print(f"[backfill] user_info failed: {exc}")
+        try:
+            cli = SallaClient(tok)
+            si  = (await cli.get_store_info()).get("data") or {}
+            meta = {
+                "name":   (si.get("name")   or "").strip(),
+                "domain": (si.get("domain") or "").strip(),
+                "avatar": (si.get("avatar") or "").strip(),
+                "url":    (si.get("url")    or "").strip(),
+                "email":  (si.get("email")  or "").strip().lower(),
+            }
+            # Some merchants leave the OAuth user email blank but the store
+            # email is populated — use it as a fallback.
+            if not email and meta["email"]:
+                email = meta["email"]
+        except Exception as exc:
+            print(f"[backfill] store_info failed: {exc}")
+        return email, meta
+
     for s in sm.list_stores():
-        store_id = s["store_id"]
-        existing = (s.get("owner_email") or "").strip().lower()
-        if existing:
-            skipped.append({"store_id": store_id, "reason": "already_has_email", "email": existing})
+        store_id      = s["store_id"]
+        existing_email = (s.get("owner_email")  or "").strip().lower()
+        existing_domain = (s.get("store_domain") or "").strip()
+        # Skip stores that already have BOTH — nothing to refresh
+        if existing_email and existing_domain:
+            skipped.append({
+                "store_id": store_id,
+                "reason":   "already_has_email_and_domain",
+                "email":    existing_email,
+                "domain":   existing_domain,
+            })
             continue
 
         access_token = sm.get_access_token(store_id)
@@ -301,41 +340,51 @@ async def backfill_owner_emails(request: Request):
             failed.append({"store_id": store_id, "reason": "no_access_token"})
             continue
 
-        # Try once with the current token; if it 401s, refresh and retry once.
-        # We swallow per-store errors so one broken token doesn't abort the
-        # whole batch.
-        async def _fetch_email(tok: str) -> str:
-            info  = await get_user_info(tok)
-            data  = info.get("data") or {}
-            return (data.get("email") or "").strip().lower()
-
-        email = ""
-        try:
-            email = await _fetch_email(access_token)
-        except Exception as exc1:
-            # Could be 401 expired — try a refresh + retry
+        # Try once with the current token; if both calls 401, refresh and
+        # retry once. We swallow per-store errors so one broken token
+        # doesn't abort the whole batch.
+        email, meta = await _fetch_email_and_meta(access_token)
+        if not email and not meta:
             try:
-                new_token = await refresh_access_token(store_id)
-                email = await _fetch_email(new_token)
-            except Exception as exc2:
+                new_token   = await refresh_access_token(store_id)
+                email, meta = await _fetch_email_and_meta(new_token)
+            except Exception as exc:
                 failed.append({
                     "store_id": store_id,
-                    "reason":   f"user_info_failed: {str(exc2)[:120]}",
+                    "reason":   f"refresh_failed: {str(exc)[:120]}",
                 })
                 continue
 
-        if not email:
-            failed.append({"store_id": store_id, "reason": "salla_returned_no_email"})
+        if not email and not meta:
+            failed.append({"store_id": store_id, "reason": "salla_returned_nothing"})
             continue
 
-        # set_owner_email updates both the in-memory registry and the DB
-        # column — so the change is visible to the next /auth/login
-        # without waiting for a reload_from_db cycle.
-        if not sm.set_owner_email(store_id, email):
-            failed.append({"store_id": store_id, "reason": "registry_or_db_write_failed"})
-            continue
+        # Email goes through the dedicated owner_email setter (registry +
+        # DB column). Metadata goes through update_store_info → save_store
+        # which lands in the tokens JSONB blob.
+        if email and not existing_email:
+            sm.set_owner_email(store_id, email)
+        if meta:
+            tokens = dict(sm.get_store_info(store_id) or {})
+            updated = False
+            if meta.get("name")   and tokens.get("store_name")   != meta["name"]:
+                tokens["store_name"]   = meta["name"];   updated = True
+            if meta.get("domain") and tokens.get("store_domain") != meta["domain"]:
+                tokens["store_domain"] = meta["domain"]; updated = True
+            if meta.get("avatar") and tokens.get("store_avatar") != meta["avatar"]:
+                tokens["store_avatar"] = meta["avatar"]; updated = True
+            if meta.get("url")    and tokens.get("store_url")    != meta["url"]:
+                tokens["store_url"]    = meta["url"];    updated = True
+            if updated:
+                sm.update_store_info(store_id, tokens)
+                if db.available():
+                    db.fire(db.save_store(store_id, tokens))
 
-        filled.append({"store_id": store_id, "email": email})
+        filled.append({
+            "store_id": store_id,
+            "email":    email or existing_email,
+            "domain":   (meta.get("domain") if meta else "") or existing_domain,
+        })
 
     return {
         "status":      "ok",
@@ -344,7 +393,7 @@ async def backfill_owner_emails(request: Request):
         "failed":      len(failed),
         "filled_rows": filled,
         "failed_rows": failed,
-        "message":     f"تم تعبئة {len(filled)} متجر، تخطّي {len(skipped)}، فشل {len(failed)}",
+        "message":     f"تم تحديث {len(filled)} متجر، تخطّي {len(skipped)}، فشل {len(failed)}",
     }
 
 

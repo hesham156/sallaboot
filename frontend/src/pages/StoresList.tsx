@@ -157,7 +157,7 @@ export default function StoresList() {
   }
 
   async function handleBackfillEmails() {
-    if (!confirm('سيتم استدعاء Salla لكل المتاجر اللي مالهاش owner_email وتعبئته. متابعة؟')) return
+    if (!confirm('سيتم استدعاء Salla لكل متجر ناقصه email أو نطاق، وتعبئة بياناته. قد يستغرق ثواني للمتاجر الكثيرة. متابعة؟')) return
     setDbTesting(true); setDbTestResult('')
     try {
       const r = await api.backfillOwnerEmails()
@@ -295,13 +295,13 @@ export default function StoresList() {
             onClick={handleBackfillEmails}
             disabled={dbTesting}
             className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/15 disabled:opacity-60"
-            title="استدعاء Salla لتعبئة owner_email للمتاجر القديمة عشان تقدر تدخل بالـ email"
+            title="استدعاء Salla لتعبئة email + النطاق + الشعار للمتاجر القديمة"
           >
             {dbTesting
               ? <Spinner size="sm" color="warning" className="scale-75" />
               : <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={13} />
             }
-            تعبئة الإيميلات
+            تحديث بيانات المتاجر
           </button>
 
           <button
