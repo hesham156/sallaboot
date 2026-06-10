@@ -1003,8 +1003,16 @@
       // failures. EventSource auto-reconnects on transient errors with
       // its own ~3s default; we layer our own exponential backoff for
       // the bad-network case where the browser keeps retrying instantly.
+      //
+      // Critical fallback: also kick off polling. If the server returns
+      // 503 because realtime is unavailable (DATABASE_URL unset, listener
+      // failed to start, etc.), every reconnect attempt also returns 503
+      // — without polling as a safety net, admin replies + CSAT never
+      // reach the customer. stopPolling() in the 'connected' handler
+      // automatically tears it down if SSE later succeeds.
       streamConn.onerror = function () {
         if (streamConn && streamConn.readyState === 2 /*CLOSED*/) {
+          startPolling();
           scheduleStreamReconnect();
         }
       };
