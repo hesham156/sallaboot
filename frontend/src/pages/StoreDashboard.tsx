@@ -221,8 +221,12 @@ export default function StoreDashboard() {
   const [needsSupportAccess, setNeedsSupportAccess] = useState(false)
 
   const basePath     = `/store/${storeId}`
+  // First path segment after /store/:storeId/ — strip sub-routes so the
+  // sidebar still highlights "المحادثات" when you're inside one specific
+  // conversation (/conversations/:sessionId).
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
-  const activeKey    = NAV_ITEMS.find(n => n.key === relativePath)?.key ?? ''
+  const topSegment   = relativePath.split('/')[0]
+  const activeKey    = NAV_ITEMS.find(n => n.key === topSegment)?.key ?? ''
   const employee     = getEmployee()
   const role         = getCurrentRole()
   const canSee = (item: { roles?: Role[] }) =>
@@ -529,19 +533,19 @@ export default function StoreDashboard() {
 
             {/* Manager + owner only */}
             {(role === 'owner' || role === 'manager') && <>
-              <Route path="products"  element={<Products  storeId={storeId} />} />
-              <Route path="analytics" element={<Analytics storeId={storeId} />} />
-              <Route path="pricing"   element={<Pricing   storeId={storeId} />} />
-              <Route path="brain"     element={<Brain     storeId={storeId} />} />
-              <Route path="training"  element={<Training  storeId={storeId} />} />
-              <Route path="llm-usage" element={<LlmUsage  storeId={storeId} />} />
+              <Route path="products"        element={<Products        storeId={storeId} />} />
+              <Route path="analytics"       element={<Analytics       storeId={storeId} />} />
+              <Route path="pricing"         element={<Pricing         storeId={storeId} />} />
+              <Route path="brain"           element={<Brain           storeId={storeId} />} />
+              <Route path="training"        element={<Training        storeId={storeId} />} />
+              <Route path="llm-usage"       element={<LlmUsage        storeId={storeId} />} />
+              <Route path="whatsapp-events" element={<WhatsAppEvents  storeId={storeId} />} />
             </>}
 
             {/* Owner only */}
             {role === 'owner' && <>
-              <Route path="employees"        element={<Employees        storeId={storeId} />} />
+              <Route path="employees"       element={<Employees       storeId={storeId} />} />
               <Route path="support-access"  element={<SupportAccess   storeId={storeId} />} />
-              <Route path="whatsapp-events" element={<WhatsAppEvents  storeId={storeId} />} />
               <Route path="settings"        element={<Settings        storeId={storeId} />} />
             </>}
 

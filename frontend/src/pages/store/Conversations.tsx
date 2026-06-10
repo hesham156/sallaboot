@@ -121,7 +121,19 @@ export default function Conversations({ storeId }: Props) {
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
   const [search, setSearch] = useState('')
+  const [actionError, setActionError] = useState('')
   const messagesRef = useRef<HTMLDivElement>(null)
+  // Debounce list refreshes from SSE — a busy thread can fire many
+  // new_message events per second and refetching the list each time
+  // flickers the loading spinner + hammers the backend.
+  const listRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function scheduleListRefresh(delay = 500) {
+    if (listRefreshTimer.current) return
+    listRefreshTimer.current = setTimeout(() => {
+      listRefreshTimer.current = null
+      loadConversations()
+    }, delay)
+  }
 
   // ── Access-reason gating (super admin cross-store reads) ────────────────
   // The backend rejects /admin/{store}/conversations/{sid} from a super
@@ -215,14 +227,21 @@ export default function Conversations({ storeId }: Props) {
             .then(setSelected)
             .catch(() => { /* user just navigated away — ignore */ })
         }
-        // Always refresh the list (preview + unread badge change).
-        loadConversations()
+        // Debounced list refresh — a chatty thread emitting many events
+        // per second still only triggers one list fetch every 500ms.
+        scheduleListRefresh()
       },
-      onNewConversation: () => { loadConversations() },
-      onRating:          () => { loadConversations() },
-      onBotToggle:       () => { loadConversations() },
+      onNewConversation: () => scheduleListRefresh(),
+      onRating:          () => scheduleListRefresh(),
+      onBotToggle:       () => scheduleListRefresh(),
     }, { reason: accessReason || undefined })
-    return close
+    return () => {
+      close()
+      if (listRefreshTimer.current) {
+        clearTimeout(listRefreshTimer.current)
+        listRefreshTimer.current = null
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId, accessReason])
 
@@ -261,40 +280,61 @@ export default function Conversations({ storeId }: Props) {
   }
 
   async function openConversation(c: ConvSummary) {
+    setActionError('')
     setSelectedId(c.session_id)
     setDetailLoading(true)
     try {
       const detail = await fetchConv(c.session_id)
       setSelected(detail)
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      // Clear the "selected" highlight so the right panel doesn't keep
+      // showing stale state from a previously opened conversation when the
+      // user cancels the access-reason prompt or the fetch fails.
+      setSelectedId(null)
+      setSelected(null)
+    }
     finally { setDetailLoading(false) }
   }
 
   async function sendReply() {
     if (!selected || !replyText.trim()) return
     setSending(true)
+    setActionError('')
     try {
       await api.adminReply(storeId, selected.session_id, replyText.trim())
       setReplyText('')
       const updated = await fetchConv(selected.session_id)
       setSelected(updated)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'تعذر إرسال الرد')
     } finally { setSending(false) }
   }
 
   async function handleTakeover() {
     if (!selected) return
-    await api.takeover(storeId, selected.session_id)
-    const updated = await fetchConv(selected.session_id)
-    setSelected(updated)
-    loadConversations()
+    setActionError('')
+    try {
+      await api.takeover(storeId, selected.session_id)
+      const updated = await fetchConv(selected.session_id)
+      setSelected(updated)
+      loadConversations()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'تعذر تولّي المحادثة')
+    }
   }
 
   async function handleHandback() {
     if (!selected) return
-    await api.handback(storeId, selected.session_id)
-    const updated = await fetchConv(selected.session_id)
-    setSelected(updated)
-    loadConversations()
+    setActionError('')
+    try {
+      await api.handback(storeId, selected.session_id)
+      const updated = await fetchConv(selected.session_id)
+      setSelected(updated)
+      loadConversations()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'تعذر إرجاع المحادثة للبوت')
+    }
   }
 
   function openEndModal() {
@@ -451,7 +491,7 @@ export default function Conversations({ storeId }: Props) {
                           {c.bot_enabled ? 'بوت' : 'إدارة'}
                         </span>
                         {/* WhatsApp channel badge */}
-                        {(c as any).channel === 'whatsapp' && (
+                        {c.channel === 'whatsapp' && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-semibold flex items-center gap-0.5">
                             <svg width={9} height={9} viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.12.554 4.106 1.521 5.836L.057 23.887l6.217-1.432A11.946 11.946 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.894a9.877 9.877 0 01-5.042-1.381l-.361-.214-3.741.981.998-3.645-.235-.374A9.862 9.862 0 012.116 12C2.116 6.548 6.548 2.116 12 2.116c5.452 0 9.884 4.432 9.884 9.884 0 5.452-4.432 9.894-9.884 9.894z"/></svg>
                             WA
@@ -554,6 +594,25 @@ export default function Conversations({ storeId }: Props) {
                 </div>
               </div>
             </header>
+
+            {/* Action error banner — surfaces failed reply/takeover/handback
+                so the user actually knows something went wrong instead of
+                a silent no-op. Auto-clears on the next successful action. */}
+            {actionError && (
+              <div className="px-5 py-2.5 bg-danger/10 border-b border-danger/20 text-danger text-xs font-bold flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <Icon paths="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" size={14} />
+                  {actionError}
+                </span>
+                <button
+                  onClick={() => setActionError('')}
+                  className="text-danger/70 hover:text-danger"
+                  aria-label="إغلاق"
+                >
+                  <Icon paths={['M18 6L6 18', 'M6 6l12 12']} size={14} />
+                </button>
+              </div>
+            )}
 
             {/* Messages */}
             <div

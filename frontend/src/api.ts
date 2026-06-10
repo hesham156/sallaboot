@@ -221,7 +221,7 @@ export const api = {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
-      throw new Error(err.detail || `HTTP ${res.status}`)
+      throw new ApiError(res.status, err.detail || `HTTP ${res.status}`)
     }
     return res.json()
   },
@@ -437,6 +437,8 @@ export interface ConvSummary {
   bot_enabled: boolean
   unread: boolean
   rating?: number
+  // Channel the conversation arrived on. Absent on legacy rows.
+  channel?: 'widget' | 'whatsapp'
 }
 
 export interface CsatOption { value: number; label: string }

@@ -214,15 +214,33 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
   }, [storeId])
 
   const toggleEvent = async (key: string, val: boolean) => {
-    setEvents(prev => ({ ...prev, [key]: { ...prev[key], enabled: val } }))
-    await api.setWaEvent(storeId, key, { enabled: val }).catch(console.error)
+    // Optimistic flip — snapshot the previous value so we can roll back
+    // if the API rejects (no point lying to the user about persisted state).
+    const prev = events[key]?.enabled ?? false
+    setEvents(p => ({ ...p, [key]: { ...p[key], enabled: val } }))
+    try {
+      await api.setWaEvent(storeId, key, { enabled: val })
+    } catch (e) {
+      console.error(e)
+      setEvents(p => ({ ...p, [key]: { ...p[key], enabled: prev } }))
+      setTestMsg(e instanceof Error ? `❌ ${e.message}` : '❌ تعذّر حفظ التغيير')
+    }
   }
 
   const saveTemplate = async (key: string, template: string) => {
     setSaving(true)
-    await api.setWaEvent(storeId, key, { template }).catch(console.error)
-    setSaving(false)
-    setConfiguring(null)
+    setTestMsg('')
+    try {
+      await api.setWaEvent(storeId, key, { template })
+      setEvents(p => ({ ...p, [key]: { ...p[key], template } }))
+      setConfiguring(null)
+    } catch (e) {
+      console.error(e)
+      // Keep the modal open so the user can retry without retyping.
+      setTestMsg(e instanceof Error ? `❌ ${e.message}` : '❌ تعذّر حفظ القالب')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const testEvent = async (key: string, phone: string) => {
