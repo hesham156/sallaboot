@@ -18,8 +18,9 @@ import json
 import httpx
 from pathlib import Path
 
-AUTH_URL  = "https://accounts.salla.sa/oauth2/auth"
-TOKEN_URL = "https://accounts.salla.sa/oauth2/token"
+AUTH_URL      = "https://accounts.salla.sa/oauth2/auth"
+TOKEN_URL     = "https://accounts.salla.sa/oauth2/token"
+USER_INFO_URL = "https://api.salla.dev/admin/v2/oauth2/user/info"
 
 # ── Per-store async locks ─────────────────────────────────────────────────────
 # One lock per store prevents parallel refresh calls that would trigger
@@ -56,7 +57,16 @@ _load_tokens_from_file()
 
 # ── Auth URL helpers ──────────────────────────────────────────────────────────
 
-def get_auth_url(redirect_uri: str) -> str:
+def get_auth_url(redirect_uri: str, state: str = "") -> str:
+    """
+    Build the Salla OAuth authorize URL.
+
+    `state` is the CSRF token the caller generated + stored (cookie/session).
+    Salla echoes it back unchanged on /auth/callback so we can verify the
+    redirect came from a flow we started, not an attacker pasting a code
+    into a victim's browser. Empty string is allowed for backward compat
+    but the caller should always pass one in production.
+    """
     from urllib.parse import urlencode
     params = {
         "client_id":     os.environ["SALLA_CLIENT_ID"],
@@ -64,7 +74,28 @@ def get_auth_url(redirect_uri: str) -> str:
         "response_type": "code",
         "scope":         "offline_access",
     }
+    if state:
+        params["state"] = state
     return AUTH_URL + "?" + urlencode(params)
+
+
+async def get_user_info(access_token: str) -> dict:
+    """
+    Fetch the authorising user's profile (incl. their store) using a fresh
+    access token. Used in the /auth/callback to figure out which merchant
+    just authorised — without this we'd have to hardcode store_id="default"
+    and break multi-tenant.
+
+    Response shape (per Salla OAS): {data: {id, name, email, ..., store: {id, name, ...}}}
+    Newer responses use `merchant` instead of `store`; we accept either.
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            USER_INFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 async def exchange_code(code: str, redirect_uri: str) -> dict:

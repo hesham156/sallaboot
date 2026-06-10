@@ -4,6 +4,8 @@ Also handles Salla OAuth callback (/auth/salla, /auth/callback).
 """
 import os
 import asyncio
+import hmac
+import secrets
 import uuid
 import datetime as _dt
 
@@ -17,7 +19,7 @@ import conversation_store as cs
 import realtime
 import notifications as _notif
 from models import ChatRequest, ChatResponse, RateRequest
-from salla_oauth import get_auth_url, exchange_code, save_tokens
+from salla_oauth import get_auth_url, exchange_code, get_user_info, save_tokens
 from routers.deps import chat_rate_limited, budget_exhausted, daily_token_budget
 import log as _logmod
 
@@ -34,41 +36,130 @@ def set_sync_task(fn):
 
 
 # ── Salla OAuth ───────────────────────────────────────────────────────────────
+#
+# Custom-mode OAuth flow (the Easy-mode path goes via the `app.store.authorize`
+# webhook in routers/webhooks.py instead). Two hardening invariants:
+#
+#  1. CSRF state: /auth/salla generates a 256-bit random token, drops it in a
+#     short-lived HttpOnly cookie scoped to /auth, and includes it as the
+#     `state` query param. /auth/callback rejects the request unless the
+#     query state matches the cookie via timing-safe compare. Without this
+#     an attacker could trick a logged-in merchant into linking the
+#     attacker's store to the victim's session.
+#
+#  2. Real merchant_id: we DON'T trust the redirect URI alone to identify
+#     which store just authorised — we call GET /oauth2/user/info with the
+#     fresh access token and use the returned store.id as the canonical
+#     store_id. Previously we hardcoded "default", which overwrote every
+#     other tenant's slot on each new install.
+
+_OAUTH_STATE_COOKIE = "salla_oauth_state"
+_OAUTH_STATE_MAX_AGE = 600   # 10 min — install flow finishes much faster
+
+
+def _cookie_secure() -> bool:
+    """HTTPS cookies in prod, plain in dev. Detected from BASE_URL scheme."""
+    return os.getenv("BASE_URL", "").startswith("https://")
+
 
 @router.get("/auth/salla")
 async def salla_auth():
     base         = os.getenv("BASE_URL", "http://localhost:8000")
     redirect_uri = f"{base}/auth/callback"
-    return RedirectResponse(get_auth_url(redirect_uri))
+    state        = secrets.token_urlsafe(32)
+
+    resp = RedirectResponse(get_auth_url(redirect_uri, state=state))
+    resp.set_cookie(
+        key       = _OAUTH_STATE_COOKIE,
+        value     = state,
+        max_age   = _OAUTH_STATE_MAX_AGE,
+        httponly  = True,
+        secure    = _cookie_secure(),
+        samesite  = "lax",   # required: OAuth redirect is a top-level GET
+        path      = "/auth",
+    )
+    return resp
 
 
 @router.get("/auth/callback")
-async def salla_callback(code: str = "", error: str = ""):
+async def salla_callback(request: Request, code: str = "", error: str = "",
+                         state: str = ""):
+    # ── 1. CSRF state check ──────────────────────────────────────────────
+    cookie_state = request.cookies.get(_OAUTH_STATE_COOKIE, "")
+    if not state or not cookie_state or not hmac.compare_digest(state, cookie_state):
+        log.warning("oauth_state_mismatch", extra={
+            "has_query_state":  bool(state),
+            "has_cookie_state": bool(cookie_state),
+        })
+        return HTMLResponse(
+            "<h2 style='color:red;font-family:Arial'>فشل التحقق من جلسة التفويض. "
+            "أعد بدء التثبيت من البداية.</h2>",
+            status_code=400,
+        )
+
     if error or not code:
         return HTMLResponse(
             "<h2 style='color:red;font-family:Arial'>فشل التفويض. أعد المحاولة.</h2>",
             status_code=400,
         )
+
     base         = os.getenv("BASE_URL", "http://localhost:8000")
     redirect_uri = f"{base}/auth/callback"
     try:
         tokens        = await exchange_code(code, redirect_uri)
         access_token  = tokens["access_token"]
         refresh_token = tokens.get("refresh_token", "")
-        save_tokens(access_token, refresh_token)
-        sm.register_store("default", access_token, refresh_token)
+
+        # ── 2. Resolve the REAL merchant id ──────────────────────────────
+        # Without this every install would clobber the "default" slot.
+        store_id   = ""
+        store_name = ""
+        try:
+            info = await get_user_info(access_token)
+            data = info.get("data") or {}
+            merchant_blob = data.get("store") or data.get("merchant") or {}
+            sid = merchant_blob.get("id")
+            if sid:
+                store_id   = str(sid)
+                store_name = merchant_blob.get("name", "") or ""
+        except Exception as exc:
+            log.error("oauth_user_info_failed", extra={"err": str(exc)[:200]})
+
+        if not store_id:
+            # We refuse to register an unidentified merchant rather than
+            # silently overwriting the "default" slot like the old code.
+            return HTMLResponse(
+                "<h2 style='color:red;font-family:Arial'>تعذّر تحديد المتجر "
+                "بعد التفويض. يرجى المحاولة مجدداً أو التواصل مع الدعم.</h2>",
+                status_code=502,
+            )
+
+        sm.register_store(
+            store_id      = store_id,
+            access_token  = access_token,
+            refresh_token = refresh_token,
+            store_info    = {"store_name": store_name} if store_name else None,
+        )
         if _sync_task:
-            asyncio.create_task(_sync_task("default", access_token))
-        return HTMLResponse("""
+            asyncio.create_task(_sync_task(store_id, access_token))
+
+        resp = HTMLResponse(f"""
         <html><body style='font-family:Arial;text-align:center;padding:60px;direction:rtl'>
-          <h2 style='color:#16a34a'>✅ تم ربط المتجر بنجاح!</h2>
+          <h2 style='color:#16a34a'>✅ تم ربط متجر "{store_name or store_id}" بنجاح!</h2>
           <p>يمكنك إغلاق هذه الصفحة والعودة لاستخدام الشات بوت.</p>
           <a href='/admin' style='color:#3b82f6'>← فتح لوحة التحكم</a>
         </body></html>
         """)
+        # State cookie consumed — invalidate it so it can't be reused.
+        resp.delete_cookie(_OAUTH_STATE_COOKIE, path="/auth")
+        return resp
     except Exception as e:
+        log.exception("oauth_callback_failed")
+        # Never echo the raw exception back to the browser — could leak
+        # httpx request internals (URL, headers).
         return HTMLResponse(
-            f"<h2 style='color:red;font-family:Arial'>خطأ: {str(e)}</h2>",
+            "<h2 style='color:red;font-family:Arial'>حدث خطأ أثناء ربط المتجر. "
+            "أعد المحاولة من جديد.</h2>",
             status_code=500,
         )
 
