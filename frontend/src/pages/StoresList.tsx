@@ -156,6 +156,24 @@ export default function StoresList() {
     } finally { setDbTesting(false) }
   }
 
+  async function handleBackfillEmails() {
+    if (!confirm('سيتم استدعاء Salla لكل المتاجر اللي مالهاش owner_email وتعبئته. متابعة؟')) return
+    setDbTesting(true); setDbTestResult('')
+    try {
+      const r = await api.backfillOwnerEmails()
+      const failedHint = r.failed > 0
+        ? ` ⚠️ ${r.failed} متجر فشل — افتح console لتفاصيل`
+        : ''
+      if (r.failed > 0) {
+        console.warn('[backfill] failed rows:', r.failed_rows)
+      }
+      setDbTestResult(`✅ ${r.message}${failedHint}`)
+      await loadData()
+    } catch (e: unknown) {
+      setDbTestResult(`❌ خطأ: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally { setDbTesting(false) }
+  }
+
   async function handleReset(storeId: string) {
     if (!confirm(`إعادة تعيين كلمة مرور متجر ${storeId}؟`)) return
     try {
@@ -271,6 +289,19 @@ export default function StoresList() {
               : <Icon paths={['M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3']} size={13} />
             }
             تحميل من DB
+          </button>
+
+          <button
+            onClick={handleBackfillEmails}
+            disabled={dbTesting}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/15 disabled:opacity-60"
+            title="استدعاء Salla لتعبئة owner_email للمتاجر القديمة عشان تقدر تدخل بالـ email"
+          >
+            {dbTesting
+              ? <Spinner size="sm" color="warning" className="scale-75" />
+              : <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={13} />
+            }
+            تعبئة الإيميلات
           </button>
 
           <button

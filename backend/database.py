@@ -1373,6 +1373,32 @@ async def save_store(store_id: str, tokens: dict, owner_email: str = ""):
         print(f"[db] save_store({store_id!r}) error: {e}")
 
 
+async def set_store_owner_email(store_id: str, email: str) -> bool:
+    """
+    Set or clear the owner_email column for one store, without touching
+    the encrypted tokens blob (which would require a full re-encrypt).
+    Used by the super-admin backfill endpoint after fetching the email
+    from Salla's /oauth2/user/info for legacy stores.
+
+    Returns True if a row was updated. Empty `email` is allowed and stores
+    NULL — useful if a merchant explicitly wants their email unlinked.
+    """
+    if not _pool:
+        return False
+    e = (email or "").strip().lower() or None
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                "UPDATE stores SET owner_email = $1, updated_at = NOW() WHERE store_id = $2",
+                e, store_id,
+            )
+        # asyncpg returns 'UPDATE N' — trailing number is the row count
+        return r.split()[-1] != "0" if r else False
+    except Exception as ex:
+        print(f"[db] set_store_owner_email({store_id!r}) error: {ex}")
+        return False
+
+
 async def find_store_by_owner_email(email: str) -> str | None:
     """
     Find the store_id whose owner_email matches (case-insensitive).

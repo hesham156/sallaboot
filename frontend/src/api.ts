@@ -335,6 +335,20 @@ export const api = {
   reloadFromDb: () =>
     post<{ before: number; after: number; loaded: number; message: string }>('/admin/reload-from-db'),
 
+  // Super-admin: backfill owner_email for stores installed before the
+  // unified login shipped. Iterates registered stores, calls Salla
+  // /oauth2/user/info with the stored access_token, saves the returned
+  // email so the merchant can sign in via email/password.
+  backfillOwnerEmails: () =>
+    post<{
+      filled:      number
+      skipped:     number
+      failed:      number
+      filled_rows: Array<{ store_id: string; email: string }>
+      failed_rows: Array<{ store_id: string; reason: string }>
+      message:     string
+    }>('/admin/backfill-owner-emails'),
+
   // Super-admin: reset store password
   resetPassword: (storeId: string) =>
     put(`/admin/stores/${storeId}/reset-password`),
@@ -430,6 +444,8 @@ export interface StoreInfo {
   store_domain: string
   store_avatar: string
   connected_at: string
+  /** Salla owner email — empty until backfilled or re-installed. */
+  owner_email?: string
   products_count: number
   last_sync: string
   last_sync_errors: string[]

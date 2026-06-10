@@ -265,6 +265,89 @@ async def reload_from_db(request: Request):
     }
 
 
+@router.post("/admin/backfill-owner-emails")
+async def backfill_owner_emails(request: Request):
+    """
+    Walk every registered store that doesn't have an owner_email yet,
+    call Salla's /oauth2/user/info with the stored access_token, and
+    save the returned email. Used to migrate stores installed BEFORE
+    the unified email/password login shipped — without this they can't
+    sign in through the new UI.
+
+    Stores whose access_token is missing OR has expired without a
+    working refresh path are reported under `failed`. The endpoint is
+    safe to re-run: it skips stores that already have an email.
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
+
+    from salla_oauth import get_user_info, refresh_access_token
+
+    filled:  list[dict] = []
+    skipped: list[dict] = []
+    failed:  list[dict] = []
+
+    for s in sm.list_stores():
+        store_id = s["store_id"]
+        existing = (s.get("owner_email") or "").strip().lower()
+        if existing:
+            skipped.append({"store_id": store_id, "reason": "already_has_email", "email": existing})
+            continue
+
+        access_token = sm.get_access_token(store_id)
+        if not access_token:
+            failed.append({"store_id": store_id, "reason": "no_access_token"})
+            continue
+
+        # Try once with the current token; if it 401s, refresh and retry once.
+        # We swallow per-store errors so one broken token doesn't abort the
+        # whole batch.
+        async def _fetch_email(tok: str) -> str:
+            info  = await get_user_info(tok)
+            data  = info.get("data") or {}
+            return (data.get("email") or "").strip().lower()
+
+        email = ""
+        try:
+            email = await _fetch_email(access_token)
+        except Exception as exc1:
+            # Could be 401 expired — try a refresh + retry
+            try:
+                new_token = await refresh_access_token(store_id)
+                email = await _fetch_email(new_token)
+            except Exception as exc2:
+                failed.append({
+                    "store_id": store_id,
+                    "reason":   f"user_info_failed: {str(exc2)[:120]}",
+                })
+                continue
+
+        if not email:
+            failed.append({"store_id": store_id, "reason": "salla_returned_no_email"})
+            continue
+
+        # set_owner_email updates both the in-memory registry and the DB
+        # column — so the change is visible to the next /auth/login
+        # without waiting for a reload_from_db cycle.
+        if not sm.set_owner_email(store_id, email):
+            failed.append({"store_id": store_id, "reason": "registry_or_db_write_failed"})
+            continue
+
+        filled.append({"store_id": store_id, "email": email})
+
+    return {
+        "status":      "ok",
+        "filled":      len(filled),
+        "skipped":     len(skipped),
+        "failed":      len(failed),
+        "filled_rows": filled,
+        "failed_rows": failed,
+        "message":     f"تم تعبئة {len(filled)} متجر، تخطّي {len(skipped)}، فشل {len(failed)}",
+    }
+
+
 @router.get("/admin/db-test")
 async def db_diagnostic(request: Request):
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()

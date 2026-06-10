@@ -362,6 +362,28 @@ def is_registered(store_id: str) -> bool:
     return str(store_id) in _registry
 
 
+def get_owner_email(store_id: str) -> str:
+    """Stored owner email for unified email/password login. '' if unknown."""
+    return _registry.get(str(store_id), {}).get("tokens", {}).get("owner_email", "")
+
+
+def set_owner_email(store_id: str, email: str) -> bool:
+    """
+    Update the owner_email both in the in-memory registry and in the DB.
+    Returns True on DB write success. Empty string clears the link.
+
+    Used by the super-admin backfill endpoint to retro-fit emails onto
+    stores that were installed before the unified login shipped.
+    """
+    store_id = str(store_id)
+    if store_id not in _registry:
+        return False
+    e = (email or "").strip().lower()
+    _registry[store_id].setdefault("tokens", {})["owner_email"] = e
+    db.fire(db.set_store_owner_email(store_id, e))
+    return True
+
+
 def list_stores() -> list:
     """Summary list of all registered stores, sorted by connected_at desc."""
     result = []
@@ -374,6 +396,7 @@ def list_stores() -> list:
             "store_domain":     tokens.get("store_domain", ""),
             "store_avatar":     tokens.get("store_avatar", ""),
             "connected_at":     tokens.get("connected_at", ""),
+            "owner_email":      tokens.get("owner_email", ""),
             "products_count":   cache.get("products_count", 0),
             "last_sync":        cache.get("last_sync", "never"),
             "last_sync_errors": cache.get("last_sync_errors", []),
