@@ -85,6 +85,14 @@ const DEFAULT_CONFIG: FollowupConfig = {
   },
 }
 
+interface EditState {
+  customer: Customer
+  segment: string
+  notes: string
+  saving: boolean
+  error: string
+}
+
 export default function CustomerSegments({ storeId }: { storeId: string }) {
   const [tab, setTab]           = useState<'customers' | 'settings'>('customers')
   const [filter, setFilter]     = useState('')
@@ -98,6 +106,7 @@ export default function CustomerSegments({ storeId }: { storeId: string }) {
   const [cfgSaving, setCfgSaving]   = useState(false)
   const [cfgMsg, setCfgMsg]     = useState('')
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const [editState, setEditState] = useState<EditState | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -150,6 +159,29 @@ export default function CustomerSegments({ storeId }: { storeId: string }) {
     } catch (e) {
       alert(e instanceof ApiError ? e.detail : 'فشل الإرسال')
     } finally { setSendingId(null) }
+  }
+
+  const openEdit = (c: Customer) => {
+    setEditState({ customer: c, segment: c.segment, notes: c.notes || '', saving: false, error: '' })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editState) return
+    setEditState(s => s ? { ...s, saving: true, error: '' } : s)
+    try {
+      const res = await api.put<{ customer: Customer }>(
+        `/admin/${storeId}/segments/${encodeURIComponent(editState.customer.customer_id)}`,
+        { segment: editState.segment, notes: editState.notes }
+      )
+      setCustomers(cs => cs.map(c =>
+        c.customer_id === editState.customer.customer_id
+          ? { ...c, ...res.customer }
+          : c
+      ))
+      setEditState(null)
+    } catch (e) {
+      setEditState(s => s ? { ...s, saving: false, error: e instanceof ApiError ? e.detail : 'فشل الحفظ' } : s)
+    }
   }
 
   const handleSaveConfig = async () => {
@@ -260,8 +292,20 @@ export default function CustomerSegments({ storeId }: { storeId: string }) {
                           <span className="text-blue-400">المتابعة القادمة: {fmtDate(c.next_followup_at)}</span>
                         )}
                       </div>
+                      {c.notes && (
+                        <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 border border-amber-100">
+                          📝 {c.notes}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {/* Edit segment/notes */}
+                      <button
+                        onClick={() => openEdit(c)}
+                        title="تعديل التصنيف أو الملاحظات"
+                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
+                        <Icon d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={16} />
+                      </button>
                       {/* Send now */}
                       <button
                         onClick={() => handleSendNow(c.customer_id)}
@@ -383,6 +427,76 @@ export default function CustomerSegments({ storeId }: { storeId: string }) {
             </button>
           </div>
         )
+      )}
+
+      {/* ── Edit Modal ── */}
+      {editState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" dir="rtl">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-900">تعديل بيانات العميل</h2>
+              <button onClick={() => setEditState(null)}
+                className="text-gray-400 hover:text-gray-600 p-1">
+                <Icon d="M6 18L18 6M6 6l12 12" size={20} />
+              </button>
+            </div>
+
+            {/* Customer name */}
+            <div className="text-sm text-gray-500">
+              {editState.customer.customer_name || 'بدون اسم'} —{' '}
+              {editState.customer.phone || editState.customer.email || editState.customer.customer_id}
+            </div>
+
+            {/* Segment selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">التصنيف</label>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(SEGMENTS).map(([seg, meta]) => (
+                  <button key={seg}
+                    onClick={() => setEditState(s => s ? { ...s, segment: seg } : s)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 text-xs transition-all ${
+                      editState.segment === seg
+                        ? `border-blue-400 ${meta.bg}`
+                        : 'border-gray-100 hover:border-gray-300'
+                    }`}>
+                    <span className="text-lg">{meta.icon}</span>
+                    <span className={`font-medium ${editState.segment === seg ? meta.color : 'text-gray-600'}`}>
+                      {meta.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات الموظف</label>
+              <textarea
+                value={editState.notes}
+                onChange={e => setEditState(s => s ? { ...s, notes: e.target.value } : s)}
+                rows={3}
+                placeholder="مثال: العميل طلب عرض سعر للطباعة الكبيرة..."
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none"
+              />
+            </div>
+
+            {editState.error && (
+              <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{editState.error}</p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setEditState(null)}
+                className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50 transition-colors">
+                إلغاء
+              </button>
+              <button onClick={handleSaveEdit} disabled={editState.saving}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+                {editState.saving ? <Spinner size="sm" color="white" /> : null}
+                حفظ التعديلات
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

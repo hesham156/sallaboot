@@ -68,6 +68,55 @@ async def trigger_scan(store_id: str):
             "message": f"✅ تم تصنيف {n} عميل من المحادثات الموجودة"}
 
 
+# ── Manual update: segment + notes ───────────────────────────────────────────
+
+@router.put("/admin/{store_id}/segments/{customer_id}")
+async def update_customer(store_id: str, customer_id: str, request: Request):
+    _require_store(store_id)
+    body = await request.json()
+
+    allowed_segments = {"new", "inquiry", "hesitant", "buyer", "loyal", "inactive"}
+    new_segment = body.get("segment", "").strip()
+    notes       = body.get("notes", "").strip()
+
+    if new_segment and new_segment not in allowed_segments:
+        raise HTTPException(400, f"تصنيف غير صالح: {new_segment}")
+
+    pool = db._pool
+    if not pool:
+        raise HTTPException(503, "قاعدة البيانات غير متاحة")
+
+    fields, vals = [], []
+    idx = 1
+    if new_segment:
+        fields.append(f"segment = ${idx}")
+        vals.append(new_segment)
+        idx += 1
+        fields.append(f"segment_reason = ${idx}")
+        vals.append("تم التصنيف يدوياً")
+        idx += 1
+    if "notes" in body:
+        fields.append(f"notes = ${idx}")
+        vals.append(notes)
+        idx += 1
+
+    if not fields:
+        raise HTTPException(400, "لا توجد حقول للتحديث")
+
+    fields.append(f"updated_at = NOW()")
+    vals += [store_id, customer_id]
+    q = (
+        f"UPDATE customer_segments SET {', '.join(fields)} "
+        f"WHERE store_id = ${idx} AND customer_id = ${idx + 1} "
+        f"RETURNING *"
+    )
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(q, *vals)
+    if not row:
+        raise HTTPException(404, "العميل غير موجود")
+    return {"status": "ok", "customer": dict(row)}
+
+
 # ── Pause / resume a customer's follow-up ────────────────────────────────────
 
 @router.put("/admin/{store_id}/segments/{customer_id}/pause")
