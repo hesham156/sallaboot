@@ -30,6 +30,17 @@ def _require_store(store_id: str):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
 
 
+def _json_safe(v):
+    """Convert asyncpg non-JSON-serializable types to Python primitives."""
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    if hasattr(v, "__int__") and not isinstance(v, (bool, int)):
+        return int(v)
+    if hasattr(v, "__float__") and not isinstance(v, float):
+        return float(v)
+    return v
+
+
 # ── List customers with their segments ────────────────────────────────────────
 
 @router.get("/admin/{store_id}/segments")
@@ -38,15 +49,7 @@ async def list_segments(store_id: str, segment: str = "", limit: int = 100, offs
     try:
         rows = await db.seg_list(store_id, segment or None, limit=limit, offset=offset)
         def _clean(r: dict) -> dict:
-            out = {}
-            for k, v in r.items():
-                if hasattr(v, "isoformat"):
-                    out[k] = v.isoformat()
-                elif hasattr(v, "__int__"):
-                    out[k] = int(v)
-                else:
-                    out[k] = v
-            return out
+            return {k: _json_safe(v) for k, v in r.items()}
         return {"customers": [_clean(r) for r in rows], "count": len(rows)}
     except Exception as exc:
         log.error("segments_list_error", extra={"store_id": store_id, "error": str(exc)})

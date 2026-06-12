@@ -2984,3 +2984,160 @@ async def wa_template_delete(store_id: str, name: str) -> bool:
     except Exception as e:
         print(f"[db] wa_template_delete error: {e}")
         return False
+
+
+# ── Customer Segments ─────────────────────────────────────────────────────────
+
+async def seg_upsert(store_id: str, customer_id: str, data: dict) -> dict | None:
+    """Insert or update a customer segment row. Returns the saved row."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO customer_segments
+                    (store_id, customer_id, customer_name, phone, email,
+                     segment, segment_reason, last_order_id, last_order_at,
+                     last_conv_id, last_conv_at, next_followup_at, notes, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+                ON CONFLICT (store_id, customer_id) DO UPDATE SET
+                    customer_name    = COALESCE(NULLIF(EXCLUDED.customer_name,''), customer_segments.customer_name),
+                    phone            = COALESCE(NULLIF(EXCLUDED.phone,''),         customer_segments.phone),
+                    email            = COALESCE(NULLIF(EXCLUDED.email,''),         customer_segments.email),
+                    segment          = EXCLUDED.segment,
+                    segment_reason   = EXCLUDED.segment_reason,
+                    last_order_id    = COALESCE(EXCLUDED.last_order_id,   customer_segments.last_order_id),
+                    last_order_at    = COALESCE(EXCLUDED.last_order_at,   customer_segments.last_order_at),
+                    last_conv_id     = COALESCE(EXCLUDED.last_conv_id,    customer_segments.last_conv_id),
+                    last_conv_at     = COALESCE(EXCLUDED.last_conv_at,    customer_segments.last_conv_at),
+                    next_followup_at = EXCLUDED.next_followup_at,
+                    notes            = COALESCE(NULLIF(EXCLUDED.notes,''), customer_segments.notes),
+                    updated_at       = NOW()
+                RETURNING *
+            """,
+            store_id, customer_id,
+            data.get("customer_name", ""), data.get("phone", ""), data.get("email", ""),
+            data.get("segment", "new"), data.get("segment_reason", ""),
+            data.get("last_order_id"), data.get("last_order_at"),
+            data.get("last_conv_id"), data.get("last_conv_at"),
+            data.get("next_followup_at"), data.get("notes", ""))
+            return dict(row) if row else None
+    except Exception as e:
+        print(f"[db] seg_upsert error: {e}")
+        return None
+
+
+async def seg_list(store_id: str, segment: str | None = None,
+                   limit: int = 100, offset: int = 0) -> list[dict]:
+    """List customer segments for a store, optionally filtered by segment type."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            if segment:
+                rows = await conn.fetch("""
+                    SELECT * FROM customer_segments
+                    WHERE store_id=$1 AND segment=$2
+                    ORDER BY updated_at DESC LIMIT $3 OFFSET $4
+                """, store_id, segment, limit, offset)
+            else:
+                rows = await conn.fetch("""
+                    SELECT * FROM customer_segments
+                    WHERE store_id=$1
+                    ORDER BY updated_at DESC LIMIT $2 OFFSET $3
+                """, store_id, limit, offset)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[db] seg_list error: {e}")
+        return []
+
+
+async def seg_count_by_type(store_id: str) -> dict:
+    """Return {segment: count} for all segments in a store."""
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT segment, COUNT(*) as cnt
+                FROM customer_segments WHERE store_id=$1
+                GROUP BY segment
+            """, store_id)
+            return {r["segment"]: int(r["cnt"]) for r in rows}
+    except Exception as e:
+        print(f"[db] seg_count_by_type error: {e}")
+        return {}
+
+
+async def seg_get_due_followups(store_id: str, limit: int = 50) -> list[dict]:
+    """Return customers whose next_followup_at <= now and not paused."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM customer_segments
+                WHERE store_id=$1
+                  AND next_followup_at <= NOW()
+                  AND followup_paused = FALSE
+                  AND phone <> ''
+                ORDER BY next_followup_at ASC
+                LIMIT $2
+            """, store_id, limit)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[db] seg_get_due_followups error: {e}")
+        return []
+
+
+async def seg_mark_followup_sent(store_id: str, customer_id: str,
+                                 next_followup_at=None) -> None:
+    """Increment followup_count and set last/next followup timestamps."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE customer_segments
+                SET followup_count   = followup_count + 1,
+                    last_followup_at = NOW(),
+                    next_followup_at = $3,
+                    updated_at       = NOW()
+                WHERE store_id=$1 AND customer_id=$2
+            """, store_id, customer_id, next_followup_at)
+    except Exception as e:
+        print(f"[db] seg_mark_followup_sent error: {e}")
+
+
+async def seg_pause(store_id: str, customer_id: str, paused: bool) -> None:
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE customer_segments
+                SET followup_paused=$3, updated_at=NOW()
+                WHERE store_id=$1 AND customer_id=$2
+            """, store_id, customer_id, paused)
+    except Exception as e:
+        print(f"[db] seg_pause error: {e}")
+
+
+async def seg_get_all_stores_due() -> list[dict]:
+    """Return all customers across all stores with due follow-ups."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM customer_segments
+                WHERE next_followup_at <= NOW()
+                  AND followup_paused = FALSE
+                  AND phone <> ''
+                ORDER BY next_followup_at ASC
+                LIMIT 200
+            """)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[db] seg_get_all_stores_due error: {e}")
+        return []
