@@ -35,17 +35,22 @@ def _require_store(store_id: str):
 @router.get("/admin/{store_id}/segments")
 async def list_segments(store_id: str, segment: str = "", limit: int = 100, offset: int = 0):
     _require_store(store_id)
-    rows = await db.seg_list(store_id, segment or None, limit=limit, offset=offset)
-    # Convert datetime fields to ISO strings for JSON
-    def _clean(r: dict) -> dict:
-        out = {}
-        for k, v in r.items():
-            if hasattr(v, "isoformat"):
-                out[k] = v.isoformat()
-            else:
-                out[k] = v
-        return out
-    return {"customers": [_clean(r) for r in rows], "count": len(rows)}
+    try:
+        rows = await db.seg_list(store_id, segment or None, limit=limit, offset=offset)
+        def _clean(r: dict) -> dict:
+            out = {}
+            for k, v in r.items():
+                if hasattr(v, "isoformat"):
+                    out[k] = v.isoformat()
+                elif hasattr(v, "__int__"):
+                    out[k] = int(v)
+                else:
+                    out[k] = v
+            return out
+        return {"customers": [_clean(r) for r in rows], "count": len(rows)}
+    except Exception as exc:
+        log.error("segments_list_error", extra={"store_id": store_id, "error": str(exc)})
+        raise HTTPException(500, f"خطأ في قاعدة البيانات: {exc}")
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -53,9 +58,13 @@ async def list_segments(store_id: str, segment: str = "", limit: int = 100, offs
 @router.get("/admin/{store_id}/segments/stats")
 async def segment_stats(store_id: str):
     _require_store(store_id)
-    counts = await db.seg_count_by_type(store_id)
-    total  = sum(counts.values())
-    return {"counts": counts, "total": total}
+    try:
+        counts = await db.seg_count_by_type(store_id)
+        total  = sum(int(v) for v in counts.values())
+        return {"counts": {k: int(v) for k, v in counts.items()}, "total": total}
+    except Exception as exc:
+        log.error("segments_stats_error", extra={"store_id": store_id, "error": str(exc)})
+        raise HTTPException(500, f"خطأ في قاعدة البيانات: {exc}")
 
 
 # ── Scan existing conversations and classify ──────────────────────────────────
