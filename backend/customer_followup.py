@@ -201,10 +201,22 @@ async def classify_from_conversation(store_id: str, session_id: str,
         if not customer_id or customer_id == "phone:":
             return
 
-        phone = str(conv_data.get("customer_phone") or
-                    conv_data.get("wa_sender") or "").strip()
-        name  = str(conv_data.get("customer_name") or "").strip()
-        email = str(conv_data.get("customer_email") or "").strip()
+        # customer_info is a nested dict inside the conversation data
+        cust_info = conv_data.get("customer_info") or {}
+        if isinstance(cust_info, str):
+            try:
+                import json as _json
+                cust_info = _json.loads(cust_info)
+            except Exception:
+                cust_info = {}
+
+        phone = str(
+            cust_info.get("phone") or
+            conv_data.get("customer_phone") or
+            conv_data.get("wa_sender") or ""
+        ).strip()
+        name  = str(cust_info.get("name") or conv_data.get("customer_name") or "").strip()
+        email = str(cust_info.get("email") or conv_data.get("customer_email") or "").strip()
 
         # Extract customer messages from the messages array
         messages_raw = conv_data.get("messages") or []
@@ -348,9 +360,11 @@ async def scan_store_conversations(store_id: str, limit: int = 500) -> int:
                 SELECT session_id, data, updated_at
                 FROM conversations
                 WHERE store_id = $1
-                  AND (data->>'salla_customer_id' IS NOT NULL
-                       OR data->>'customer_phone' IS NOT NULL
-                       OR data->>'wa_sender' IS NOT NULL)
+                  AND (
+                    (data->>'salla_customer_id' IS NOT NULL AND data->>'salla_customer_id' <> '')
+                    OR (data->'customer_info'->>'phone' IS NOT NULL AND data->'customer_info'->>'phone' <> '')
+                    OR (data->>'wa_sender' IS NOT NULL AND data->>'wa_sender' <> '')
+                  )
                 ORDER BY updated_at DESC
                 LIMIT $2
             """, store_id, limit)
