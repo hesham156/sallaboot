@@ -49,7 +49,7 @@ def _is_browser_navigation(request: Request) -> bool:
 # endpoints themselves).
 
 _PROTECTED_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log|support-access)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log|support-access|whatsapp|segments)"
 )
 _SUPER_PROTECTED_RE = re.compile(r"^/admin/stores$")
 
@@ -69,7 +69,7 @@ _SYSTEM_STORES = {"sallabot"}
 # Conversations / orders / abandoned-carts / info / bot status stay open
 # because that's the customer-service work they're hired to do.
 _MANAGER_ONLY_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)[^/]+/(settings|analytics|sync|products|debug|webhooks|training|brain|pricing|llm-usage|llm-budget|audit-log)"
+    r"^/admin/(?!stores$|auth/)[^/]+/(settings|analytics|sync|products|debug|webhooks|training|brain|pricing|llm-usage|llm-budget|audit-log|whatsapp|segments)"
 )
 # Owner-only paths (blocks BOTH agents and managers). llm-budget is here
 # because raising/lowering the daily token cap is a financial-risk knob —
