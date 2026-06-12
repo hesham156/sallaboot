@@ -252,6 +252,22 @@ async def _handle_order_event(event: str, merchant_id: str, data: dict):
 
     if event == "order.created":
         await _wa_order_created(store_id, cfg, data, order_ref, total_amt, currency)
+        # Classify customer as buyer
+        try:
+            from customer_followup import classify_customer
+            customer = data.get("customer") or {}
+            phone = _extract_phone(customer)
+            name  = _extract_name(customer)
+            cust_id = str(customer.get("id") or phone or "")
+            if cust_id:
+                await classify_customer(
+                    store_id=store_id, customer_id=cust_id,
+                    customer_name=name, phone=phone,
+                    order_count=1, last_order_id=order_id,
+                    last_order_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                )
+        except Exception as _ce:
+            print(f"[webhook] classify buyer error: {_ce}")
     elif event in ("order.status.updated", "order.updated"):
         await _wa_order_status(store_id, cfg, data, order_ref, status_name)
     elif event in ("order.invoice.created", "invoice.created"):

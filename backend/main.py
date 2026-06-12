@@ -133,6 +133,7 @@ from routers import chat      as _chat_router
 from routers import stream    as _stream_router
 from routers import files        as _files_router
 from routers import wa_templates as _wa_templates_router
+from routers import segments     as _segments_router
 
 # Wire lifecycle.sync_task into routers that need it.
 _stores_router.set_sync_task(_lc.sync_task)
@@ -152,6 +153,7 @@ app.include_router(_chat_router.router)
 app.include_router(_stream_router.router)
 app.include_router(_files_router.router)
 app.include_router(_wa_templates_router.router)
+app.include_router(_segments_router.router)
 
 # Backward-compat aliases for tests that import from main
 _process_salla_event     = _webhooks_router.process_salla_event

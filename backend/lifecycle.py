@@ -196,6 +196,24 @@ async def periodic_cleanup_loop() -> None:
         await asyncio.sleep(6 * 3600)
 
 
+async def followup_loop() -> None:
+    """
+    Every 30 min: send due WhatsApp follow-ups to classified customers.
+    Leader-elected so only one instance fires per window.
+    """
+    await asyncio.sleep(180)   # let startup settle
+    while True:
+        try:
+            if await db.try_lead("followup_loop", WORKER_ID, ttl_seconds=1800):
+                from customer_followup import run_followup_pass
+                sent = await run_followup_pass()
+                if sent:
+                    print(f"[followup_loop] 📱 Sent {sent} follow-up message(s)")
+        except Exception as exc:
+            print(f"[followup_loop] ❌ Error: {exc}")
+        await asyncio.sleep(1800)   # 30 minutes
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Inbox + outbox drainers
 # ─────────────────────────────────────────────────────────────────────────
@@ -345,6 +363,7 @@ async def startup() -> None:
         asyncio.create_task(token_refresh_loop())
         asyncio.create_task(periodic_flush_loop())
         asyncio.create_task(periodic_cleanup_loop())
+        asyncio.create_task(followup_loop())
         print("[startup] 🔄💾🧹 Periodic loops registered (leader-elected)")
     else:
         print("[startup] ⏸ Periodic loops disabled (ENABLE_PERIODIC=false)")

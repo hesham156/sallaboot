@@ -96,6 +96,11 @@ const del  = <T>(url: string) => req<T>('DELETE', url)
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
 export const api = {
+  // Raw helpers for one-off requests
+  get: <T>(url: string) => get<T>(url),
+  post: <T>(url: string, body?: unknown) => post<T>(url, body),
+  put: <T>(url: string, body?: unknown) => put<T>(url, body),
+
   // Unified email/password login. Backend figures out which kind of
   // account the email belongs to (super → employee → store owner) and
   // returns a uniform response.

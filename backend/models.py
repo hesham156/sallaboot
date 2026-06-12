@@ -87,6 +87,7 @@ class AIConfigRequest(BaseModel):
     # WhatsApp Cloud API (Meta) — per-store channel config
     whatsapp_token:    Optional[str] = None  # access token (write-only; "" keeps existing)
     whatsapp_phone_id: Optional[str] = None  # Phone Number ID
+    whatsapp_waba_id:  Optional[str] = None  # WhatsApp Business Account ID
     whatsapp_enabled:  Optional[bool] = None
 
 

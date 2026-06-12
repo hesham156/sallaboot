@@ -66,10 +66,11 @@ async def get_ai_settings(store_id: str):
         "bot_name":          cfg.get("bot_name",  ""),
         "provider":          provider,
         "store_type":        store_type,
-        "whatsapp_enabled":   bool(cfg.get("whatsapp_enabled")),
-        "whatsapp_phone_id":  cfg.get("whatsapp_phone_id", ""),
-        "whatsapp_token":     "••••" if cfg.get("whatsapp_token") else "",
-        "whatsapp_webhook":   (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
+        "whatsapp_enabled":    bool(cfg.get("whatsapp_enabled")),
+        "whatsapp_phone_id":   cfg.get("whatsapp_phone_id", ""),
+        "whatsapp_token":      "••••" if cfg.get("whatsapp_token") else "",
+        "whatsapp_waba_id":    cfg.get("whatsapp_waba_id", ""),
+        "whatsapp_webhook":    (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
         "whatsapp_verify_token": _wa.VERIFY_TOKEN,
     }
 
@@ -104,6 +105,8 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
         config["whatsapp_enabled"] = bool(req.whatsapp_enabled)
     if req.whatsapp_token is not None and req.whatsapp_token.strip():
         config["whatsapp_token"] = req.whatsapp_token.strip()
+    if req.whatsapp_waba_id is not None:
+        config["whatsapp_waba_id"] = req.whatsapp_waba_id.strip()
 
     if groq_key:
         config["anthropic_api_key"] = ""

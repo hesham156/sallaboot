@@ -21,6 +21,7 @@ const LlmUsage       = lazy(() => import('./store/LlmUsage'))
 const SupportAccess    = lazy(() => import('./store/SupportAccess'))
 const WhatsAppEvents     = lazy(() => import('./store/WhatsAppEvents'))
 const WhatsAppTemplates  = lazy(() => import('./store/WhatsAppTemplates'))
+const CustomerSegments   = lazy(() => import('./store/CustomerSegments'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -149,6 +150,15 @@ const NAV_ITEMS: Array<{
     activeColor: 'text-fuchsia-400',
     activeBg: 'bg-fuchsia-500/10',
     activeBorder: 'border-r-fuchsia-500',
+    roles: ['owner', 'manager'],
+  },
+  {
+    key: 'customer-segments',
+    label: 'تصنيف العملاء',
+    icon: ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'],
+    activeColor: 'text-orange-500',
+    activeBg: 'bg-orange-500/10',
+    activeBorder: 'border-r-orange-500',
     roles: ['owner', 'manager'],
   },
   {
@@ -549,6 +559,7 @@ export default function StoreDashboard() {
               <Route path="brain"           element={<Brain           storeId={storeId} />} />
               <Route path="training"        element={<Training        storeId={storeId} />} />
               <Route path="llm-usage"       element={<LlmUsage        storeId={storeId} />} />
+              <Route path="customer-segments"  element={<CustomerSegments  storeId={storeId} />} />
               <Route path="whatsapp-templates" element={<WhatsAppTemplates storeId={storeId} />} />
               <Route path="whatsapp-events" element={<WhatsAppEvents    storeId={storeId} />} />
             </>}
