@@ -114,12 +114,14 @@ async def store_spa_sub(store_id: str, rest: str):
 async def health():
     stores = sm.list_stores()
     total_products = sum(s.get("products_count", 0) for s in stores)
+    db_ok = db.available()
     return {
-        "status":           "ok",
-        "service":          "salla-printing-chatbot",
-        "version":          "2.0.0",
-        "stores_count":     len(stores),
-        "total_products":   total_products,
+        "status":         "ok" if db_ok else "degraded",
+        "service":        "salla-printing-chatbot",
+        "version":        "2.0.0",
+        "stores_count":   len(stores),
+        "total_products": total_products,
+        "db":             "ok" if db_ok else "unavailable",
     }
 
 

@@ -33,6 +33,9 @@ from typing import Optional
 import database as db
 import store_manager as sm
 import whatsapp as wa
+from log import get_logger
+
+log = get_logger(__name__)
 
 # ── Keyword patterns for rule-based classification ───────────────────────────
 
@@ -234,7 +237,7 @@ async def classify_from_conversation(store_id: str, session_id: str,
             last_conv_at  = datetime.now(timezone.utc),
         )
     except Exception as exc:
-        print(f"[followup] classify_from_conversation error: {exc}")
+        log.error("followup_classify_error", extra={"error": str(exc)})
 
 
 # ── Follow-up sender ──────────────────────────────────────────────────────────
@@ -296,11 +299,11 @@ async def send_followup(store_id: str, customer: dict) -> bool:
             await db.seg_mark_followup_sent(
                 store_id, customer["customer_id"], next_fu
             )
-            print(f"[followup] ✅ Sent to {phone} ({segment}) store={store_id}")
+            log.info("followup_sent", extra={"phone": phone, "segment": segment, "store_id": store_id})
 
         return ok
     except Exception as exc:
-        print(f"[followup] send_followup error: {exc}")
+        log.error("followup_send_error", extra={"error": str(exc)})
         return False
 
 
@@ -360,5 +363,5 @@ async def scan_store_conversations(store_id: str, limit: int = 500) -> int:
             upserted += 1
         return upserted
     except Exception as exc:
-        print(f"[followup] scan_store_conversations error: {exc}")
+        log.error("followup_scan_error", extra={"error": str(exc)})
         return 0

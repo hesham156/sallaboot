@@ -267,7 +267,7 @@ async def _handle_order_event(event: str, merchant_id: str, data: dict):
                     last_order_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
                 )
         except Exception as _ce:
-            print(f"[webhook] classify buyer error: {_ce}")
+            log.warning("classify_buyer_error", extra={"error": str(_ce)})
     elif event in ("order.status.updated", "order.updated"):
         await _wa_order_status(store_id, cfg, data, order_ref, status_name)
     elif event in ("order.invoice.created", "invoice.created"):

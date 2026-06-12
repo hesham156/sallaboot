@@ -15,12 +15,14 @@ from fastapi import APIRouter, HTTPException, Request
 
 import database as db
 import store_manager as sm
+from log import get_logger
 from customer_followup import (
     classify_customer, scan_store_conversations,
     send_followup, _get_followup_config, _save_followup_config,
 )
 
 router = APIRouter()
+log = get_logger(__name__)
 
 
 def _require_store(store_id: str):

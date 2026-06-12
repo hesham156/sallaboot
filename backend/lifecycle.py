@@ -208,9 +208,9 @@ async def followup_loop() -> None:
                 from customer_followup import run_followup_pass
                 sent = await run_followup_pass()
                 if sent:
-                    print(f"[followup_loop] 📱 Sent {sent} follow-up message(s)")
+                    log.info("followup_loop_sent", extra={"sent": sent})
         except Exception as exc:
-            print(f"[followup_loop] ❌ Error: {exc}")
+            log.error("followup_loop_error", extra={"error": str(exc)})
         await asyncio.sleep(1800)   # 30 minutes
 
 
