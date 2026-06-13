@@ -14,11 +14,18 @@ import type { ReactNode } from 'react'
  * instead of a jarring snap.
  */
 
-const EASE = [0.25, 0.46, 0.45, 0.94] as const
-const DURATION = 0.55
-const REDUCED_DURATION = 0.15
-const DISTANCE = 40
-const VIEWPORT_MARGIN = '-80px'
+// Expo-out — the gold-standard "Apple feel" curve: starts fast, lands like
+// silk. Pairs with a slightly longer duration and a smaller distance to
+// avoid the snap-in effect that linear/quad curves give at higher speeds.
+const EASE = [0.16, 1, 0.3, 1] as const
+const DURATION = 0.85
+const REDUCED_DURATION = 0.2
+const DISTANCE = 24
+const STAGGER = 0.1
+// Trigger slightly before the element is fully in frame so it animates
+// while the user is still scrolling toward it — feels anticipatory, not
+// reactive. amount=0.15 means "fire when 15% of the element is visible".
+const VIEWPORT_AMOUNT = 0.15
 
 type Direction = 'up' | 'left' | 'right'
 
@@ -37,7 +44,7 @@ export const fadeUpVariants: Variants = {
 
 export const staggerVariants: Variants = {
   hidden: {},
-  visible: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } },
+  visible: { transition: { staggerChildren: STAGGER, delayChildren: 0.05 } },
 }
 
 /* ── AnimatedSection ── */
@@ -67,7 +74,7 @@ export function AnimatedSection({
       className={className}
       initial={{ opacity: 0, ...offset }}
       whileInView={{ opacity: 1, x: 0, y: 0 }}
-      viewport={{ once, margin: VIEWPORT_MARGIN }}
+      viewport={{ once, amount: VIEWPORT_AMOUNT }}
       transition={{ duration, ease: EASE, delay }}
     >
       {children}
@@ -94,7 +101,7 @@ export function StaggerContainer({ children, className, once = true }: StaggerCo
       className={className}
       initial="hidden"
       whileInView="visible"
-      viewport={{ once, margin: VIEWPORT_MARGIN }}
+      viewport={{ once, amount: VIEWPORT_AMOUNT }}
       variants={variants}
     >
       {children}
