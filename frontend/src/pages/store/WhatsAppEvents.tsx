@@ -22,6 +22,7 @@ interface EventDef {
   icon: string | string[]
   iconBg: string
   iconColor: string
+  accent: string  // hex — used for the hover glow and accent stripe
   isNew?: boolean
   readOnly?: boolean
 }
@@ -32,21 +33,24 @@ const EVENT_DEFS: EventDef[] = [
     label: 'سلة متروكة',
     description: 'يُرسل رسالة للعميل عبر WhatsApp عندما يترك سلة التسوق دون إتمام الشراء.',
     icon: ['M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z', 'M3 6h18', 'M16 10a4 4 0 0 1-8 0'],
-    iconBg: 'bg-blue-50', iconColor: 'text-blue-500',
+    iconBg: 'bg-blue-50', iconColor: 'text-blue-600',
+    accent: '#3b82f6',
   },
   {
     key: 'customer_welcome',
     label: 'ترحيب بعميل جديد',
     description: 'رسالة ترحيب تلقائية عبر WhatsApp عندما يسجّل عميل جديد في متجرك.',
     icon: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
-    iconBg: 'bg-purple-50', iconColor: 'text-purple-500',
+    iconBg: 'bg-purple-50', iconColor: 'text-purple-600',
+    accent: '#a855f7',
   },
   {
     key: 'new_order',
     label: 'طلب جديد',
     description: 'إشعار فوري للعميل عبر WhatsApp عند تقديم طلب جديد في المتجر.',
     icon: ['M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2', 'M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2', 'M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2'],
-    iconBg: 'bg-green-50', iconColor: 'text-green-600',
+    iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600',
+    accent: '#10b981',
     isNew: true,
   },
   {
@@ -54,21 +58,24 @@ const EVENT_DEFS: EventDef[] = [
     label: 'تحديث حالة الطلب',
     description: 'يُخطر العميل بتغييرات حالة طلبه (قيد التوصيل، مكتمل، إلخ) عبر WhatsApp.',
     icon: ['M9 3H5a2 2 0 0 0-2 2v4', 'M9 3h6', 'M9 3v4', 'M15 3h4a2 2 0 0 1 2 2v4', 'M21 9v6', 'M3 9v6', 'M3 15a2 2 0 0 0 2 2h4', 'M15 17h4a2 2 0 0 0 2-2'],
-    iconBg: 'bg-orange-50', iconColor: 'text-orange-500',
+    iconBg: 'bg-orange-50', iconColor: 'text-orange-600',
+    accent: '#f97316',
   },
   {
     key: 'invoice_created',
     label: 'إنشاء فاتورة',
     description: 'إشعار للعميل عبر WhatsApp عند إنشاء فاتورة لطلبه.',
     icon: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8'],
-    iconBg: 'bg-slate-50', iconColor: 'text-slate-500',
+    iconBg: 'bg-amber-50', iconColor: 'text-amber-600',
+    accent: '#d97706',
   },
   {
     key: 'verification_code',
     label: 'رمز التحقق',
     description: 'إرسال رمز التحقق للعميل عبر WhatsApp عند محاولة تسجيل الدخول.',
     icon: ['M8 9h8', 'M8 13h6', 'M18 2H6a2 2 0 0 0-2 2v16l4-2 4 2 4-2 4 2V4a2 2 0 0 0-2-2z'],
-    iconBg: 'bg-slate-50', iconColor: 'text-slate-400',
+    iconBg: 'bg-rose-50', iconColor: 'text-rose-500',
+    accent: '#f43f5e',
     readOnly: true,
   },
   {
@@ -76,14 +83,16 @@ const EVENT_DEFS: EventDef[] = [
     label: 'إنشاء شحنة',
     description: 'إشعار للعميل عبر WhatsApp بمعلومات الشحن ورقم التتبع.',
     icon: ['M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v9a2 2 0 0 1-2 2h-3', 'M16 3.13V8H11', 'M16 17a2 2 0 1 1-4 0 2 2 0 0 1 4 0', 'M7 17a2 2 0 1 1-4 0 2 2 0 0 1 4 0'],
-    iconBg: 'bg-slate-50', iconColor: 'text-slate-500',
+    iconBg: 'bg-cyan-50', iconColor: 'text-cyan-600',
+    accent: '#06b6d4',
   },
   {
     key: 'review_added',
     label: 'إضافة تقييم',
     description: 'يُرسَل هذا الحدث عند إضافة تقييم لمنتج ويُشكر العميل تلقائياً.',
     icon: ['M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z'],
-    iconBg: 'bg-slate-50', iconColor: 'text-slate-500',
+    iconBg: 'bg-yellow-50', iconColor: 'text-yellow-600',
+    accent: '#eab308',
   },
 ]
 
@@ -260,55 +269,153 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
   )
 
   const activeDef = configuring ? EVENT_DEFS.find(d => d.key === configuring) : null
+  const enabledCount = EVENT_DEFS.filter(d => events[d.key]?.enabled).length
+  const configurableCount = EVENT_DEFS.filter(d => !d.readOnly).length
 
   return (
-    <div className="space-y-6" dir="rtl">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-foreground">أحداث WhatsApp</h1>
-        <p className="text-sm text-default-500 mt-1">
-          خصّص رسائل WhatsApp التلقائية التي تُرسَل لعملائك عند كل حدث في متجرك.
-        </p>
+    <div className="relative space-y-8 pb-4" dir="rtl">
+      {/* ─── Atmospheric background ─── */}
+      <div className="absolute top-[-3rem] right-[-3rem] w-[26rem] h-[26rem] bg-emerald-400/15 rounded-full blur-[140px] pointer-events-none -z-10" />
+      <div className="absolute top-32 left-[-4rem] w-[22rem] h-[22rem] bg-teal-400/10 rounded-full blur-[140px] pointer-events-none -z-10" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,_theme(colors.default.200)_1px,_transparent_0)] [background-size:24px_24px] opacity-40 pointer-events-none -z-10" />
+
+      {/* ─── Header ─── */}
+      <div className="relative flex flex-wrap items-end justify-between gap-6">
+        <div className="flex-1 min-w-[260px]">
+          <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-full px-3 py-1 mb-3">
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
+              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.12.554 4.106 1.521 5.836L.057 23.887l6.217-1.432A11.946 11.946 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0z" />
+            </svg>
+            تكامل مباشر مع WhatsApp Business
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-black text-foreground tracking-tight leading-tight">
+            أحداث <span className="text-gradient">WhatsApp</span>
+          </h1>
+          <p className="text-sm text-default-500 mt-3 max-w-xl leading-relaxed">
+            كل حدث في متجرك = رسالة في الوقت المناسب — من ترحيب العميل لحد متابعة الشحنة. خصّص الرسائل بنفسك أو خلّيهم على الافتراضي.
+          </p>
+        </div>
+
+        {/* Stats card */}
+        <div className="bg-content1 border border-divider rounded-2xl px-5 py-3.5 flex items-center gap-4 shadow-sm">
+          <div className="text-right">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-3xl font-black text-emerald-600 leading-none">{enabledCount}</span>
+              <span className="text-sm font-bold text-default-400">/ {EVENT_DEFS.length}</span>
+            </div>
+            <p className="text-[10px] font-semibold text-default-500 mt-0.5 uppercase tracking-wide">حدث مفعّل</p>
+          </div>
+          <div className="h-10 w-px bg-divider" />
+          <div className="text-right">
+            <p className="text-xl font-black text-foreground leading-none">{configurableCount}</p>
+            <p className="text-[10px] font-semibold text-default-500 mt-0.5 uppercase tracking-wide">قابل للتخصيص</p>
+          </div>
+        </div>
       </div>
 
-      {/* Cards grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {/* ─── Cards grid ─── */}
+      <div className="relative grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {EVENT_DEFS.map(def => {
           const ev = events[def.key] ?? { enabled: false, template: '' }
+          const isHero = def.isNew
+
           return (
             <div
               key={def.key}
-              className="group bg-content1 border border-divider rounded-2xl p-5 flex flex-col gap-4 hover:border-primary/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 relative cursor-pointer"
               onClick={() => { setTestMsg(''); setConfiguring(def.key) }}
+              className={`group relative overflow-hidden rounded-2xl border bg-content1 p-5 flex flex-col gap-4 cursor-pointer transition-all duration-300 hover:-translate-y-1 ${
+                isHero
+                  ? 'border-emerald-200/70 sm:col-span-2 xl:col-span-2'
+                  : 'border-divider hover:border-default-200'
+              }`}
+              style={{
+                ['--accent' as string]: def.accent,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = `0 18px 40px -12px ${def.accent}30, 0 0 0 1px ${def.accent}20`
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = ''
+              }}
             >
+              {/* Accent stripe — top edge, gradient fading from the accent color */}
+              <div
+                className="absolute top-0 inset-x-0 h-[3px] opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                style={{ background: `linear-gradient(90deg, transparent, ${def.accent}, transparent)` }}
+              />
+
+              {/* Featured background tint for the "new" hero card */}
+              {isHero && (
+                <div
+                  className="absolute inset-0 pointer-events-none opacity-60"
+                  style={{ background: `radial-gradient(circle at top right, ${def.accent}15, transparent 70%)` }}
+                />
+              )}
+
               {def.isNew && (
-                <span className="absolute top-3 left-3 bg-primary text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">
+                <span
+                  className="absolute top-3 left-3 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider shadow-md flex items-center gap-1 z-10"
+                  style={{ background: `linear-gradient(135deg, ${def.accent}, #0d9488)` }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                   جديد
                 </span>
               )}
 
+              {def.readOnly && (
+                <span className="absolute top-3 left-3 text-default-500 bg-default-100 border border-divider text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide z-10 flex items-center gap-1">
+                  <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                    <path d="M7 11V7a5 5 0 0110 0v4" />
+                  </svg>
+                  Salla
+                </span>
+              )}
+
               {/* Icon + title */}
-              <div className="flex items-start gap-3">
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${def.iconBg}`}>
-                  <Icon d={def.icon} size={22} className={def.iconColor} />
+              <div className="relative flex items-start gap-3.5">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${def.iconBg} transition-transform duration-300 group-hover:scale-110 group-hover:rotate-[-4deg]`}
+                >
+                  <Icon d={def.icon} size={24} className={def.iconColor} />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm text-foreground leading-tight">{def.label}</p>
-                  <p className="text-xs text-default-500 mt-1 leading-relaxed line-clamp-2">{def.description}</p>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <p className={`font-black text-foreground leading-tight ${isHero ? 'text-base' : 'text-sm'}`}>
+                    {def.label}
+                  </p>
+                  <p className={`text-xs text-default-500 mt-1.5 leading-relaxed ${isHero ? 'line-clamp-3' : 'line-clamp-2'}`}>
+                    {def.description}
+                  </p>
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-between border-t border-divider pt-3 mt-auto">
+              <div className="relative flex items-center justify-between border-t border-divider/70 pt-3 mt-auto">
                 <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full transition-colors ${ev.enabled ? 'bg-success animate-pulse' : 'bg-default-300'}`} />
-                  <span className={`text-xs font-medium ${ev.enabled ? 'text-success-600' : 'text-default-400'}`}>
+                  <span className="relative flex items-center justify-center w-2 h-2">
+                    <span
+                      className={`absolute inset-0 rounded-full ${ev.enabled ? 'animate-ping opacity-60' : 'opacity-0'}`}
+                      style={{ background: def.accent }}
+                    />
+                    <span
+                      className="relative w-2 h-2 rounded-full transition-colors"
+                      style={{ background: ev.enabled ? def.accent : '#cbd5e1' }}
+                    />
+                  </span>
+                  <span
+                    className="text-xs font-bold transition-colors"
+                    style={{ color: ev.enabled ? def.accent : '#94a3b8' }}
+                  >
                     {ev.enabled ? 'مفعّل' : 'معطّل'}
                   </span>
                 </div>
-                <span className="text-xs font-semibold text-primary group-hover:underline flex items-center gap-1">
+                <span
+                  className="text-xs font-bold flex items-center gap-1 transition-all"
+                  style={{ color: def.accent }}
+                >
                   ضبط
-                  <Icon d="M9 18l6-6-6-6" size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                  <Icon d="M9 18l6-6-6-6" size={13} className="group-hover:-translate-x-1 transition-transform duration-300" />
                 </span>
               </div>
             </div>
