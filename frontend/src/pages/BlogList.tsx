@@ -1,10 +1,11 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useSEO } from '../hooks/useSEO'
-import { POSTS } from '../content/blog/posts'
+import { api, BlogPostMeta } from '../api'
 
-function formatDate(iso: string): string {
-  // Display as DD MMM YYYY in Arabic — Intl handles the month name.
+function formatDate(iso: string | null): string {
+  if (!iso) return ''
   try {
     return new Intl.DateTimeFormat('ar-SA', {
       year: 'numeric', month: 'long', day: 'numeric',
@@ -21,13 +22,22 @@ export default function BlogList() {
     description: 'مقالات عملية للتجار: ربط بوت واتساب، استرجاع السلات المتروكة، تحسين تجربة العميل، وأفضل ممارسات التجارة الإلكترونية في السوق السعودي.',
   })
 
+  const [posts, setPosts] = useState<BlogPostMeta[] | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    api.blogListPublic()
+      .then(r => { if (alive) setPosts(r.posts || []) })
+      .catch(e => { if (alive) setError(e.message || 'تعذّر تحميل المقالات') })
+    return () => { alive = false }
+  }, [])
+
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50/50 text-slate-800 font-sans pb-20 overflow-x-hidden">
-      {/* Background glows */}
       <div className="absolute top-[-6rem] right-[-6rem] w-[34rem] h-[34rem] bg-teal-300/20 rounded-full blur-[130px] pointer-events-none" />
       <div className="absolute top-[10rem] left-[-8rem] w-[30rem] h-[30rem] bg-cyan-300/15 rounded-full blur-[130px] pointer-events-none" />
 
-      {/* Header */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
         <nav className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2.5">
@@ -45,7 +55,6 @@ export default function BlogList() {
         </nav>
       </header>
 
-      {/* Hero */}
       <section className="relative max-w-4xl mx-auto px-6 pt-16 pb-12 text-center">
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
           <span className="inline-block text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 px-3 py-1 rounded-full">
@@ -61,17 +70,20 @@ export default function BlogList() {
         </motion.div>
       </section>
 
-      {/* Posts grid */}
       <section className="relative max-w-5xl mx-auto px-6 pb-20">
-        {POSTS.length === 0 ? (
+        {error ? (
+          <div className="text-center text-red-600 py-12">{error}</div>
+        ) : posts === null ? (
+          <div className="text-center text-slate-400 py-12">جاري التحميل…</div>
+        ) : posts.length === 0 ? (
           <div className="text-center text-slate-500 py-20">
             <p>قريباً — أول مقالاتنا في الطريق.</p>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 gap-6">
-            {POSTS.map((post, i) => (
+            {posts.map((post, i) => (
               <motion.article
-                key={post.slug}
+                key={post.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: i * 0.06 }}
@@ -80,9 +92,9 @@ export default function BlogList() {
               >
                 <div className="p-6 sm:p-7">
                   <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
-                    <time dateTime={post.date}>{formatDate(post.date)}</time>
-                    <span>•</span>
-                    <span>{post.readTime} د قراءة</span>
+                    {post.published_at && <time dateTime={post.published_at}>{formatDate(post.published_at)}</time>}
+                    {post.published_at && <span>•</span>}
+                    <span>{post.read_time} د قراءة</span>
                   </div>
                   <h2 className="text-xl sm:text-2xl font-black text-slate-900 leading-snug group-hover:text-teal-700 transition-colors">
                     {post.title}

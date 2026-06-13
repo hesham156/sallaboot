@@ -124,16 +124,6 @@ async def store_spa_sub(store_id: str, rest: str):
 # Google Search Console reads these to crawl the marketing pages while
 # staying out of the auth-gated dashboard.
 
-# Blog post slugs mirrored from frontend/src/content/blog/posts.tsx.
-# When you publish a new post, append its slug here so the sitemap
-# advertises it to Google. Listed newest-first so the sitemap reflects
-# publication order even if a crawler honours <lastmod>.
-_BLOG_POST_SLUGS = [
-    "how-to-add-whatsapp-bot-to-salla-store",
-    "recover-abandoned-carts-whatsapp",
-]
-
-
 @router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     base = os.getenv("BASE_URL", "https://7ayak.app").rstrip("/")
@@ -165,27 +155,38 @@ async def robots_txt():
 
 @router.get("/sitemap.xml")
 async def sitemap_xml():
+    """Static pages + every published blog post pulled live from the DB.
+    Editing the post list no longer requires a deploy — publishing a
+    post in the admin instantly updates the sitemap for the next crawl.
+    """
     base = os.getenv("BASE_URL", "https://7ayak.app").rstrip("/")
-    # (path, changefreq, priority)
-    urls = [
-        ("/",              "weekly", "1.0"),
-        ("/landing",       "weekly", "0.9"),
-        ("/blog",          "weekly", "0.8"),
-        ("/privacy",       "yearly", "0.5"),
-        ("/terms",         "yearly", "0.5"),
-        ("/data-deletion", "yearly", "0.5"),
+    # (path, changefreq, priority, lastmod_iso_or_None)
+    urls: list[tuple[str, str, str, str | None]] = [
+        ("/",              "weekly", "1.0", None),
+        ("/landing",       "weekly", "0.9", None),
+        ("/blog",          "weekly", "0.8", None),
+        ("/privacy",       "yearly", "0.5", None),
+        ("/terms",         "yearly", "0.5", None),
+        ("/data-deletion", "yearly", "0.5", None),
     ]
-    # Each blog post is a separate URL — Google indexes them individually
-    # and they're the long-tail SEO content.
-    for slug in _BLOG_POST_SLUGS:
-        urls.append((f"/blog/{slug}", "monthly", "0.7"))
+    # Live from DB: only published posts, newest first.
+    try:
+        posts = await db.blog_list_public()
+    except Exception:
+        posts = []
+    for p in posts:
+        slug    = p.get("slug", "")
+        pub_at  = p.get("published_at")
+        lastmod = pub_at.isoformat() if pub_at and hasattr(pub_at, "isoformat") else None
+        urls.append((f"/blog/{slug}", "monthly", "0.7", lastmod))
 
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    for path, freq, prio in urls:
+    for path, freq, prio, lastmod in urls:
+        lines += ["  <url>", f"    <loc>{base}{path}</loc>"]
+        if lastmod:
+            lines.append(f"    <lastmod>{lastmod}</lastmod>")
         lines += [
-            "  <url>",
-            f"    <loc>{base}{path}</loc>",
             f"    <changefreq>{freq}</changefreq>",
             f"    <priority>{prio}</priority>",
             "  </url>",

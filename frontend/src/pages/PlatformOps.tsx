@@ -160,6 +160,9 @@ export default function PlatformOps() {
             <Button variant="flat" onPress={() => navigate('/admin')}>
               قائمة المتاجر
             </Button>
+            <Button variant="flat" color="primary" onPress={() => navigate('/admin/blog')}>
+              المدونة
+            </Button>
             <Button variant="flat" color="warning" onPress={() => navigate('/admin/audit-log')}>
               سجل المراجعة
             </Button>

@@ -463,6 +463,22 @@ export const api = {
       `/admin/${storeId}/llm-budget`,
       { daily_token_budget: dailyTokenBudget },
     ),
+
+  // ── Blog (public reads + super-admin CRUD) ─────────────────────────────
+  blogListPublic: () =>
+    get<{ posts: BlogPostMeta[] }>('/api/blog/posts'),
+  blogGetPublic: (slug: string) =>
+    get<BlogPost>(`/api/blog/posts/${slug}`),
+  blogListAdmin: () =>
+    get<{ posts: BlogPostAdmin[] }>('/admin/blog/posts'),
+  blogGetAdmin: (id: number) =>
+    get<BlogPost>(`/admin/blog/posts/${id}`),
+  blogCreate: (data: BlogPostInput) =>
+    post<BlogPost>('/admin/blog/posts', data),
+  blogUpdate: (id: number, data: Partial<BlogPostInput>) =>
+    put<BlogPost>(`/admin/blog/posts/${id}`, data),
+  blogDelete: (id: number) =>
+    req<{ status: string; deleted_id: number }>('DELETE', `/admin/blog/posts/${id}`),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -679,6 +695,38 @@ export interface ConversationInsights {
     without_checkout: number
     conversion_rate: number
   }
+}
+
+export interface BlogPostMeta {
+  id:           number
+  slug:         string
+  title:        string
+  description:  string
+  tags:         string[]
+  author:       string
+  read_time:    number
+  published_at: string | null
+}
+
+export interface BlogPostAdmin extends BlogPostMeta {
+  published:  boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface BlogPost extends BlogPostAdmin {
+  content_md: string
+}
+
+export interface BlogPostInput {
+  slug:        string
+  title:       string
+  description: string
+  content_md:  string
+  tags:        string[]
+  author:      string
+  read_time:   number
+  published:   boolean
 }
 
 export interface NotificationSettings {

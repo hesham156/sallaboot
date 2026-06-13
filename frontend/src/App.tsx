@@ -16,6 +16,8 @@ const TermsOfService = lazy(() => import('./pages/TermsOfService'))
 const DataDeletion   = lazy(() => import('./pages/DataDeletion'))
 const BlogList       = lazy(() => import('./pages/BlogList'))
 const BlogPost       = lazy(() => import('./pages/BlogPost'))
+const AdminBlog      = lazy(() => import('./pages/AdminBlog'))
+const AdminBlogEditor= lazy(() => import('./pages/AdminBlogEditor'))
 
 
 function RequireSuper({ children }: { children: JSX.Element }) {
@@ -86,6 +88,24 @@ export default function App() {
             element={
               <RequireSuper>
                 <AuditLog />
+              </RequireSuper>
+            }
+          />
+
+          {/* Super-admin: blog CMS */}
+          <Route
+            path="/admin/blog"
+            element={
+              <RequireSuper>
+                <AdminBlog />
+              </RequireSuper>
+            }
+          />
+          <Route
+            path="/admin/blog/:id"
+            element={
+              <RequireSuper>
+                <AdminBlogEditor />
               </RequireSuper>
             }
           />
