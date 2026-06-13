@@ -171,7 +171,7 @@ def _register_memory(store_id: str, access_token: str, refresh_token: str = "", 
         _registry[store_id] = {"tokens": tokens, "cache": {}, "agent": None}
 
 
-def register_store(
+async def register_store(
     store_id: str,
     access_token: str,
     refresh_token: str = "",
@@ -179,12 +179,16 @@ def register_store(
     owner_email: str = "",
 ):
     """
-    Register or update a store, persist to DB (fire-and-forget) and JSON file.
+    Register or update a store, AWAIT the DB write, then save a JSON fallback.
     Called from webhook (app.store.authorize) or OAuth callback.
 
     owner_email is the email Salla returned for the authorising user. It
     powers the unified email/password login — without it the store owner
     can only log in via the legacy store_id+password path.
+
+    The DB write is awaited (not fired-and-forgotten) so a Railway redeploy
+    that races a save can't drop the tokens — the HTTP response only
+    returns after PostgreSQL has committed.
     """
     store_id = str(store_id)
     info     = store_info or {}
@@ -233,8 +237,8 @@ def register_store(
     else:
         _registry[store_id] = {"tokens": tokens, "cache": {}, "agent": None}
 
-    # ── Persist: DB (primary) + JSON file (fallback) ───────────────────────────
-    db.fire(db.save_store(store_id, tokens, owner_email=resolved_email))
+    # ── Persist: DB (primary, AWAITED) + JSON file (fallback) ─────────────────
+    await db.save_store(store_id, tokens, owner_email=resolved_email)
 
     try:
         _store_dir(store_id)
@@ -367,20 +371,21 @@ def get_owner_email(store_id: str) -> str:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("owner_email", "")
 
 
-def set_owner_email(store_id: str, email: str) -> bool:
+async def set_owner_email(store_id: str, email: str) -> bool:
     """
     Update the owner_email both in the in-memory registry and in the DB.
     Returns True on DB write success. Empty string clears the link.
 
     Used by the super-admin backfill endpoint to retro-fit emails onto
-    stores that were installed before the unified login shipped.
+    stores that were installed before the unified login shipped. The DB
+    write is awaited so a redeploy can't silently drop the link.
     """
     store_id = str(store_id)
     if store_id not in _registry:
         return False
     e = (email or "").strip().lower()
     _registry[store_id].setdefault("tokens", {})["owner_email"] = e
-    db.fire(db.set_store_owner_email(store_id, e))
+    await db.set_store_owner_email(store_id, e)
     return True
 
 
@@ -432,8 +437,14 @@ def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
     return ""
 
 
-def set_ai_config(store_id: str, config: dict):
-    """Save AI settings for a store and reset its agent."""
+async def set_ai_config(store_id: str, config: dict):
+    """Save AI settings for a store and reset its agent.
+
+    Awaits both DB writes — previously the writes were fired-and-forgotten,
+    so a redeploy seconds after the user clicked "Save" could drop the new
+    API keys / WhatsApp config and leave the merchant looking at a fresh
+    empty form on next page load.
+    """
     store_id = str(store_id)
     if store_id not in _registry:
         return
@@ -441,9 +452,9 @@ def set_ai_config(store_id: str, config: dict):
     tokens["ai_config"] = config
     _registry[store_id]["agent"] = None  # force re-init with new keys
 
-    # ── Persist ────────────────────────────────────────────────────────────────
-    db.fire(db.save_store(store_id, tokens))   # full tokens upsert covers ai_config
-    db.fire(db.save_ai_config(store_id, config))
+    # ── Persist (AWAITED — guarantee DB commit before returning) ──────────────
+    await db.save_store(store_id, tokens)        # full tokens upsert covers ai_config
+    await db.save_ai_config(store_id, config)    # dedicated column for fast queries
 
     try:
         _store_dir(store_id)
@@ -463,16 +474,20 @@ def get_admin_password_hash(store_id: str) -> str:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("admin_password_hash", "")
 
 
-def set_admin_password(store_id: str, password_hash: str):
-    """Save a new (already-hashed) admin password for a store."""
+async def set_admin_password(store_id: str, password_hash: str):
+    """Save a new (already-hashed) admin password for a store.
+
+    Awaits the DB write — losing a password on redeploy locks the merchant
+    out of their own dashboard until they reset, which is unacceptable.
+    """
     store_id = str(store_id)
     if store_id not in _registry:
         return
     tokens = _registry[store_id]["tokens"]
     tokens["admin_password_hash"] = password_hash
 
-    # ── Persist ────────────────────────────────────────────────────────────────
-    db.fire(db.save_store(store_id, tokens))
+    # ── Persist (AWAITED) ─────────────────────────────────────────────────────
+    await db.save_store(store_id, tokens)
 
     try:
         _store_dir(store_id)

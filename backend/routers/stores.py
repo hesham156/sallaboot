@@ -182,7 +182,7 @@ async def manual_register_store(req: ManualRegisterRequest, request: Request):
     if not store_id or not req.access_token.strip():
         raise HTTPException(400, "store_id و access_token مطلوبان")
 
-    sm.register_store(
+    await sm.register_store(
         store_id=store_id,
         access_token=req.access_token.strip(),
         refresh_token=req.refresh_token.strip(),
@@ -363,7 +363,7 @@ async def backfill_owner_emails(request: Request):
         # DB column). Metadata goes through update_store_info → save_store
         # which lands in the tokens JSONB blob.
         if email and not existing_email:
-            sm.set_owner_email(store_id, email)
+            await sm.set_owner_email(store_id, email)
         if meta:
             tokens = dict(sm.get_store_info(store_id) or {})
             updated = False
@@ -412,7 +412,7 @@ async def sallabot_reload_knowledge(request: Request):
         raise HTTPException(401, "يرجى تسجيل الدخول كمدير عام")
 
     import bootstrap
-    result = bootstrap.reload_knowledge_from_file()
+    result = await bootstrap.reload_knowledge_from_file()
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "reload failed"))
     return {

@@ -59,11 +59,16 @@ def _get_custom_knowledge(store_id: str) -> str:
     return text
 
 
-def set_custom_knowledge(store_id: str, text: str) -> None:
-    """Save the admin's custom knowledge text. Persisted in ai_config."""
+async def set_custom_knowledge(store_id: str, text: str) -> None:
+    """Save the admin's custom knowledge text. Persisted in ai_config.
+
+    Async because sm.set_ai_config awaits its DB write — propagating the
+    await up so the HTTP handler (or bootstrap) blocks until the new
+    knowledge is committed.
+    """
     cfg = sm.get_ai_config(store_id) or {}
     cfg["custom_knowledge"] = (text or "").strip()
-    sm.set_ai_config(store_id, cfg)
+    await sm.set_ai_config(store_id, cfg)
 
 
 # ── Overview / stats ────────────────────────────────────────────────────────

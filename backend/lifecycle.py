@@ -328,7 +328,7 @@ async def startup() -> None:
     #     re-running just refreshes the knowledge-file content.
     try:
         import bootstrap
-        bootstrap.ensure_sallabot_store()
+        await bootstrap.ensure_sallabot_store()
     except Exception as exc:
         log.warning("bootstrap_demo_store_failed", extra={"err": str(exc)[:200]})
 
@@ -346,7 +346,7 @@ async def startup() -> None:
     # Always register env-var token as "default" store — survives Railway restarts
     env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
     if env_token and not sm.is_registered("default"):
-        sm.register_store(
+        await sm.register_store(
             "default", env_token,
             os.getenv("SALLA_REFRESH_TOKEN", ""),
             {"name": "المتجر الافتراضي"},

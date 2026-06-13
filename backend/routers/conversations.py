@@ -27,7 +27,7 @@ async def store_bot_status(store_id: str):
 
 @router.post("/admin/{store_id}/bot/toggle")
 async def store_bot_toggle(store_id: str, req: BotToggleRequest):
-    cs.set_store_bot(store_id, req.enabled)
+    await cs.set_store_bot(store_id, req.enabled)
     return {"bot_globally_enabled": cs.get_store_bot(store_id)}
 
 

@@ -39,7 +39,7 @@ def _read_knowledge() -> str:
         return ""
 
 
-def ensure_sallabot_store() -> None:
+async def ensure_sallabot_store() -> None:
     """
     Register the marketing/demo store if it doesn't exist, and seed its
     custom_knowledge from the markdown file ONLY on first install.
@@ -52,6 +52,8 @@ def ensure_sallabot_store() -> None:
     Setting SALLABOT_FORCE_RELOAD_KNOWLEDGE=true in the env also forces a
     reload at boot, useful for one-off deploys where the file content
     changed and you want it picked up without a manual API call.
+
+    Async because sm.register_store now awaits its DB write.
     """
     knowledge = _read_knowledge()
     is_new    = not sm.is_registered(SALLABOT_STORE_ID)
@@ -60,7 +62,7 @@ def ensure_sallabot_store() -> None:
         # No real access token — this is a no-Salla demo store. The agent
         # already guards every self.salla.* call behind `if not self.salla`,
         # so chat works fine using only custom_knowledge.
-        sm.register_store(
+        await sm.register_store(
             store_id      = SALLABOT_STORE_ID,
             access_token  = "",
             refresh_token = "",
@@ -77,7 +79,7 @@ def ensure_sallabot_store() -> None:
     force = os.getenv("SALLABOT_FORCE_RELOAD_KNOWLEDGE", "").lower() == "true"
     existing = brain._get_custom_knowledge(SALLABOT_STORE_ID).strip()
     if knowledge and (not existing or force):
-        brain.set_custom_knowledge(SALLABOT_STORE_ID, knowledge)
+        await brain.set_custom_knowledge(SALLABOT_STORE_ID, knowledge)
         why = "first install" if not existing else "FORCE env override"
         print(f"[bootstrap] 📚 seeded {len(knowledge)} chars of marketing knowledge ({why})")
     elif existing:
@@ -85,7 +87,7 @@ def ensure_sallabot_store() -> None:
               "UI edits stick. Set SALLABOT_FORCE_RELOAD_KNOWLEDGE=true to override.")
 
 
-def reload_knowledge_from_file() -> dict:
+async def reload_knowledge_from_file() -> dict:
     """
     Force a fresh read of the markdown file and overwrite custom_knowledge.
     Called by the super-admin /admin/sallabot/reload-knowledge endpoint —
@@ -97,7 +99,7 @@ def reload_knowledge_from_file() -> dict:
     knowledge = _read_knowledge()
     if not knowledge:
         return {"ok": False, "error": "knowledge file is empty or missing"}
-    brain.set_custom_knowledge(SALLABOT_STORE_ID, knowledge)
+    await brain.set_custom_knowledge(SALLABOT_STORE_ID, knowledge)
     return {"ok": True, "loaded_chars": len(knowledge), "file": str(_KNOWLEDGE_FILE)}
 
 

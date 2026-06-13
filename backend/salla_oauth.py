@@ -188,7 +188,7 @@ async def refresh_access_token(store_id: str = "default") -> str:
 
         # Persist to store_manager → data/stores/{store_id}/tokens.json
         # register_store preserves admin_password_hash, ai_config, store info, etc.
-        sm.register_store(
+        await sm.register_store(
             store_id=store_id,
             access_token=new_access,
             refresh_token=new_refresh,
@@ -267,13 +267,17 @@ def get_token_status(store_id: str) -> dict:
 
 # ── Backward-compat helper ────────────────────────────────────────────────────
 
-def save_tokens(access_token: str, refresh_token: str, store_id: str = "default"):
+async def save_tokens(access_token: str, refresh_token: str, store_id: str = "default"):
     """
     Persist tokens.  Prefer calling store_manager.register_store() directly;
     this wrapper is kept for code that imported save_tokens previously.
+
+    Now async — sm.register_store awaits its DB commit so callers must
+    await this too. No live callers in the repo today; kept for external
+    importers.
     """
     import store_manager as sm
-    sm.register_store(
+    await sm.register_store(
         store_id=store_id,
         access_token=access_token,
         refresh_token=refresh_token,

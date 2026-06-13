@@ -154,7 +154,7 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         or (store_info.get("email") or "").strip().lower()
     )
 
-    sm.register_store(
+    await sm.register_store(
         store_id=store_id,
         access_token=access_token,
         refresh_token=refresh_token,

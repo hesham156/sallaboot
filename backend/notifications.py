@@ -242,11 +242,11 @@ def get_settings(store_id: str) -> dict:
     }
 
 
-def save_settings(store_id: str, settings: dict) -> None:
+async def save_settings(store_id: str, settings: dict) -> None:
     """Persist notification settings into the store's ai_config."""
     cfg = dict(sm.get_ai_config(store_id))
     cfg["notifications"] = settings
-    sm.set_ai_config(store_id, cfg)
+    await sm.set_ai_config(store_id, cfg)
 
 
 async def notify(store_id: str, event: str, ctx: dict) -> None:

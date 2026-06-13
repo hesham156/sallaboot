@@ -579,13 +579,16 @@ def get_store_bot(store_id: str) -> bool:
     return sm.get_store_info(store_id).get("bot_enabled", True)
 
 
-def set_store_bot(store_id: str, enabled: bool):
-    """Enable/disable bot for a specific store only. Persisted via store_manager → DB."""
+async def set_store_bot(store_id: str, enabled: bool):
+    """Enable/disable bot for a specific store only. Persisted via store_manager → DB.
+
+    Async because sm.register_store now awaits its DB commit.
+    """
     import store_manager as sm
     if sm.is_registered(store_id):
         tokens = sm.get_store_info(store_id)
         tokens["bot_enabled"] = enabled
-        sm.register_store(store_id, tokens.get("access_token", ""), tokens.get("refresh_token", ""), tokens)
+        await sm.register_store(store_id, tokens.get("access_token", ""), tokens.get("refresh_token", ""), tokens)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

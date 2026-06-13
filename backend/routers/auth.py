@@ -79,7 +79,7 @@ async def store_login(store_id: str, req: LoginRequest, request: Request):
     # because we just confirmed the password is correct.
     if _auth.needs_rehash(stored_hash):
         try:
-            sm.set_admin_password(store_id, _auth.hash_password(req.password))
+            await sm.set_admin_password(store_id, _auth.hash_password(req.password))
             print(f"[auth] 🔁 Upgraded password hash for store {store_id!r}")
         except Exception as exc:
             print(f"[auth] ⚠️ Password hash upgrade failed for {store_id!r}: {exc}")
@@ -243,7 +243,7 @@ async def unified_login(req: LoginRequest, request: Request):
             raise generic_401
         if _auth.needs_rehash(stored_hash):
             try:
-                sm.set_admin_password(store_id, _auth.hash_password(pwd_in))
+                await sm.set_admin_password(store_id, _auth.hash_password(pwd_in))
             except Exception as exc:
                 print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
         token = _auth.create_token(store_id)

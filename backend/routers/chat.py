@@ -140,7 +140,7 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
                 status_code=502,
             )
 
-        sm.register_store(
+        await sm.register_store(
             store_id      = store_id,
             access_token  = access_token,
             refresh_token = refresh_token,
@@ -289,7 +289,7 @@ async def chat(req: ChatRequest, request: Request):
         env_token = os.getenv("SALLA_ACCESS_TOKEN", "")
         if env_token:
             if not sm.is_registered("default"):
-                sm.register_store(
+                await sm.register_store(
                     "default", env_token,
                     os.getenv("SALLA_REFRESH_TOKEN", ""),
                     {"name": "المتجر الافتراضي"},

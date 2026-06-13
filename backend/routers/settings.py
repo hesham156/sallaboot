@@ -118,7 +118,7 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
         config["groq_api_key"]      = ""
         config["anthropic_api_key"] = ""
 
-    sm.set_ai_config(store_id, config)
+    await sm.set_ai_config(store_id, config)
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, config)
@@ -153,7 +153,7 @@ async def get_ai_brain(store_id: str):
 async def update_ai_brain(store_id: str, req: CustomKnowledgeRequest):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    brain.set_custom_knowledge(store_id, req.custom_knowledge)
+    await brain.set_custom_knowledge(store_id, req.custom_knowledge)
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, sm.get_ai_config(store_id))
@@ -322,7 +322,7 @@ async def update_notification_settings(store_id: str, req: NotificationSettingsR
         "notify_llm_budget":      bool(req.notify_llm_budget),
         "notify_abandoned_cart":  bool(req.notify_abandoned_cart or req.on_abandoned_cart),
     })
-    sm.set_ai_config(store_id, cfg)
+    await sm.set_ai_config(store_id, cfg)
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, cfg)
@@ -382,7 +382,7 @@ async def update_whatsapp_event(store_id: str, event_key: str, body: dict):
         cfg[f"wa_event_{event_key}_enabled"] = bool(body["enabled"])
     if "template" in body:
         cfg[f"wa_event_{event_key}_template"] = str(body["template"])
-    sm.set_ai_config(store_id, cfg)
+    await sm.set_ai_config(store_id, cfg)
     await db.save_ai_config(store_id, cfg)
     return {"status": "ok"}
 
@@ -483,7 +483,7 @@ async def update_pricing_settings(store_id: str, pricing: dict):
     cfg["pricing_config"] = pricing.get("pricing_config", cfg.get("pricing_config", {}))
     if "currency" in pricing:
         cfg["currency"] = pricing["currency"]
-    sm.set_ai_config(store_id, cfg)
+    await sm.set_ai_config(store_id, cfg)
     sm.reset_agent(store_id)
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
@@ -518,7 +518,7 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest, reque
         raise HTTPException(401, "كلمة المرور الحالية غير صحيحة")
     if len(req.new_password) < 6:
         raise HTTPException(400, "كلمة المرور الجديدة قصيرة جداً (6 أحرف على الأقل)")
-    sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
+    await sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
     await db.save_store(store_id, sm.get_store_info(store_id))
     await audit(request, "change_store_password", target_store=store_id)
     return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
@@ -564,5 +564,5 @@ async def super_reset_password(store_id: str, request: Request):
         raise HTTPException(403, "مصرح للمدير العام فقط")
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    sm.set_admin_password(store_id, _auth.hash_password(str(store_id)))
+    await sm.set_admin_password(store_id, _auth.hash_password(str(store_id)))
     return {"status": "ok", "message": f"تمت إعادة تعيين كلمة المرور إلى: {store_id}"}

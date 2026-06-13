@@ -168,7 +168,7 @@ async def update_llm_budget(store_id: str, request: Request):
         cfg["daily_token_budget"] = n
         applied = n
 
-    sm.set_ai_config(store_id, cfg)
+    await sm.set_ai_config(store_id, cfg)
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, cfg)
