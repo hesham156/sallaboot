@@ -407,15 +407,81 @@ async def update_notification_settings(store_id: str, req: NotificationSettingsR
 
 @router.post("/admin/{store_id}/settings/notifications/test")
 async def test_notification(store_id: str):
+    """Send a real test email/webhook synchronously so the merchant gets
+    immediate feedback. Bypasses notify() → outbox → drainer because:
+
+    - notify() gates on event type ('new_conversation', 'abandoned_cart',
+      'low_rating', 'llm_budget_warning'); 'test' isn't in the gate dict
+      and silently early-returns.
+    - deliver_outbox_row() has no 'test' branch either, so even if we did
+      enqueue it would no-op.
+    - We want the actual provider response surfaced to the UI ("domain
+      not verified" / "invalid from") instead of a misleading "تم الإرسال"
+      while the email never leaves.
+    """
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    try:
-        ok = await _notif.notify(store_id, "test", {
-            "message": "هذا إشعار تجريبي من لوحة التحكم ✅",
+
+    n = _notif.get_settings(store_id)
+    if not n["email_enabled"] and not n["webhook_url"]:
+        raise HTTPException(
+            400,
+            "فعّل البريد الإلكتروني أو الـ Webhook أولاً، ثم اضغط حفظ، ثم اضغط اختبار."
+        )
+
+    results: dict = {"email": None, "webhook": None}
+
+    if n["email_enabled"]:
+        if not n["email_address"]:
+            raise HTTPException(400, "البريد الإلكتروني مفعّل لكن خانة عنوان الاستقبال فارغة.")
+        info       = sm.get_store_info(store_id) or {}
+        store_name = info.get("store_name") or f"متجر {store_id}"
+        subject    = f"إشعار تجريبي من حياك — {store_name} ✅"
+        html = f"""
+        <div dir="rtl" style="font-family: Arial, Tahoma, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #f9fafb;">
+          <div style="background: white; padding: 32px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+            <h2 style="color: #0d9488; margin: 0 0 16px;">إشعار تجريبي ✅</h2>
+            <p style="color: #374151; line-height: 1.7;">
+              تم استلام هذا الإيميل بنجاح — إعدادات الإشعارات تعمل بشكل صحيح
+              للمتجر <b>{store_name}</b>.
+            </p>
+            <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
+              الإيميل المسجّل: <code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px;">{n["email_address"]}</code>
+            </p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+            <p style="color: #9ca3af; font-size: 12px; text-align: center; margin: 0;">
+              نظام حياك — مساعدك الذكي للمتاجر
+            </p>
+          </div>
+        </div>
+        """
+        results["email"] = await _notif._send_email(n["email_address"], subject, html)
+
+    if n["webhook_url"]:
+        results["webhook"] = await _notif._send_webhook(n["webhook_url"], {
+            "event":      "test",
+            "store_id":   store_id,
+            "store_name": (sm.get_store_info(store_id) or {}).get("store_name", ""),
+            "message":    "إشعار تجريبي من لوحة التحكم",
         })
-        return {"status": "ok" if ok else "failed", "sent": ok}
-    except Exception as e:
-        raise HTTPException(500, f"فشل الإرسال: {e}")
+
+    failed = [ch for ch, ok in results.items() if ok is False]
+    if failed:
+        raise HTTPException(
+            502,
+            f"فشل الإرسال للقنوات: {', '.join(failed)} — راجع Railway logs لمعرفة السبب الدقيق "
+            "(غالباً: domain غير مفعّل في Resend، أو API key غير صحيح)."
+        )
+
+    sent_to = []
+    if results["email"]:   sent_to.append(f"إيميل ({n['email_address']})")
+    if results["webhook"]: sent_to.append("webhook")
+    return {
+        "status":  "ok",
+        "sent":    True,
+        "channels": results,
+        "message": f"✅ تم الإرسال إلى: {' + '.join(sent_to)}",
+    }
 
 
 # ── WhatsApp Events ───────────────────────────────────────────────────────────
