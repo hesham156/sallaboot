@@ -14,7 +14,7 @@ export default function DataDeletion() {
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
         <nav className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2.5">
-            <img src="/uploads/logo.png"/>
+            <img src="/uploads/logo.png" style={{ maxWidth: '100%', height: 'auto', width: '140px' }}/>
           </a>
 
           <button
