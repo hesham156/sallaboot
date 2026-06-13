@@ -140,7 +140,7 @@ export default function Landing() {
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
         <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2.5">
-          <img src='/uploads/3.png'/>
+          <img src='/uploads/logo.png'/>
           </a>
 
           <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
@@ -176,7 +176,7 @@ export default function Landing() {
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}>
               <div className="flex items-center justify-between mb-8">
-                <img src="/uploads/3.png" className="h-8"/>
+                <img src="/uploads/logo.png" className="h-8"/>
                 <button onClick={() => setMenuOpen(false)} className="text-slate-500"><Icon d={ICONS.close} size={22} /></button>
               </div>
               <div className="flex flex-col gap-1 text-base font-bold text-slate-700">
@@ -381,7 +381,7 @@ export default function Landing() {
       <footer className="border-t border-slate-100">
         <div className="max-w-7xl mx-auto px-5 sm:px-8 py-12 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2.5">
-            <img src="/uploads/3.png" className="h-8"/>
+            <img src="/uploads/logo.png" className="h-8"/>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-semibold text-slate-500">
             <a href="#features" className="hover:text-teal-600 transition-colors">المميزات</a>
