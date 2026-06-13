@@ -293,35 +293,111 @@ async def delete_training_entry(store_id: str, training_id: int):
 
 @router.get("/admin/{store_id}/settings/notifications")
 async def get_notification_settings(store_id: str):
+    """Return notification settings in BOTH the new (`notify_*` / `email`)
+    and legacy (`on_*` / `email_address`) key shapes plus quiet-hours.
+
+    The SPA still reads the legacy keys (Settings.tsx uses on_new_conversation,
+    on_abandoned_cart, on_low_rating, email_address). If we only returned the
+    new shape, the frontend would receive `undefined` for those fields and
+    render every checkbox as unchecked on reload — which is the exact bug
+    the merchant just hit.
+    """
     cfg = sm.get_ai_config(store_id) or {}
+    nested = cfg.get("notifications") or {}
+
+    # ── Canonical values ────────────────────────────────────────────────
+    email_addr   = cfg.get("notify_email", "") or nested.get("email_address", "")
+    new_conv     = bool(cfg.get("notify_new_conv", nested.get("on_new_conversation", True)))
+    low_rating   = bool(cfg.get("notify_low_rating", nested.get("on_low_rating", True)))
+    abandoned    = bool(cfg.get("notify_abandoned_cart", nested.get("on_abandoned_cart", True)))
+    llm_budget   = bool(cfg.get("notify_llm_budget", True))
+    qh_enabled   = bool(nested.get("quiet_hours_enabled", False))
+    qh_start     = int(nested.get("quiet_hours_start", 22))
+    qh_end       = int(nested.get("quiet_hours_end",   8))
+
     return {
+        # ── New shape (settings-page POST + future code) ──
         "email_enabled":         bool(cfg.get("notify_email_enabled")),
-        "email":                 cfg.get("notify_email", ""),
+        "email":                 email_addr,
         "webhook_enabled":       bool(cfg.get("notify_webhook_enabled")),
         "webhook_url":           cfg.get("notify_webhook_url", ""),
-        "notify_new_conv":       bool(cfg.get("notify_new_conv", True)),
-        "notify_low_rating":     bool(cfg.get("notify_low_rating", True)),
-        "notify_llm_budget":     bool(cfg.get("notify_llm_budget", True)),
-        "notify_abandoned_cart": bool(cfg.get("notify_abandoned_cart", True)),
+        "notify_new_conv":       new_conv,
+        "notify_low_rating":     low_rating,
+        "notify_llm_budget":     llm_budget,
+        "notify_abandoned_cart": abandoned,
+        # ── Legacy aliases (what the SPA actually binds to) ──
+        "email_address":         email_addr,
+        "on_new_conversation":   new_conv,
+        "on_abandoned_cart":     abandoned,
+        "on_low_rating":         low_rating,
+        # ── Quiet hours (always nested in notifications dict) ──
+        "quiet_hours_enabled":   qh_enabled,
+        "quiet_hours_start":     qh_start,
+        "quiet_hours_end":       qh_end,
     }
 
 
 @router.put("/admin/{store_id}/settings/notifications")
 async def update_notification_settings(store_id: str, req: NotificationSettingsRequest):
+    """Persist notification settings in BOTH key shapes so the email sender
+    (notifications._send_email path, reads cfg["notifications"]) and the
+    settings GET (reads flat notify_* keys) both see the same truth.
+
+    Without the nested-dict write, even a perfectly-saved settings form
+    produces zero emails: notify(store_id, ...) reads get_settings() which
+    reads cfg["notifications"], which never gets written.
+    """
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     cfg = dict(sm.get_ai_config(store_id) or {})
     email = (req.email or req.email_address or "").strip()
+
+    # The SPA sends the legacy on_* keys; the model also accepts the new
+    # notify_* keys. Either one being True wins (OR-logic) — but only when
+    # the corresponding payload key was actually sent in the request body,
+    # not the Pydantic default. `model_fields_set` tells us which keys the
+    # caller explicitly included.
+    sent = req.model_fields_set
+    def resolved(new_key: str, legacy_key: str, default: bool = True) -> bool:
+        if legacy_key in sent and new_key in sent:
+            return bool(getattr(req, new_key) or getattr(req, legacy_key))
+        if legacy_key in sent:
+            return bool(getattr(req, legacy_key))
+        if new_key in sent:
+            return bool(getattr(req, new_key))
+        return default
+
+    new_conv   = resolved("notify_new_conv",       "on_new_conversation")
+    low_rating = resolved("notify_low_rating",     "on_low_rating")
+    abandoned  = resolved("notify_abandoned_cart", "on_abandoned_cart")
+    llm_budget = bool(req.notify_llm_budget)
+
     cfg.update({
+        # Flat keys — read by settings GET
         "notify_email_enabled":   bool(req.email_enabled),
         "notify_email":           email,
         "notify_webhook_enabled": bool(req.webhook_enabled),
         "notify_webhook_url":     (req.webhook_url or "").strip(),
-        "notify_new_conv":        bool(req.notify_new_conv or req.on_new_conversation),
-        "notify_low_rating":      bool(req.notify_low_rating or req.on_low_rating),
-        "notify_llm_budget":      bool(req.notify_llm_budget),
-        "notify_abandoned_cart":  bool(req.notify_abandoned_cart or req.on_abandoned_cart),
+        "notify_new_conv":        new_conv,
+        "notify_low_rating":      low_rating,
+        "notify_llm_budget":      llm_budget,
+        "notify_abandoned_cart":  abandoned,
     })
+
+    # Nested dict — read by the email sender (notifications.get_settings).
+    # Mirror every flag so the two sides never drift.
+    cfg["notifications"] = {
+        "email_enabled":        bool(req.email_enabled),
+        "email_address":        email,
+        "webhook_url":          (req.webhook_url or "").strip(),
+        "on_new_conversation":  new_conv,
+        "on_abandoned_cart":    abandoned,
+        "on_low_rating":        low_rating,
+        "quiet_hours_enabled":  bool(req.quiet_hours_enabled),
+        "quiet_hours_start":    int(req.quiet_hours_start or 22),
+        "quiet_hours_end":      int(req.quiet_hours_end or 8),
+    }
+
     await sm.set_ai_config(store_id, cfg)
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
