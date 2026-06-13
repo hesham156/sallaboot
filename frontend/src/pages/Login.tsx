@@ -65,16 +65,14 @@ export default function Login() {
       <div className="w-full max-w-md relative z-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
 
         {/* Logo */}
-        <div className="text-center mb-8 space-y-4">
-          <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-teal-400 to-cyan-500 flex items-center justify-center shadow-xl shadow-teal-500/25 hover:scale-105 transition-transform duration-300">
-            <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={32} className="text-white" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-black tracking-tight text-slate-800">
-              سـلّابـوت
-            </h1>
-            <p className="text-sm text-slate-500 font-medium mt-1">المساعد الذكي لمتاجر سلة</p>
-          </div>
+        <div className="text-center mb-8 space-y-3">
+          <img
+            src="/uploads/logo.png"
+            alt="حياك"
+            style={{ maxWidth: '100%', height: 'auto', width: '180px' }}
+            className="mx-auto"
+          />
+          <p className="text-sm text-slate-500 font-medium">المساعد الذكي لمتاجر سلة</p>
         </div>
 
         {/* Card */}
