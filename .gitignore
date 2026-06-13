@@ -22,6 +22,8 @@ coverage.xml
 
 # Uploads folder
 backend/uploads/
+# …except brand assets shipped with the repo
+!backend/uploads/logo.png
 
 # Multi-tenant store data (contains access tokens — never commit)
 backend/data/
