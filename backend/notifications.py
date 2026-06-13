@@ -37,7 +37,7 @@ import database as db
 
 # ── Resend sender ──────────────────────────────────────────────────────────────
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-FROM_EMAIL     = os.getenv("NOTIFY_FROM_EMAIL", "نظام سلّابوت <noreply@sallabot.app>")
+FROM_EMAIL     = os.getenv("NOTIFY_FROM_EMAIL", "نظام حياك <noreply@sallabot.app>")
 BASE_URL       = os.getenv("BASE_URL", "https://sallabot.app")
 
 
@@ -74,14 +74,14 @@ def _html_wrapper(title: str, body: str) -> str:
 <div class="wrap">
   <div class="card">
     <div class="header">
-      <h1>💬 سلّابوت</h1>
+      <h1>💬 حياك</h1>
       <p>{title}</p>
     </div>
     <div class="body">
       {body}
     </div>
     <div class="footer">
-      رسالة تلقائية من سلّابوت — لإيقاف الإشعارات افتح لوحة التحكم ← الإعدادات ← الإشعارات
+      رسالة تلقائية من حياك — لإيقاف الإشعارات افتح لوحة التحكم ← الإعدادات ← الإشعارات
     </div>
   </div>
 </div>

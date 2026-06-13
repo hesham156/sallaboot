@@ -212,8 +212,8 @@ export default function ErrorPage({ code: codeProp, message }: Props) {
   // Helpful for ops — surfaces the failing path in the browser title so
   // bug reports include it without the user having to copy the URL.
   useEffect(() => {
-    document.title = `${rawCode} — ${meta.title} | Sallabot`
-    return () => { document.title = 'Sallabot' }
+    document.title = `${rawCode} — ${meta.title} | Hayyak`
+    return () => { document.title = 'Hayyak' }
   }, [rawCode, meta.title])
 
   // ── Action handlers ────────────────────────────────────────────────────

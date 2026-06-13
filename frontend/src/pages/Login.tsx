@@ -158,7 +158,7 @@ export default function Login() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-[11px] text-slate-400 font-medium">
-            سلّابوت — المساعد الذكي لمتاجر سلة © {new Date().getFullYear()}
+            حياك — المساعد الذكي لمتاجر سلة © {new Date().getFullYear()}
           </p>
         </div>
       </div>

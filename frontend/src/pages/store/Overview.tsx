@@ -79,14 +79,14 @@ export default function Overview({ storeId, store }: Props) {
     const cur = weekly.currency === 'SAR' ? 'ريال' : weekly.currency
     const d = (n: number) => (n > 0 ? `▲${n}%` : n < 0 ? `▼${Math.abs(n)}%` : '—')
     const report =
-      `📊 تقرير سلّابوت الأسبوعي — ${store.store_name}\n` +
+      `📊 تقرير حياك الأسبوعي — ${store.store_name}\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
       `💰 المبيعات: ${weekly.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${cur} (${d(weekly.revenue_delta)})\n` +
       `📦 الطلبات: ${weekly.orders} (${d(weekly.orders_delta)})\n` +
       `💬 المحادثات: ${weekly.conversations} (${d(weekly.conv_delta)})\n` +
       (weekly.avg_rating ? `⭐ رضا العملاء: ${weekly.avg_rating}/5\n` : '') +
       (weekly.top_topic ? `🔎 أكثر موضوع: ${weekly.top_topic}\n` : '') +
-      `━━━━━━━━━━━━━━━━━━\nبواسطة سلّابوت 🤖`
+      `━━━━━━━━━━━━━━━━━━\nبواسطة حياك 🤖`
     navigator.clipboard.writeText(report)
     setCopied(true); setTimeout(() => setCopied(false), 1800)
   }
@@ -187,7 +187,7 @@ export default function Overview({ storeId, store }: Props) {
                   <div className="inline-flex items-center gap-2 bg-white/15 rounded-full px-3 py-1 text-xs font-bold mb-3">
                     <Icon paths="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" size={13} /> آخر 30 يوم
                   </div>
-                  <p className="text-sm font-semibold text-teal-50">سلّابوت جابلك</p>
+                  <p className="text-sm font-semibold text-teal-50">حياك جابلك</p>
                   <p className="text-4xl sm:text-5xl font-black tracking-tight mt-1">
                     {roi.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                     <span className="text-2xl font-bold mr-2">{roi.currency === 'SAR' ? 'ريال' : roi.currency}</span>

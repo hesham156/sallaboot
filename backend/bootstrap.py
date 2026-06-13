@@ -20,7 +20,7 @@ import store_brain as brain
 import store_manager as sm
 
 SALLABOT_STORE_ID = "sallabot"
-SALLABOT_STORE_NAME = "سلّابوت"
+SALLABOT_STORE_NAME = "حياك"
 
 _KNOWLEDGE_FILE = Path(__file__).parent / "data" / "sallabot_knowledge.md"
 

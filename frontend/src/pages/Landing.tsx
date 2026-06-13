@@ -18,10 +18,10 @@ function useSallabotWidget() {
     ;(window as unknown as { SallaChatConfig: Record<string, unknown> }).SallaChatConfig = {
       storeId:        'sallabot',
       apiUrl:         window.location.origin,
-      storeName:      'سلّابوت',
+      storeName:      'حياك',
       primaryColor:   '#0d9488',  // teal-600 — matches the landing page
       position:       'left',     // RTL → left == far from the CTA buttons
-      welcomeMessage: 'أهلاً! 👋 أنا سلّابوت. اسألني عن أي حاجة عن المنتج: المميزات، الأسعار، التثبيت، أو احجز عرض حي.',
+      welcomeMessage: 'أهلاً! 👋 أنا حياك. اسألني عن أي حاجة عن المنتج: المميزات، الأسعار، التثبيت، أو احجز عرض حي.',
       placeholder:    'اكتب سؤالك...',
     }
 
@@ -86,7 +86,7 @@ const FEATURES = [
   { icon: ICONS.globe, title: 'عربي بطلاقة',                 desc: 'يفهم لهجات الخليج ويرد بأسلوب ودّي طبيعي يناسب عملاءك.', color: 'sky' },
 ]
 const STATS = [
-  { num: '+200', label: 'متجر يثق بسلّابوت' },
+  { num: '+200', label: 'متجر يثق بحياك' },
   { num: '٪89',  label: 'توفير في تكلفة الردود' },
   { num: '٪40',  label: 'زيادة في التحويل' },
   { num: '٢٤/٧', label: 'دعم بدون توقّف' },
@@ -132,7 +132,7 @@ export default function Landing() {
       <div className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-center text-xs sm:text-sm font-semibold py-2 px-4">
         <span className="inline-flex items-center gap-2">
           <Icon d={ICONS.spark} size={14} />
-          جرّب سلّابوت مجاناً — مساعد مبيعات ذكي يشتغل على متجر سلة بتاعك
+          جرّب حياك مجاناً — مساعد مبيعات ذكي يشتغل على متجر سلة بتاعك
         </span>
       </div>
 
@@ -143,7 +143,7 @@ export default function Landing() {
             <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-teal-500/25">
               <Icon d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" size={18} />
             </span>
-            <span className="font-black text-lg text-slate-900">سلّابوت</span>
+            <span className="font-black text-lg text-slate-900">حياك</span>
           </a>
 
           <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
@@ -179,7 +179,7 @@ export default function Landing() {
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}>
               <div className="flex items-center justify-between mb-8">
-                <span className="font-black text-lg text-slate-900">سلّابوت</span>
+                <span className="font-black text-lg text-slate-900">حياك</span>
                 <button onClick={() => setMenuOpen(false)} className="text-slate-500"><Icon d={ICONS.close} size={22} /></button>
               </div>
               <div className="flex flex-col gap-1 text-base font-bold text-slate-700">
@@ -217,7 +217,7 @@ export default function Landing() {
               <br className="hidden sm:block" /> بمساعد ذكي يبيع نيابةً عنك
             </motion.h1>
             <motion.p variants={fadeUpVariants} className="mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto lg:mx-0">
-              سلّابوت يجاوب عملاءك فوراً، يحسب الأسعار، يسترجع السلات المتروكة، ويتعلّم من كل محادثة — كل ده على متجرك في سلة، بالعربي.
+              حياك يجاوب عملاءك فوراً، يحسب الأسعار، يسترجع السلات المتروكة، ويتعلّم من كل محادثة — كل ده على متجرك في سلة، بالعربي.
             </motion.p>
             <motion.div variants={fadeUpVariants} className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-3">
               <button onClick={goDashboard}
@@ -243,7 +243,7 @@ export default function Landing() {
                 <div className="flex items-center gap-0.5 text-amber-400">
                   {[...Array(5)].map((_, i) => <Icon key={i} d={ICONS.star} size={13} className="fill-amber-400" />)}
                 </div>
-                <p className="text-xs font-semibold text-slate-500 mt-0.5">+200 متجر يبيع أكتر مع سلّابوت</p>
+                <p className="text-xs font-semibold text-slate-500 mt-0.5">+200 متجر يبيع أكتر مع حياك</p>
               </div>
             </motion.div>
           </motion.div>
@@ -301,7 +301,7 @@ export default function Landing() {
         <StaggerContainer className="text-center max-w-2xl mx-auto mb-14">
           <motion.span variants={fadeUpVariants} className="inline-block text-xs font-bold text-teal-600 bg-teal-50 rounded-full px-3 py-1 mb-4">كل اللي متجرك محتاجه</motion.span>
           <motion.h2 variants={fadeUpVariants} className="text-3xl sm:text-4xl font-black text-slate-900 leading-tight">مساعد واحد يقوم بعمل فريق مبيعات كامل</motion.h2>
-          <motion.p variants={fadeUpVariants} className="text-base text-slate-600 mt-4">من أول رسالة للعميل لحد إتمام الطلب — سلّابوت معاك في كل خطوة.</motion.p>
+          <motion.p variants={fadeUpVariants} className="text-base text-slate-600 mt-4">من أول رسالة للعميل لحد إتمام الطلب — حياك معاك في كل خطوة.</motion.p>
         </StaggerContainer>
 
         <StaggerContainer className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -325,7 +325,7 @@ export default function Landing() {
               <Icon d={ICONS.shield} size={14} /> سرّي وآمن
             </span>
             <h3 className="text-2xl sm:text-3xl font-black leading-tight mb-3">يتعلّم من كل محادثة — ويوفّر تكلفتك</h3>
-            <p className="text-slate-300 leading-relaxed">سلّابوت يلتقط تصحيحاتك ويطبّقها، ويرد على الأسئلة المتكررة بدون ذكاء اصطناعي — توفير يوصل ٪89 من التكلفة مع كل ما يتعلّم أكثر.</p>
+            <p className="text-slate-300 leading-relaxed">حياك يلتقط تصحيحاتك ويطبّقها، ويرد على الأسئلة المتكررة بدون ذكاء اصطناعي — توفير يوصل ٪89 من التكلفة مع كل ما يتعلّم أكثر.</p>
             <button onClick={goDashboard} className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-slate-900 bg-white rounded-full px-5 py-3 hover:bg-teal-50 transition-colors">
               ابدأ الآن <Icon d={ICONS.arrow} size={16} className="rotate-180" />
             </button>
@@ -367,7 +367,7 @@ export default function Landing() {
           <div className="absolute bottom-[-6rem] left-[-3rem] w-80 h-80 bg-white/10 rounded-full blur-3xl" />
           <div className="relative">
             <h2 className="text-3xl sm:text-5xl font-black leading-tight">جاهز تبيع أكتر؟</h2>
-            <p className="mt-4 text-base sm:text-lg text-teal-50 max-w-xl mx-auto">فعّل سلّابوت على متجرك النهاردة، وخلّي مساعد ذكي يشتغل لك ٢٤ ساعة.</p>
+            <p className="mt-4 text-base sm:text-lg text-teal-50 max-w-xl mx-auto">فعّل حياك على متجرك النهاردة، وخلّي مساعد ذكي يشتغل لك ٢٤ ساعة.</p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
               <button onClick={goDashboard} className="inline-flex items-center gap-2 text-base font-black text-teal-600 bg-white rounded-full px-8 py-4 shadow-xl hover:-translate-y-0.5 transition-transform">
                 {cta} <Icon d={ICONS.arrow} size={18} className="rotate-180" />
@@ -387,7 +387,7 @@ export default function Landing() {
             <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white">
               <Icon d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" size={16} />
             </span>
-            <span className="font-black text-slate-900">سلّابوت</span>
+            <span className="font-black text-slate-900">حياك</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-semibold text-slate-500">
             <a href="#features" className="hover:text-teal-600 transition-colors">المميزات</a>
@@ -397,7 +397,7 @@ export default function Landing() {
             <button onClick={() => navigate('/data-deletion')} className="hover:text-teal-600 transition-colors">حذف البيانات</button>
             <button onClick={() => navigate('/login')} className="hover:text-teal-600 transition-colors">تسجيل الدخول</button>
           </div>
-          <p className="text-xs text-slate-400">© {new Date().getFullYear()} سلّابوت — المساعد الذكي لمتاجر سلة</p>
+          <p className="text-xs text-slate-400">© {new Date().getFullYear()} حياك — المساعد الذكي لمتاجر سلة</p>
         </div>
       </footer>
     </div>
