@@ -761,7 +761,7 @@ async def whatsapp_debug(request: Request):
             "wa_enabled":     bool(cfg.get("whatsapp_enabled")),
             "wa_phone_id":    cfg.get("whatsapp_phone_id", ""),
             "wa_token_set":   bool(cfg.get("whatsapp_token", "").strip()),
-            "wa_verify_token": os.getenv("WHATSAPP_VERIFY_TOKEN", "sallabot-wa"),
+            "wa_verify_token": os.getenv("WHATSAPP_VERIFY_TOKEN", "7ayak-wa"),
             "webhook_url":    f"{os.getenv('BASE_URL','')}/whatsapp/webhook",
         })
     return {"stores": result}

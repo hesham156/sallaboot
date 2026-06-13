@@ -66,7 +66,7 @@ def ensure_sallabot_store() -> None:
             refresh_token = "",
             store_info    = {
                 "name":   SALLABOT_STORE_NAME,
-                "domain": os.getenv("BASE_URL", "").replace("https://", "").replace("http://", "") or "sallabot.com",
+                "domain": os.getenv("BASE_URL", "").replace("https://", "").replace("http://", "") or "7ayak.app",
             },
         )
         print(f"[bootstrap] ✅ registered demo store {SALLABOT_STORE_ID!r}")

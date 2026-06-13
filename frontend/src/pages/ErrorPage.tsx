@@ -234,7 +234,7 @@ export default function ErrorPage({ code: codeProp, message }: Props) {
   }
   const goLogin   = () => navigate('/login',  { replace: true })
   const retry     = () => window.location.reload()
-  const support   = () => window.open('mailto:support@sallabot.app?subject=' + encodeURIComponent(`خطأ ${rawCode} على ${location.pathname}`))
+  const support   = () => window.open('mailto:support@7ayak.app?subject=' + encodeURIComponent(`خطأ ${rawCode} على ${location.pathname}`))
 
   const ACTION_BUTTONS: Record<string, { label: string; onClick: () => void; primary?: boolean }> = {
     back:    { label: 'رجوع',                onClick: goBack  },

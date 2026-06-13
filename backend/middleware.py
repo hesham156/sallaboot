@@ -195,7 +195,7 @@ async def admin_auth_middleware(request: Request, call_next):
 # blocks).
 #
 # Configure via env:
-#   BASE_URL              — admin SPA origin (e.g. https://sallabot.app)
+#   BASE_URL              — admin SPA origin (e.g. https://7ayak.app)
 #   ADMIN_ALLOWED_ORIGINS — extra CSV (e.g. http://localhost:3000,...)
 
 def _build_admin_origin_allowlist() -> set[str]:

@@ -22,7 +22,7 @@ import os
 import httpx
 
 GRAPH_VERSION = os.getenv("WHATSAPP_GRAPH_VERSION", "v21.0")
-VERIFY_TOKEN  = os.getenv("WHATSAPP_VERIFY_TOKEN", "sallabot-wa")
+VERIFY_TOKEN  = os.getenv("WHATSAPP_VERIFY_TOKEN", "7ayak-wa")
 _WA_TEXT_LIMIT = 4096
 
 
