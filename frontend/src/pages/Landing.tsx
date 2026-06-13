@@ -50,6 +50,114 @@ const float = (delay = 0) => ({
 })
 
 /* ─────────────────────────── Icon helper ─────────────────────────── */
+/* ─────────────────────────── FAQ Section ───────────────────────────
+   Targets long-tail SEO keywords for Salla merchants searching for
+   chatbot / WhatsApp / abandoned-cart solutions. Mirrored in the
+   FAQPage JSON-LD schema in index.html so Google can render these
+   as a rich snippet (the expandable Q&A accordion in SERPs).
+   Keep the question/answer text identical between the two.
+─────────────────────────────────────────────────────────────────── */
+const FAQS = [
+  {
+    q: 'ما هو حياك ولماذا أحتاجه لمتجر سلة؟',
+    a: 'حياك مساعد ذكي مخصص لمتاجر سلة، يربط متجرك بواتساب الأعمال ويرد على عملائك تلقائياً ٢٤ ساعة في اليوم. يجيب على أسئلة المنتجات، يستعيد السلات المتروكة، يرسل إشعارات الطلبات، ويزيد مبيعاتك بدون توظيف فريق خدمة عملاء. مصمم خصيصاً للسوق السعودي بفهم عميق للهجة والثقافة المحلية.',
+  },
+  {
+    q: 'كيف يعمل بوت واتساب الخاص بحياك مع متجر سلة؟',
+    a: 'بمجرد ربط حياك بمتجر سلة عبر واجهة سلة الرسمية، يقوم بسحب كل منتجاتك وأسعارك وفئاتك تلقائياً. عندما يراسلك عميل على واتساب، يرد البوت باستخدام الذكاء الاصطناعي بناءً على بيانات متجرك الفعلية — يرشح منتجات، يحسب الأسعار، ويرسل روابط الشراء المباشرة. كل المحادثات محفوظة في لوحة تحكم واحدة.',
+  },
+  {
+    q: 'هل يمكن لحياك استرجاع السلات المتروكة تلقائياً؟',
+    a: 'نعم. حياك يكتشف العملاء الذين أضافوا منتجات للسلة ولم يكملوا الطلب، ويرسل لهم رسالة واتساب مخصصة خلال ٣٠ دقيقة بأسلوب لطيف يذكّرهم بالمنتجات وأحياناً يقدم خصم. هذه الميزة وحدها قد تزيد مبيعاتك ١٥-٣٠٪ حسب طبيعة المتجر، وهي مفعّلة افتراضياً.',
+  },
+  {
+    q: 'كم تكلفة الاشتراك في حياك؟',
+    a: 'نقدم خطة مجانية للبدء تتيح لك تجربة كل المميزات الأساسية. الخطط المدفوعة تبدأ بأسعار مناسبة للمتاجر الصغيرة والمتوسطة، وتُحسب بناءً على عدد المحادثات الشهرية. زر صفحة الأسعار للتفاصيل الكاملة، أو ابدأ مجاناً الآن بدون بطاقة ائتمان.',
+  },
+  {
+    q: 'هل أحتاج خبرة تقنية لتشغيل بوت حياك؟',
+    a: 'إطلاقاً. الربط مع متجر سلة يتم بضغطة واحدة من متجر تطبيقات سلة. لا حاجة لكود أو إعدادات معقدة. تستطيع تخصيص ردود البوت ونغمته من لوحة التحكم بسهولة، وفريق الدعم متاح لمساعدتك في الإعداد إذا احتجت.',
+  },
+  {
+    q: 'ما الفرق بين حياك وواتساب أعمال العادي؟',
+    a: 'واتساب أعمال يوفر لك حساب فقط — أنت تحتاج موظف يرد على كل رسالة يدوياً. حياك يضيف طبقة من الذكاء الاصطناعي ترد تلقائياً، تفهم العميل، ترشح المنتجات من متجرك، وتحول المحادثة لطلب فعلي. تستطيع التدخل في أي محادثة يدوياً متى أردت من لوحة التحكم.',
+  },
+  {
+    q: 'كيف يتعلم الذكاء الاصطناعي عن منتجاتي ومتجري؟',
+    a: 'حياك يقرأ كاتالوج منتجاتك من سلة تلقائياً (الأسماء، الأوصاف، الأسعار، الفئات، المخزون)، ويستخدم نموذج ذكاء اصطناعي متقدم لفهم استفسارات العملاء وربطها بالمنتج المناسب. تستطيع كذلك إضافة معلومات إضافية مثل سياسات الإرجاع وأوقات الشحن من تبويب "تدريب البوت" في لوحة التحكم.',
+  },
+  {
+    q: 'كم وقت يستغرق ربط حياك بمتجري؟',
+    a: 'الربط الكامل يأخذ أقل من ٥ دقائق: تثبيت التطبيق من سلة، ربط رقم واتساب الأعمال، ثم تفعيل البوت. مزامنة المنتجات تتم تلقائياً في الخلفية وقد تستغرق دقائق إضافية حسب حجم المتجر. بعدها البوت جاهز للرد على عملائك مباشرة.',
+  },
+  {
+    q: 'هل بيانات عملائي ومتجري آمنة مع حياك؟',
+    a: 'نعم. جميع البيانات الحساسة (مفاتيح API، رموز الوصول، أرقام العملاء) مشفّرة في قاعدة البيانات. لا نشارك بياناتك مع أي طرف ثالث. عند إلغاء التطبيق من سلة يتم حذف جميع بياناتك تلقائياً خلال ٢٤ ساعة وفقاً لسياسة الخصوصية. الموقع محمي بـ HTTPS وبروتوكولات حماية متقدمة.',
+  },
+  {
+    q: 'هل البوت يدعم اللهجات العربية المختلفة؟',
+    a: 'نعم، حياك مصمم خصيصاً للسوق السعودي والخليجي ويتعامل بطلاقة مع اللهجات العربية المختلفة بالإضافة للعربية الفصحى والإنجليزية. النموذج المستخدم مدرّب على محادثات تجارية باللهجات المحلية، ويستطيع الرد بنفس لهجة العميل تلقائياً.',
+  },
+]
+
+function FAQSection() {
+  const [open, setOpen] = useState<number | null>(0)
+  return (
+    <section id="faq" className="max-w-4xl mx-auto px-5 sm:px-8 py-20 sm:py-28">
+      <AnimatedSection className="text-center mb-12">
+        <span className="inline-block text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 px-3 py-1 rounded-full">FAQ</span>
+        <h2 className="mt-4 text-3xl sm:text-5xl font-black text-slate-900 leading-tight">الأسئلة الشائعة</h2>
+        <p className="mt-3 text-base sm:text-lg text-slate-600">كل ما تحتاج معرفته عن حياك قبل البدء</p>
+      </AnimatedSection>
+
+      <div className="space-y-3">
+        {FAQS.map((faq, i) => {
+          const isOpen = open === i
+          return (
+            <div
+              key={i}
+              className={`bg-white border rounded-2xl overflow-hidden transition-all ${
+                isOpen ? 'border-teal-200 shadow-soft' : 'border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <button
+                onClick={() => setOpen(isOpen ? null : i)}
+                className="w-full flex items-center justify-between gap-4 text-right px-5 sm:px-7 py-5 hover:bg-slate-50/50 transition-colors"
+                aria-expanded={isOpen}
+              >
+                <h3 className={`flex-1 text-base sm:text-lg font-bold leading-snug ${isOpen ? 'text-teal-700' : 'text-slate-900'}`}>
+                  {faq.q}
+                </h3>
+                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                  isOpen ? 'bg-teal-500 text-white rotate-180' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  <Icon d={ICONS.chevDown} size={16} />
+                </div>
+              </button>
+              {isOpen && (
+                <div className="px-5 sm:px-7 pb-6 text-slate-600 leading-loose text-sm sm:text-base border-t border-slate-100 pt-4">
+                  {faq.a}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Soft CTA at end of FAQ — captures the user who scrolled all the way */}
+      <AnimatedSection className="mt-12 text-center">
+        <p className="text-sm text-slate-500">عندك سؤال تاني؟</p>
+        <a
+          href="mailto:support@7ayak.app"
+          className="mt-2 inline-flex items-center gap-2 text-base font-bold text-teal-600 hover:text-teal-700"
+        >
+          راسلنا على support@7ayak.app
+        </a>
+      </AnimatedSection>
+    </section>
+  )
+}
+
 function Icon({ d, size = 20, className = '' }: { d: string | string[]; size?: number; className?: string }) {
   const paths = Array.isArray(d) ? d : [d]
   return (
@@ -74,6 +182,7 @@ const ICONS = {
   shield: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', 'M9 12l2 2 4-4'],
   menu:   ['M4 6h16', 'M4 12h16', 'M4 18h16'],
   close:  ['M6 6l12 12', 'M18 6L6 18'],
+  chevDown: ['M19 9l-7 7-7-7'],
 }
 
 /* ─────────────────────────── Section data ─────────────────────────── */
@@ -356,6 +465,9 @@ export default function Landing() {
           </StaggerContainer>
         </div>
       </section>
+
+      {/* ═══════════════ FAQ — SEO + customer objections ═══════════════ */}
+      <FAQSection />
 
       {/* ═══════════════ CTA ═══════════════ */}
       <section className="max-w-7xl mx-auto px-5 sm:px-8 py-20 sm:py-24">
