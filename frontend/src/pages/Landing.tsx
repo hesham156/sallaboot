@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, useScroll, useTransform, AnimatePresence, type Variants } from 'framer-motion'
+import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion'
+import { AnimatedSection, StaggerContainer, StaggerItem, fadeUpVariants, staggerVariants } from '../components/AnimatedSection'
 import { getToken, getIsSuper, getStoreId } from '../api'
 
 // Inject the marketing chat widget once per page mount. The widget reads
@@ -40,17 +41,9 @@ function useSallabotWidget() {
   }, [])
 }
 
-/* ─────────────────────────── Motion variants ─────────────────────────── */
-const EASE = [0.22, 1, 0.36, 1] as const
+/* ─────────────────────────── Local motion helpers ─────────────────────────── */
+const EASE = [0.25, 0.46, 0.45, 0.94] as const
 
-const fadeUp: Variants = {
-  hidden:  { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } },
-}
-const stagger: Variants = {
-  hidden:  {},
-  visible: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } },
-}
 const float = (delay = 0) => ({
   animate: { y: [0, -10, 0] },
   transition: { duration: 4, repeat: Infinity, ease: 'easeInOut', delay },
@@ -213,20 +206,20 @@ export default function Landing() {
 
         <div className="relative max-w-7xl mx-auto px-5 sm:px-8 pt-16 sm:pt-24 pb-20 grid lg:grid-cols-2 gap-12 lg:gap-8 items-center">
           {/* copy */}
-          <motion.div initial="hidden" animate="visible" variants={stagger} className="text-center lg:text-right">
-            <motion.div variants={fadeUp} className="inline-flex items-center gap-2 bg-teal-50 border border-teal-100 text-teal-700 text-xs font-bold rounded-full px-3.5 py-1.5 mb-5">
+          <motion.div initial="hidden" animate="visible" variants={staggerVariants} className="text-center lg:text-right">
+            <motion.div variants={fadeUpVariants} className="inline-flex items-center gap-2 bg-teal-50 border border-teal-100 text-teal-700 text-xs font-bold rounded-full px-3.5 py-1.5 mb-5">
               <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
               مدعوم بالذكاء الاصطناعي — لمتاجر سلة
             </motion.div>
-            <motion.h1 variants={fadeUp} className="text-4xl sm:text-5xl lg:text-[3.4rem] font-black leading-[1.15] text-slate-900 tracking-tight">
+            <motion.h1 variants={fadeUpVariants} className="text-4xl sm:text-5xl lg:text-[3.4rem] font-black leading-[1.15] text-slate-900 tracking-tight">
               حوّل زوّار متجرك إلى
               <span className="text-gradient"> عملاء يشترون</span>
               <br className="hidden sm:block" /> بمساعد ذكي يبيع نيابةً عنك
             </motion.h1>
-            <motion.p variants={fadeUp} className="mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto lg:mx-0">
+            <motion.p variants={fadeUpVariants} className="mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto lg:mx-0">
               سلّابوت يجاوب عملاءك فوراً، يحسب الأسعار، يسترجع السلات المتروكة، ويتعلّم من كل محادثة — كل ده على متجرك في سلة، بالعربي.
             </motion.p>
-            <motion.div variants={fadeUp} className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-3">
+            <motion.div variants={fadeUpVariants} className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-3">
               <button onClick={goDashboard}
                 className="inline-flex items-center gap-2 text-base font-bold text-white bg-gradient-to-r from-teal-500 to-cyan-500 rounded-full px-7 py-3.5 shadow-xl shadow-teal-500/25 hover:shadow-teal-500/40 hover:-translate-y-0.5 transition-all">
                 {cta}
@@ -238,7 +231,7 @@ export default function Landing() {
               </a>
             </motion.div>
             {/* social proof */}
-            <motion.div variants={fadeUp} className="mt-8 flex items-center justify-center lg:justify-start gap-3">
+            <motion.div variants={fadeUpVariants} className="mt-8 flex items-center justify-center lg:justify-start gap-3">
               <div className="flex -space-x-2 space-x-reverse">
                 {['#14b8a6', '#06b6d4', '#0ea5e9', '#8b5cf6'].map((c, i) => (
                   <span key={i} className="w-9 h-9 rounded-full border-2 border-white flex items-center justify-center text-white text-xs font-bold" style={{ background: c }}>
@@ -293,29 +286,27 @@ export default function Landing() {
 
       {/* ═══════════════ STATS ═══════════════ */}
       <section id="stats" className="border-y border-slate-100 bg-slate-50/60">
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.3 }} variants={stagger}
-          className="max-w-7xl mx-auto px-5 sm:px-8 py-12 grid grid-cols-2 lg:grid-cols-4 gap-8">
+        <StaggerContainer className="max-w-7xl mx-auto px-5 sm:px-8 py-12 grid grid-cols-2 lg:grid-cols-4 gap-8">
           {STATS.map((s) => (
-            <motion.div key={s.label} variants={fadeUp} className="text-center">
+            <StaggerItem key={s.label} className="text-center">
               <p className="text-3xl sm:text-4xl font-black text-gradient">{s.num}</p>
               <p className="text-sm font-semibold text-slate-500 mt-1">{s.label}</p>
-            </motion.div>
+            </StaggerItem>
           ))}
-        </motion.div>
+        </StaggerContainer>
       </section>
 
       {/* ═══════════════ FEATURES (bento) ═══════════════ */}
       <section id="features" className="max-w-7xl mx-auto px-5 sm:px-8 py-20 sm:py-28">
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.3 }} variants={stagger} className="text-center max-w-2xl mx-auto mb-14">
-          <motion.span variants={fadeUp} className="inline-block text-xs font-bold text-teal-600 bg-teal-50 rounded-full px-3 py-1 mb-4">كل اللي متجرك محتاجه</motion.span>
-          <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-black text-slate-900 leading-tight">مساعد واحد يقوم بعمل فريق مبيعات كامل</motion.h2>
-          <motion.p variants={fadeUp} className="text-base text-slate-600 mt-4">من أول رسالة للعميل لحد إتمام الطلب — سلّابوت معاك في كل خطوة.</motion.p>
-        </motion.div>
+        <StaggerContainer className="text-center max-w-2xl mx-auto mb-14">
+          <motion.span variants={fadeUpVariants} className="inline-block text-xs font-bold text-teal-600 bg-teal-50 rounded-full px-3 py-1 mb-4">كل اللي متجرك محتاجه</motion.span>
+          <motion.h2 variants={fadeUpVariants} className="text-3xl sm:text-4xl font-black text-slate-900 leading-tight">مساعد واحد يقوم بعمل فريق مبيعات كامل</motion.h2>
+          <motion.p variants={fadeUpVariants} className="text-base text-slate-600 mt-4">من أول رسالة للعميل لحد إتمام الطلب — سلّابوت معاك في كل خطوة.</motion.p>
+        </StaggerContainer>
 
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.15 }} variants={stagger}
-          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <StaggerContainer className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {FEATURES.map((f) => (
-            <motion.div key={f.title} variants={fadeUp} whileHover={{ y: -6 }}
+            <motion.div key={f.title} variants={fadeUpVariants} whileHover={{ y: -6 }}
               className="group bg-white border border-slate-100 rounded-3xl p-7 shadow-[0_4px_24px_rgba(15,23,42,0.05)] hover:shadow-[0_12px_36px_rgba(20,184,166,0.12)] transition-shadow">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-5 ${COLOR_MAP[f.color]}`}>
                 <Icon d={f.icon} size={24} />
@@ -324,11 +315,10 @@ export default function Landing() {
               <p className="text-sm text-slate-600 leading-relaxed">{f.desc}</p>
             </motion.div>
           ))}
-        </motion.div>
+        </StaggerContainer>
 
         {/* wide dark highlight card */}
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.3 }} variants={fadeUp}
-          className="mt-5 relative overflow-hidden rounded-3xl bg-slate-900 text-white p-8 sm:p-12 grid lg:grid-cols-2 gap-8 items-center">
+        <AnimatedSection className="mt-5 relative overflow-hidden rounded-3xl bg-slate-900 text-white p-8 sm:p-12 grid lg:grid-cols-2 gap-8 items-center">
           <div className="absolute top-[-4rem] left-[-4rem] w-72 h-72 bg-teal-500/20 rounded-full blur-3xl" />
           <div className="relative">
             <span className="inline-flex items-center gap-2 text-xs font-bold text-teal-300 bg-teal-500/10 rounded-full px-3 py-1 mb-4">
@@ -348,32 +338,31 @@ export default function Landing() {
               </div>
             ))}
           </div>
-        </motion.div>
+        </AnimatedSection>
       </section>
 
       {/* ═══════════════ HOW IT WORKS ═══════════════ */}
       <section id="how" className="bg-slate-50/60 border-y border-slate-100">
         <div className="max-w-7xl mx-auto px-5 sm:px-8 py-20 sm:py-28">
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.3 }} variants={stagger} className="text-center max-w-2xl mx-auto mb-14">
-            <motion.h2 variants={fadeUp} className="text-3xl sm:text-4xl font-black text-slate-900">ابدأ في ٣ خطوات بسيطة</motion.h2>
-            <motion.p variants={fadeUp} className="text-base text-slate-600 mt-4">من الربط لأول عملية بيع — بدون تعقيد ولا أكواد.</motion.p>
-          </motion.div>
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.2 }} variants={stagger} className="grid md:grid-cols-3 gap-6">
+          <StaggerContainer className="text-center max-w-2xl mx-auto mb-14">
+            <motion.h2 variants={fadeUpVariants} className="text-3xl sm:text-4xl font-black text-slate-900">ابدأ في ٣ خطوات بسيطة</motion.h2>
+            <motion.p variants={fadeUpVariants} className="text-base text-slate-600 mt-4">من الربط لأول عملية بيع — بدون تعقيد ولا أكواد.</motion.p>
+          </StaggerContainer>
+          <StaggerContainer className="grid md:grid-cols-3 gap-6">
             {STEPS.map((s) => (
-              <motion.div key={s.n} variants={fadeUp} className="relative bg-white border border-slate-100 rounded-3xl p-8 shadow-[0_4px_24px_rgba(15,23,42,0.05)]">
+              <StaggerItem key={s.n} className="relative bg-white border border-slate-100 rounded-3xl p-8 shadow-[0_4px_24px_rgba(15,23,42,0.05)]">
                 <span className="absolute -top-5 right-7 w-12 h-12 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-500 text-white text-xl font-black flex items-center justify-center shadow-lg shadow-teal-500/30">{s.n}</span>
                 <h3 className="text-lg font-black text-slate-900 mt-4 mb-2">{s.title}</h3>
                 <p className="text-sm text-slate-600 leading-relaxed">{s.desc}</p>
-              </motion.div>
+              </StaggerItem>
             ))}
-          </motion.div>
+          </StaggerContainer>
         </div>
       </section>
 
       {/* ═══════════════ CTA ═══════════════ */}
       <section className="max-w-7xl mx-auto px-5 sm:px-8 py-20 sm:py-24">
-        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.4 }} variants={fadeUp}
-          className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-teal-500 to-cyan-500 px-7 sm:px-14 py-14 sm:py-20 text-center text-white">
+        <AnimatedSection className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-teal-500 to-cyan-500 px-7 sm:px-14 py-14 sm:py-20 text-center text-white">
           <div className="absolute top-[-5rem] right-[-3rem] w-80 h-80 bg-white/15 rounded-full blur-3xl" />
           <div className="absolute bottom-[-6rem] left-[-3rem] w-80 h-80 bg-white/10 rounded-full blur-3xl" />
           <div className="relative">
@@ -388,7 +377,7 @@ export default function Landing() {
               </button>
             </div>
           </div>
-        </motion.div>
+        </AnimatedSection>
       </section>
 
       {/* ═══════════════ FOOTER ═══════════════ */}
