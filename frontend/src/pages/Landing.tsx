@@ -140,10 +140,7 @@ export default function Landing() {
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
         <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2.5">
-            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-teal-500/25">
-              <Icon d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" size={18} />
-            </span>
-            <span className="font-black text-lg text-slate-900">حياك</span>
+          <img src='/uploads/3.png'/>
           </a>
 
           <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
