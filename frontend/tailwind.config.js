@@ -10,7 +10,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        arabic: ['Tajawal', 'sans-serif'],
+        arabic: ['Foda', 'Tajawal', 'sans-serif'],
+        foda:   ['Foda', 'sans-serif'],
       },
     },
   },

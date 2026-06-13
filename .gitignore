@@ -24,6 +24,7 @@ coverage.xml
 backend/uploads/
 # …except brand assets shipped with the repo
 !backend/uploads/logo.png
+!backend/uploads/ArbFONTS-Foda-Free-Font.ttf
 
 # Multi-tenant store data (contains access tokens — never commit)
 backend/data/
