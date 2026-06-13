@@ -280,7 +280,7 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,_theme(colors.default.200)_1px,_transparent_0)] [background-size:24px_24px] opacity-40 pointer-events-none -z-10" />
 
       {/* ─── Header ─── */}
-      <div className="relative flex flex-wrap items-end justify-between gap-6">
+      <div className="relative flex flex-wrap items-start justify-between gap-6 pt-2">
         <div className="flex-1 min-w-[260px]">
           <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-full px-3 py-1 mb-3">
             <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
@@ -298,18 +298,18 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
         </div>
 
         {/* Stats card */}
-        <div className="bg-content1 border border-divider rounded-2xl px-5 py-3.5 flex items-center gap-4 shadow-sm">
-          <div className="text-right">
-            <div className="flex items-baseline gap-1.5">
+        <div className="bg-content1 border border-divider rounded-2xl px-5 py-4 flex items-center gap-5 shadow-sm shrink-0 mt-1">
+          <div className="text-center">
+            <div className="flex items-baseline justify-center gap-1" dir="ltr">
               <span className="text-3xl font-black text-emerald-600 leading-none">{enabledCount}</span>
-              <span className="text-sm font-bold text-default-400">/ {EVENT_DEFS.length}</span>
+              <span className="text-sm font-bold text-default-400">/{EVENT_DEFS.length}</span>
             </div>
-            <p className="text-[10px] font-semibold text-default-500 mt-0.5 uppercase tracking-wide">حدث مفعّل</p>
+            <p className="text-[10px] font-bold text-default-500 mt-1.5 uppercase tracking-wider">مفعّل</p>
           </div>
           <div className="h-10 w-px bg-divider" />
-          <div className="text-right">
-            <p className="text-xl font-black text-foreground leading-none">{configurableCount}</p>
-            <p className="text-[10px] font-semibold text-default-500 mt-0.5 uppercase tracking-wide">قابل للتخصيص</p>
+          <div className="text-center">
+            <p className="text-3xl font-black text-foreground leading-none">{configurableCount}</p>
+            <p className="text-[10px] font-bold text-default-500 mt-1.5 uppercase tracking-wider">قابل للتخصيص</p>
           </div>
         </div>
       </div>
@@ -326,7 +326,7 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
               onClick={() => { setTestMsg(''); setConfiguring(def.key) }}
               className={`group relative overflow-hidden rounded-2xl border bg-content1 p-5 flex flex-col gap-4 cursor-pointer transition-all duration-300 hover:-translate-y-1 ${
                 isHero
-                  ? 'border-emerald-200/70 sm:col-span-2 xl:col-span-2'
+                  ? 'border-emerald-200/70'
                   : 'border-divider hover:border-default-200'
               }`}
               style={{
@@ -381,10 +381,10 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
                   <Icon d={def.icon} size={24} className={def.iconColor} />
                 </div>
                 <div className="flex-1 min-w-0 pt-0.5">
-                  <p className={`font-black text-foreground leading-tight ${isHero ? 'text-base' : 'text-sm'}`}>
+                  <p className="font-black text-sm text-foreground leading-tight">
                     {def.label}
                   </p>
-                  <p className={`text-xs text-default-500 mt-1.5 leading-relaxed ${isHero ? 'line-clamp-3' : 'line-clamp-2'}`}>
+                  <p className="text-xs text-default-500 mt-1.5 leading-relaxed line-clamp-2">
                     {def.description}
                   </p>
                 </div>
