@@ -273,14 +273,14 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
   const configurableCount = EVENT_DEFS.filter(d => !d.readOnly).length
 
   return (
-    <div className="relative space-y-8 pb-4" dir="rtl">
+    <div className="relative px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8 overflow-hidden" dir="rtl">
       {/* ─── Atmospheric background ─── */}
       <div className="absolute top-[-3rem] right-[-3rem] w-[26rem] h-[26rem] bg-emerald-400/15 rounded-full blur-[140px] pointer-events-none -z-10" />
       <div className="absolute top-32 left-[-4rem] w-[22rem] h-[22rem] bg-teal-400/10 rounded-full blur-[140px] pointer-events-none -z-10" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,_theme(colors.default.200)_1px,_transparent_0)] [background-size:24px_24px] opacity-40 pointer-events-none -z-10" />
 
       {/* ─── Header ─── */}
-      <div className="relative flex flex-wrap items-start justify-between gap-6 pt-2">
+      <div className="relative flex flex-wrap items-start justify-between gap-6">
         <div className="flex-1 min-w-[260px]">
           <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold rounded-full px-3 py-1 mb-3">
             <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
