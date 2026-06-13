@@ -90,7 +90,7 @@ export default function DataDeletion() {
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm sm:text-base">الطلب المباشر عبر الدعم الفني</h3>
                   <p className="text-slate-600 text-xs sm:text-sm mt-1 leading-relaxed">
-                    يمكنك مراسلتنا من البريد الإلكتروني الخاص بمالك المتجر المسجل لدينا إلى البريد الإلكتروني <a href="mailto:support@sallaboot.com" className="text-teal-600 hover:underline font-bold">support@sallaboot.com</a> بعنوان "طلب حذف حساب المتجر والبيانات"، وسيقوم فريق الدعم بحذف الحساب وكافة البيانات المرتبطة به خلال ٤٨ ساعة وإشعارك بالتأكيد.
+                    يمكنك مراسلتنا من البريد الإلكتروني الخاص بمالك المتجر المسجل لدينا إلى البريد الإلكتروني <a href="mailto:support@7ayak.app" className="text-teal-600 hover:underline font-bold">support@7ayak.app</a> بعنوان "طلب حذف حساب المتجر والبيانات"، وسيقوم فريق الدعم بحذف الحساب وكافة البيانات المرتبطة به خلال ٤٨ ساعة وإشعارك بالتأكيد.
                   </p>
                 </div>
               </div>
@@ -123,7 +123,7 @@ export default function DataDeletion() {
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm sm:text-base">التواصل معنا مباشرة</h3>
                   <p className="text-slate-600 text-xs sm:text-sm mt-1 leading-relaxed">
-                    إذا تعذر التواصل مع المتجر، يمكنك مراسلتنا مباشرة على <a href="mailto:support@sallaboot.com" className="text-teal-600 hover:underline font-bold">support@sallaboot.com</a> مع تزويدنا برقم هاتفك أو معرف المستخدم الذي تواصلت به واسم المتجر. سنقوم بالتحقق من الطلب ومسح سجل محادثاتك تماماً من خوادمنا خلال فترة أقصاها ١٤ يوماً عمل.
+                    إذا تعذر التواصل مع المتجر، يمكنك مراسلتنا مباشرة على <a href="mailto:support@7ayak.app" className="text-teal-600 hover:underline font-bold">support@7ayak.app</a> مع تزويدنا برقم هاتفك أو معرف المستخدم الذي تواصلت به واسم المتجر. سنقوم بالتحقق من الطلب ومسح سجل محادثاتك تماماً من خوادمنا خلال فترة أقصاها ١٤ يوماً عمل.
                   </p>
                 </div>
               </div>

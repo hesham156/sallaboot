@@ -146,7 +146,7 @@ export default function TermsOfService() {
             </h2>
             <p className="text-slate-600 text-sm sm:text-base leading-relaxed">
               لأي استفسار بخصوص شروط الخدمة هذه، يرجى التواصل مع فريق الدعم القانوني والفني عبر البريد الإلكتروني التالي:
-              <a href="mailto:support@sallaboot.com" className="text-teal-600 hover:underline font-bold dir-ltr inline-block mx-1.5">support@sallaboot.com</a>
+              <a href="mailto:support@7ayak.app" className="text-teal-600 hover:underline font-bold dir-ltr inline-block mx-1.5">support@7ayak.app</a>
             </p>
           </div>
         </motion.div>
