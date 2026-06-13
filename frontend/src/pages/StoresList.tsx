@@ -213,9 +213,12 @@ export default function StoresList() {
       <div className="flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center shadow-lg shadow-teal-500/30 flex-shrink-0">
-            <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={20} className="text-white" />
-          </div>
+          <img
+            src="/uploads/logo.png"
+            alt="حياك"
+            style={{ maxWidth: '100%', height: 'auto', width: '100px' }}
+            className="flex-shrink-0"
+          />
           <div>
             <h1 className="text-xl font-black text-foreground leading-tight">لوحة التحكم</h1>
             <p className="text-xs text-slate-500 mt-0.5">إدارة جميع المتاجر</p>
