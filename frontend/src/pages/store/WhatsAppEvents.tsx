@@ -272,46 +272,44 @@ export default function WhatsAppEvents({ storeId }: { storeId: string }) {
       </div>
 
       {/* Cards grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {EVENT_DEFS.map(def => {
           const ev = events[def.key] ?? { enabled: false, template: '' }
           return (
             <div
               key={def.key}
-              className="bg-content1 border border-divider rounded-2xl p-5 flex flex-col gap-4 hover:border-primary/40 transition-colors relative"
+              className="group bg-content1 border border-divider rounded-2xl p-5 flex flex-col gap-4 hover:border-primary/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 relative cursor-pointer"
+              onClick={() => { setTestMsg(''); setConfiguring(def.key) }}
             >
               {def.isNew && (
-                <span className="absolute top-4 left-4 bg-primary text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
+                <span className="absolute top-3 left-3 bg-primary text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">
                   جديد
                 </span>
               )}
 
               {/* Icon + title */}
               <div className="flex items-start gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${def.iconBg}`}>
-                  <Icon d={def.icon} size={20} className={def.iconColor} />
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${def.iconBg}`}>
+                  <Icon d={def.icon} size={22} className={def.iconColor} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-sm text-foreground leading-tight">{def.label}</p>
-                  <p className="text-xs text-default-500 mt-1 leading-relaxed line-clamp-3">{def.description}</p>
+                  <p className="text-xs text-default-500 mt-1 leading-relaxed line-clamp-2">{def.description}</p>
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-between border-t border-divider pt-3">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${ev.enabled ? 'bg-success' : 'bg-default-300'}`} />
+              <div className="flex items-center justify-between border-t border-divider pt-3 mt-auto">
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full transition-colors ${ev.enabled ? 'bg-success animate-pulse' : 'bg-default-300'}`} />
                   <span className={`text-xs font-medium ${ev.enabled ? 'text-success-600' : 'text-default-400'}`}>
                     {ev.enabled ? 'مفعّل' : 'معطّل'}
                   </span>
                 </div>
-                <button
-                  onClick={() => { setTestMsg(''); setConfiguring(def.key) }}
-                  className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
-                >
+                <span className="text-xs font-semibold text-primary group-hover:underline flex items-center gap-1">
                   ضبط
-                  <Icon d="M9 18l6-6-6-6" size={13} />
-                </button>
+                  <Icon d="M9 18l6-6-6-6" size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                </span>
               </div>
             </div>
           )
