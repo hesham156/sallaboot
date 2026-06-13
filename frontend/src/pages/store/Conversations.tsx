@@ -42,6 +42,21 @@ function fmtTime(iso: string): string {
 }
 
 /**
+ * One source of truth for "what does this customer get called in the UI".
+ * Without this, the list and the chat header drift apart — the header
+ * already prefers customer_info.name, but the list was leaking the raw
+ * session_id ("wa:96653…") which is meaningless to admins.
+ */
+function customerDisplayName(c: { customer_info?: { name?: string; phone?: string } | null; session_id: string }): string {
+  const ci = c.customer_info
+  if (ci?.name)  return ci.name
+  if (ci?.phone) return ci.phone
+  // WhatsApp sessions: wa:966531549560 → +966531549560 (E.164-ish, readable)
+  if (c.session_id.startsWith('wa:')) return '+' + c.session_id.slice(3)
+  return `جلسة ${c.session_id.slice(0, 8)}`
+}
+
+/**
  * Parse a message body for markdown-style links `[text](url)` and render:
  *  - image attachments inline as thumbnails (clickable to open full size)
  *  - other files as clickable filename links
@@ -363,6 +378,7 @@ export default function Conversations({ storeId }: Props) {
   const filtered = search
     ? convs.filter(c =>
         c.session_id.includes(search) ||
+        customerDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
         c.last_message?.content?.toLowerCase().includes(search.toLowerCase())
       )
     : convs
@@ -471,7 +487,7 @@ export default function Conversations({ storeId }: Props) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-0.5">
                         <span className="text-xs font-bold text-foreground truncate">
-                          {c.session_id.slice(0, 8)}…
+                          {customerDisplayName(c)}
                         </span>
                         <span className="text-[10px] text-slate-500 flex-shrink-0">
                           {relTime(c.last_activity)}
@@ -537,7 +553,7 @@ export default function Conversations({ storeId }: Props) {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <Avatar
-                    name={selected.session_id[0]}
+                    name={customerDisplayName(selected)[0]}
                     size="sm"
                     className={selected.bot_enabled
                       ? 'bg-gradient-to-br from-teal-500 to-cyan-600 text-white'
@@ -545,7 +561,7 @@ export default function Conversations({ storeId }: Props) {
                   />
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-foreground truncate">
-                      {selected.customer_info?.name || `جلسة ${selected.session_id.slice(0, 8)}`}
+                      {customerDisplayName(selected)}
                     </p>
                     <div className="flex items-center gap-2 text-xs">
                       <span className={`flex items-center gap-1 ${
