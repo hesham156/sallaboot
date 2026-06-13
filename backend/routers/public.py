@@ -93,6 +93,16 @@ async def data_deletion_page():
     return _serve_react_or_legacy()
 
 
+@router.get("/blog", response_class=HTMLResponse)
+async def blog_index():
+    return _serve_react_or_legacy()
+
+
+@router.get("/blog/{slug}", response_class=HTMLResponse)
+async def blog_post(slug: str):
+    return _serve_react_or_legacy()
+
+
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_index():
     return _serve_react_or_legacy()
@@ -114,6 +124,16 @@ async def store_spa_sub(store_id: str, rest: str):
 # Google Search Console reads these to crawl the marketing pages while
 # staying out of the auth-gated dashboard.
 
+# Blog post slugs mirrored from frontend/src/content/blog/posts.tsx.
+# When you publish a new post, append its slug here so the sitemap
+# advertises it to Google. Listed newest-first so the sitemap reflects
+# publication order even if a crawler honours <lastmod>.
+_BLOG_POST_SLUGS = [
+    "how-to-add-whatsapp-bot-to-salla-store",
+    "recover-abandoned-carts-whatsapp",
+]
+
+
 @router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     base = os.getenv("BASE_URL", "https://7ayak.app").rstrip("/")
@@ -121,6 +141,7 @@ async def robots_txt():
         "User-agent: *\n"
         "Allow: /\n"
         "Allow: /landing\n"
+        "Allow: /blog\n"
         "Allow: /privacy\n"
         "Allow: /terms\n"
         "Allow: /data-deletion\n"
@@ -149,10 +170,16 @@ async def sitemap_xml():
     urls = [
         ("/",              "weekly", "1.0"),
         ("/landing",       "weekly", "0.9"),
+        ("/blog",          "weekly", "0.8"),
         ("/privacy",       "yearly", "0.5"),
         ("/terms",         "yearly", "0.5"),
         ("/data-deletion", "yearly", "0.5"),
     ]
+    # Each blog post is a separate URL — Google indexes them individually
+    # and they're the long-tail SEO content.
+    for slug in _BLOG_POST_SLUGS:
+        urls.append((f"/blog/{slug}", "monthly", "0.7"))
+
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     for path, freq, prio in urls:
