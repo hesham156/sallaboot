@@ -1,8 +1,13 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { useSEO } from '../hooks/useSEO'
 
 export default function PrivacyPolicy() {
   const navigate = useNavigate()
+  useSEO({
+    title:       'سياسة الخصوصية | حياك',
+    description: 'سياسة الخصوصية لمنصة حياك — كيف نتعامل مع بيانات التجار والعملاء، الحقوق، والامتثال لأنظمة حماية البيانات.',
+  })
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50/50 text-slate-800 font-sans pb-20 overflow-x-hidden">

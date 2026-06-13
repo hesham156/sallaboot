@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 
 import auth as _auth
 import database as db
@@ -106,6 +106,65 @@ async def store_spa(store_id: str):
 @router.get("/store/{store_id}/{rest:path}", response_class=HTMLResponse)
 async def store_spa_sub(store_id: str, rest: str):
     return _serve_react_or_legacy()
+
+
+# ── SEO: robots.txt + sitemap.xml ────────────────────────────────────────
+# Served straight from the backend so they always reflect the current
+# BASE_URL and route list, without bundling stale files into the SPA.
+# Google Search Console reads these to crawl the marketing pages while
+# staying out of the auth-gated dashboard.
+
+@router.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    base = os.getenv("BASE_URL", "https://7ayak.app").rstrip("/")
+    return (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /landing\n"
+        "Allow: /privacy\n"
+        "Allow: /terms\n"
+        "Allow: /data-deletion\n"
+        # Auth-gated SPA + API surfaces: no SEO value, would waste crawl budget
+        # and risk leaking store-scoped URLs into search results.
+        "Disallow: /admin\n"
+        "Disallow: /admin/\n"
+        "Disallow: /store/\n"
+        "Disallow: /auth/\n"
+        "Disallow: /webhook/\n"
+        "Disallow: /chat\n"
+        "Disallow: /chat/\n"
+        "Disallow: /upload\n"
+        "Disallow: /file/\n"
+        "Disallow: /uploads/\n"
+        "Disallow: /env-check\n"
+        "\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+    )
+
+
+@router.get("/sitemap.xml")
+async def sitemap_xml():
+    base = os.getenv("BASE_URL", "https://7ayak.app").rstrip("/")
+    # (path, changefreq, priority)
+    urls = [
+        ("/",              "weekly", "1.0"),
+        ("/landing",       "weekly", "0.9"),
+        ("/privacy",       "yearly", "0.5"),
+        ("/terms",         "yearly", "0.5"),
+        ("/data-deletion", "yearly", "0.5"),
+    ]
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for path, freq, prio in urls:
+        lines += [
+            "  <url>",
+            f"    <loc>{base}{path}</loc>",
+            f"    <changefreq>{freq}</changefreq>",
+            f"    <priority>{prio}</priority>",
+            "  </url>",
+        ]
+    lines.append("</urlset>")
+    return Response(content="\n".join(lines), media_type="application/xml")
 
 
 # ── Health / diagnostics ─────────────────────────────────────────────────

@@ -1,8 +1,13 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { useSEO } from '../hooks/useSEO'
 
 export default function DataDeletion() {
   const navigate = useNavigate()
+  useSEO({
+    title:       'حذف البيانات | حياك',
+    description: 'تعليمات حذف بيانات حسابك أو محادثاتك من منصة حياك — حق المستخدم في الوصول لبياناته وحذفها وفقاً لأنظمة حماية البيانات.',
+  })
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50/50 text-slate-800 font-sans pb-20 overflow-x-hidden">

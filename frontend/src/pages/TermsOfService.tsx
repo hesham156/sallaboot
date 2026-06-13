@@ -1,8 +1,13 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { useSEO } from '../hooks/useSEO'
 
 export default function TermsOfService() {
   const navigate = useNavigate()
+  useSEO({
+    title:       'شروط الاستخدام | حياك',
+    description: 'الشروط والأحكام الخاصة باستخدام منصة حياك — حقوق وواجبات التجار، سياسات الاستخدام المقبول، وقواعد الخدمة.',
+  })
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50/50 text-slate-800 font-sans pb-20 overflow-x-hidden">

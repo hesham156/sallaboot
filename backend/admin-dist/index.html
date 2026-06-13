@@ -3,23 +3,116 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>لوحة تحكم | بوت المتجر</title>
+
+  <!-- ───── Primary SEO ───── -->
+  <title>حياك — مساعد ذكي لمتاجر سلة | بوت واتساب يرد على عملائك ٢٤/٧</title>
+  <meta name="description" content="حياك هو مساعد ذكي يربط متجر سلة بالواتساب — يرد على أسئلة العملاء على مدار الساعة، يستعيد السلات المتروكة، يرسل إشعارات الطلبات، ويزيد مبيعاتك بدون توظيف فريق خدمة عملاء. جرّبه مجاناً." />
+  <meta name="keywords" content="بوت سلة, شات بوت متاجر, مساعد ذكاء اصطناعي, واتساب أعمال, خدمة عملاء آلية, سلة Salla, AI chatbot, متاجر إلكترونية, حياك, 7ayak" />
+  <meta name="author" content="حياك" />
+  <link rel="canonical" href="https://7ayak.app/" />
+
+  <!-- Search engine directives -->
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+  <meta name="googlebot" content="index, follow" />
+
+  <!-- ───── Open Graph (WhatsApp / Facebook / LinkedIn previews) ───── -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://7ayak.app/" />
+  <meta property="og:title" content="حياك — مساعد ذكي لمتاجر سلة" />
+  <meta property="og:description" content="بوت واتساب وذكاء اصطناعي يدير محادثات عملائك ٢٤/٧، يستعيد السلات المتروكة، ويزيد مبيعاتك. جرّبه مجاناً على متجرك." />
+  <meta property="og:image" content="https://7ayak.app/uploads/logo.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="شعار حياك — مساعد ذكي لمتاجر سلة" />
+  <meta property="og:locale" content="ar_SA" />
+  <meta property="og:site_name" content="حياك" />
+
+  <!-- ───── Twitter Card ───── -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://7ayak.app/" />
+  <meta name="twitter:title" content="حياك — مساعد ذكي لمتاجر سلة" />
+  <meta name="twitter:description" content="بوت واتساب وذكاء اصطناعي يدير محادثات عملائك ٢٤/٧ ويزيد مبيعاتك." />
+  <meta name="twitter:image" content="https://7ayak.app/uploads/logo.png" />
+
+  <!-- ───── Theme + Manifest ───── -->
+  <meta name="theme-color" content="#14b8a6" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="حياك" />
+
   <!-- Inline SVG favicon (teal chat bubble) — avoids a /favicon.ico 404 -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2314b8a6'/%3E%3Cpath d='M20 4H4a2 2 0 00-2 2v12l4-4h14a2 2 0 002-2V6a2 2 0 00-2-2z' fill='white'/%3E%3C/svg%3E" />
+  <link rel="apple-touch-icon" href="/uploads/logo.png" />
+
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
   <style>
     * { font-family: 'Cairo', sans-serif !important; }
     body { margin: 0; background: #f8f9fe; }
     #root { min-height: 100vh; }
   </style>
-  <script type="module" crossorigin src="/assets/index-B1mWvDcy.js"></script>
+
+  <!-- ───── Structured Data (JSON-LD) ───── -->
+  <!-- Organization schema — helps Google build a Knowledge Panel -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "حياك",
+    "alternateName": "Hayyak",
+    "url": "https://7ayak.app",
+    "logo": "https://7ayak.app/uploads/logo.png",
+    "description": "مساعد ذكي لمتاجر سلة — بوت واتساب وذكاء اصطناعي لخدمة العملاء وزيادة المبيعات",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "email": "support@7ayak.app",
+      "contactType": "customer support",
+      "availableLanguage": ["Arabic", "English"]
+    },
+    "sameAs": []
+  }
+  </script>
+
+  <!-- SoftwareApplication schema — surfaces "this is an app" to Google -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "حياك",
+    "operatingSystem": "Web",
+    "applicationCategory": "BusinessApplication",
+    "description": "مساعد ذكاء اصطناعي يربط متجر سلة بالواتساب لخدمة العملاء آلياً ٢٤/٧",
+    "url": "https://7ayak.app",
+    "inLanguage": "ar",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "SAR",
+      "description": "خطة مجانية للبداية"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "حياك",
+      "url": "https://7ayak.app"
+    }
+  }
+  </script>
+  <script type="module" crossorigin src="/assets/index-C9oo52zr.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/react-DEOGDW64.js">
   <link rel="modulepreload" crossorigin href="/assets/heroui-BSW4RkVs.js">
   <link rel="stylesheet" crossorigin href="/assets/index-CT1CZdQ5.css">
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"></div>
+  <noscript>
+    <div dir="rtl" style="font-family: Cairo, sans-serif; padding: 40px; text-align: center;">
+      <h1>حياك — مساعد ذكي لمتاجر سلة</h1>
+      <p>هذا التطبيق يحتاج تفعيل JavaScript في المتصفح ليعمل بشكل صحيح.</p>
+      <p>للتواصل: <a href="mailto:support@7ayak.app">support@7ayak.app</a></p>
+    </div>
+  </noscript>
 </body>
 </html>
