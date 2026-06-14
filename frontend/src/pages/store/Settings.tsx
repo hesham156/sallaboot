@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Switch, Chip, Spinner } from '@heroui/react'
 import { api, AIConfig, TokenStatus, NotificationSettings } from '../../api'
 import { TextField } from '../../components/ui'
@@ -89,11 +89,20 @@ export default function Settings({ storeId }: Props) {
   const [aiMsg, setAiMsg]         = useState('')
 
   /* WhatsApp */
-  const [waEnabled, setWaEnabled] = useState(false)
-  const [waPhoneId, setWaPhoneId] = useState('')
-  const [waToken, setWaToken]     = useState('')
-  const [waSaving, setWaSaving]   = useState(false)
-  const [waMsg, setWaMsg]         = useState('')
+  const [waEnabled, setWaEnabled]   = useState(false)
+  const [waPhoneId, setWaPhoneId]   = useState('')
+  const [waWabaId, setWaWabaId]     = useState('')
+  const [waToken, setWaToken]       = useState('')
+  const [waSaving, setWaSaving]     = useState(false)
+  const [waMsg, setWaMsg]           = useState('')
+  const [waConnecting, setWaConnecting] = useState(false)
+  const [waStep, setWaStep]         = useState<'idle'|'choose_waba'|'choose_phone'>('idle')
+  const [waOptions, setWaOptions]   = useState<{id:string;name?:string;number?:string}[]>([])
+  const [waPendingToken, setWaPendingToken] = useState('')
+  const [waPendingWaba, setWaPendingWaba]   = useState('')
+  const [fbLoaded, setFbLoaded]     = useState(false)
+  const [waManual, setWaManual]     = useState(false)
+  const fbRef = useRef(false)
 
   /* Notifications */
   const DEF_NOTIF: NotificationSettings = {
@@ -134,11 +143,29 @@ export default function Settings({ storeId }: Props) {
       setStoreType(ai.store_type === 'printing' ? 'printing' : 'general')
       setWaEnabled(!!ai.whatsapp_enabled)
       setWaPhoneId(ai.whatsapp_phone_id || '')
+      setWaWabaId((ai as AIConfig & { whatsapp_waba_id?: string }).whatsapp_waba_id || '')
       setTokenStatus(tok)
       setNotif(n)
     } catch { /* ignore */ }
     finally { setAiLoading(false) }
   }
+
+  /* ── Load Facebook JS SDK once ── */
+  useEffect(() => {
+    if (fbRef.current) return
+    fbRef.current = true
+    api.waGetMetaAppId(storeId).then(({ app_id, graph_version }) => {
+      if (document.getElementById('fb-sdk')) { setFbLoaded(true); return }
+      window.fbAsyncInit = () => {
+        window.FB.init({ appId: app_id, version: graph_version, cookie: true, xfbml: false })
+        setFbLoaded(true)
+      }
+      const s = document.createElement('script')
+      s.id  = 'fb-sdk'
+      s.src = 'https://connect.facebook.net/en_US/sdk.js'
+      document.body.appendChild(s)
+    }).catch(() => { /* META_APP_ID not set — will fall back to manual */ })
+  }, [storeId])
 
   /* ── actions ── */
   async function saveAI() {
@@ -170,6 +197,67 @@ export default function Settings({ storeId }: Props) {
       setWaMsg('✅ تم حفظ إعدادات واتساب'); setWaToken(''); load()
     } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : 'خطأ') }
     finally { setWaSaving(false) }
+  }
+
+  async function startEmbeddedSignup() {
+    if (!window.FB) { setWaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة أو استخدم الإدخال اليدوي'); return }
+    setWaConnecting(true); setWaMsg('')
+    window.FB.login(async (res: { authResponse?: { accessToken: string } }) => {
+      if (!res.authResponse) { setWaConnecting(false); setWaMsg('❌ تم إلغاء ربط واتساب'); return }
+      try {
+        const data = await api.waConnect(storeId, { user_token: res.authResponse.accessToken })
+        await handleConnectResponse(data)
+      } catch (e: unknown) {
+        setWaMsg(e instanceof Error ? e.message : '❌ فشل الاتصال')
+      } finally { setWaConnecting(false) }
+    }, {
+      scope: 'whatsapp_business_management,business_management',
+      extras: { feature: 'whatsapp_embedded_signup', setup: {} },
+    })
+  }
+
+  async function handleConnectResponse(data: Awaited<ReturnType<typeof api.waConnect>>) {
+    if (data.step === 'choose_waba') {
+      setWaPendingToken(data.user_token || '')
+      setWaOptions(data.options || [])
+      setWaStep('choose_waba')
+    } else if (data.step === 'choose_phone') {
+      setWaPendingToken(data.user_token || '')
+      setWaPendingWaba(data.waba_id || '')
+      setWaOptions(data.options || [])
+      setWaStep('choose_phone')
+    } else {
+      setWaStep('idle'); setWaOptions([]); setWaPendingToken(''); setWaPendingWaba('')
+      setWaMsg(data.message || '✅ تم الربط')
+      load()
+    }
+  }
+
+  async function pickWaba(wabaId: string) {
+    setWaConnecting(true); setWaStep('idle')
+    try {
+      const data = await api.waConnect(storeId, { user_token: waPendingToken, waba_id: wabaId })
+      await handleConnectResponse(data)
+    } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+    finally { setWaConnecting(false) }
+  }
+
+  async function pickPhone(phoneId: string) {
+    setWaConnecting(true); setWaStep('idle')
+    try {
+      const data = await api.waConnect(storeId, { user_token: waPendingToken, waba_id: waPendingWaba, phone_number_id: phoneId })
+      await handleConnectResponse(data)
+    } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+    finally { setWaConnecting(false) }
+  }
+
+  async function disconnectWa() {
+    if (!confirm('هل تريد إلغاء ربط واتساب؟')) return
+    try {
+      await api.waDisconnect(storeId)
+      setWaMsg('✅ تم إلغاء الربط')
+      load()
+    } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
   }
 
   async function saveNotif() {
@@ -355,38 +443,166 @@ export default function Settings({ storeId }: Props) {
         {tab === 'whatsapp' && (
           <div className="max-w-xl space-y-5">
 
-            {/* Status toggle */}
-            <div className="flex items-center justify-between bg-content2 rounded-xl px-4 py-3 border border-divider">
-              <div>
-                <p className="text-sm font-bold text-foreground">تفعيل الرد على واتساب</p>
-                <p className="text-xs text-default-500 mt-0.5">البوت يرد تلقائياً على رسائل WhatsApp Business</p>
+            {/* ── Connected state ── */}
+            {waPhoneId && !waManual ? (
+              <div className="space-y-4">
+                {/* Status card */}
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-[#25D366]/15 flex items-center justify-center flex-shrink-0">
+                      <svg viewBox="0 0 24 24" fill="#25D366" width={26} height={26}>
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                        <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.117 1.528 5.845L.057 23.886l6.184-1.622A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.833 0-3.552-.497-5.027-1.362l-.36-.213-3.726.977.995-3.634-.234-.374A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-emerald-400 text-sm flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        واتساب مربوط ونشط
+                      </p>
+                      <p className="text-xs text-default-500 mt-1">Phone ID: <span className="font-mono text-foreground">{waPhoneId}</span></p>
+                      {waWabaId && <p className="text-xs text-default-500">WABA ID: <span className="font-mono text-foreground">{waWabaId}</span></p>}
+                    </div>
+                  </div>
+
+                  {/* Enable/Disable toggle */}
+                  <div className="mt-4 flex items-center justify-between border-t border-emerald-500/20 pt-3">
+                    <p className="text-xs text-default-400">الرد التلقائي على رسائل واتساب</p>
+                    <Switch isSelected={waEnabled} onValueChange={async (v) => {
+                      setWaEnabled(v)
+                      await api.setAI(storeId, { whatsapp_enabled: v })
+                    }} color="success" size="sm" />
+                  </div>
+                </div>
+
+                {/* Webhook info */}
+                <section className="space-y-3 bg-content2 rounded-xl p-4 border border-divider">
+                  <p className="text-xs font-bold text-default-500 flex items-center gap-1.5">
+                    <Icon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" size={12} />
+                    Webhook Settings — أضفها في Meta Developer Console
+                  </p>
+                  <CopyRow label="Callback URL"  value={cfg.whatsapp_webhook || ''} />
+                  <CopyRow label="Verify Token"  value={cfg.whatsapp_verify_token || ''} />
+                </section>
+
+                <Msg text={waMsg} />
+
+                <div className="flex gap-2">
+                  <Button variant="flat" color="danger" onPress={disconnectWa} className="flex-1 font-bold h-10">
+                    إلغاء الربط
+                  </Button>
+                  <Button variant="flat" onPress={() => setWaManual(true)} className="font-bold h-10 text-default-400">
+                    إعدادات يدوية
+                  </Button>
+                </div>
               </div>
-              <Switch isSelected={waEnabled} onValueChange={setWaEnabled} color="success" />
-            </div>
 
-            <section className="space-y-3">
-              <label className="text-xs font-bold text-default-400 uppercase tracking-wider block">بيانات الاتصال</label>
-              <TextField label="Phone Number ID" value={waPhoneId} onChange={setWaPhoneId}
-                placeholder="123456789012345" dir="ltr" hint="من لوحة Meta Business" />
-              <TextField label="Access Token" type="password" value={waToken} onChange={setWaToken}
-                placeholder={cfg.whatsapp_token ? '•••••••• (محفوظ)' : 'EAAG...'} dir="ltr"
-                hint={cfg.whatsapp_token ? 'محفوظ — اتركه فارغاً للإبقاء' : 'من Meta'} />
-            </section>
+            ) : waStep !== 'idle' ? (
+              /* ── Picker step (WABA or Phone) ── */
+              <div className="space-y-4">
+                <p className="text-sm font-bold text-foreground">
+                  {waStep === 'choose_waba' ? 'اختر حساب WhatsApp Business' : 'اختر رقم الهاتف'}
+                </p>
+                {waOptions.map(opt => (
+                  <button key={opt.id}
+                    onClick={() => waStep === 'choose_waba' ? pickWaba(opt.id) : pickPhone(opt.id)}
+                    disabled={waConnecting}
+                    className="w-full text-right flex items-center gap-3 p-4 rounded-xl border border-divider bg-content2 hover:border-primary/50 hover:bg-content1 transition-all disabled:opacity-50">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary text-xs font-black flex-shrink-0">
+                      {(opt.name || opt.number || '?')[0]}
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-foreground">{opt.name || opt.number}</p>
+                      <p className="text-xs text-default-500 font-mono">{opt.id}</p>
+                    </div>
+                  </button>
+                ))}
+                <Msg text={waMsg} />
+                <Button variant="flat" onPress={() => { setWaStep('idle'); setWaOptions([]) }} className="w-full font-bold h-10">
+                  إلغاء
+                </Button>
+              </div>
 
-            <section className="space-y-3 bg-content2 rounded-xl p-4 border border-divider">
-              <p className="text-xs font-bold text-default-500 flex items-center gap-1.5">
-                <Icon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" size={12} />
-                أضف هذه القيم في إعدادات Webhook عند Meta
-              </p>
-              <CopyRow label="Callback URL"  value={cfg.whatsapp_webhook || ''} />
-              <CopyRow label="Verify Token"  value={cfg.whatsapp_verify_token || ''} />
-            </section>
+            ) : (
+              /* ── Not connected / connect button ── */
+              <div className="space-y-5">
+                {/* Hero card */}
+                <div className="rounded-2xl border border-divider bg-gradient-to-br from-[#25D366]/5 to-transparent p-6 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-3xl bg-[#25D366]/10 flex items-center justify-center mx-auto">
+                    <svg viewBox="0 0 24 24" fill="#25D366" width={34} height={34}>
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                      <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.117 1.528 5.845L.057 23.886l6.184-1.622A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.833 0-3.552-.497-5.027-1.362l-.36-.213-3.726.977.995-3.634-.234-.374A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-black text-foreground text-base">ربط واتساب بالمتجر</h3>
+                    <p className="text-xs text-default-500 mt-1 leading-relaxed">
+                      سجّل دخولك بفيسبوك واختر رقم WhatsApp Business — الربط يكتمل في ثوانٍ
+                    </p>
+                  </div>
 
-            <Msg text={waMsg} />
-            <Button color="success" isLoading={waSaving} onPress={saveWhatsApp}
-              className="w-full font-bold h-10 bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
-              {waSaving ? '' : 'حفظ إعدادات واتساب'}
-            </Button>
+                  <Button
+                    onPress={startEmbeddedSignup}
+                    isLoading={waConnecting}
+                    isDisabled={!fbLoaded && !waManual}
+                    className="w-full font-black h-11 text-white"
+                    style={{ background: '#25D366' }}
+                  >
+                    {waConnecting ? '' : (
+                      <span className="flex items-center gap-2">
+                        <svg viewBox="0 0 24 24" fill="currentColor" width={16} height={16}>
+                          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                          <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.555 4.117 1.528 5.845L.057 23.886l6.184-1.622A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.833 0-3.552-.497-5.027-1.362l-.36-.213-3.726.977.995-3.634-.234-.374A9.96 9.96 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+                        </svg>
+                        ربط واتساب
+                      </span>
+                    )}
+                  </Button>
+
+                  {!fbLoaded && (
+                    <p className="text-[11px] text-default-400">
+                      {fbLoaded === false ? 'جاري تحميل Facebook SDK…' : 'META_APP_ID غير مضبوط — استخدم الإدخال اليدوي'}
+                    </p>
+                  )}
+                </div>
+
+                {/* Manual fallback toggle */}
+                <button onClick={() => setWaManual(v => !v)}
+                  className="w-full text-xs text-default-400 hover:text-default-600 transition-colors flex items-center justify-center gap-1.5">
+                  <Icon d={waManual ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} size={11} />
+                  {waManual ? 'إخفاء' : 'إدخال يدوي (للمطورين)'}
+                </button>
+
+                {waManual && (
+                  <div className="space-y-3 border border-divider rounded-xl p-4 bg-content2">
+                    <TextField label="Phone Number ID" value={waPhoneId} onChange={setWaPhoneId}
+                      placeholder="123456789012345" dir="ltr" hint="من لوحة Meta Business" />
+                    <TextField label="Access Token" type="password" value={waToken} onChange={setWaToken}
+                      placeholder={cfg.whatsapp_token ? '•••••••• (محفوظ)' : 'EAAG...'} dir="ltr"
+                      hint={cfg.whatsapp_token ? 'محفوظ — اتركه فارغاً للإبقاء' : 'من Meta'} />
+                    <Msg text={waMsg} />
+                    <Button color="success" isLoading={waSaving} onPress={saveWhatsApp}
+                      className="w-full font-bold h-10 bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
+                      {waSaving ? '' : 'حفظ'}
+                    </Button>
+                  </div>
+                )}
+
+                {!waManual && <Msg text={waMsg} />}
+
+                {/* Webhook info */}
+                {cfg.whatsapp_webhook && (
+                  <section className="space-y-3 bg-content2 rounded-xl p-4 border border-divider">
+                    <p className="text-xs font-bold text-default-500 flex items-center gap-1.5">
+                      <Icon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" size={12} />
+                      Webhook — أضفها في Meta Developer Console
+                    </p>
+                    <CopyRow label="Callback URL"  value={cfg.whatsapp_webhook} />
+                    <CopyRow label="Verify Token"  value={cfg.whatsapp_verify_token || ''} />
+                  </section>
+                )}
+              </div>
+            )}
           </div>
         )}
 

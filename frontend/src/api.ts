@@ -199,6 +199,15 @@ export const api = {
   setAI: (storeId: string, cfg: Partial<AIConfig>) =>
     put(`/admin/${storeId}/settings/ai`, cfg),
 
+  // WhatsApp Embedded Signup
+  waGetMetaAppId: (storeId: string) =>
+    get<{ app_id: string; graph_version: string }>(`/admin/${storeId}/whatsapp/meta-app-id`),
+  waConnect: (storeId: string, body: { user_token: string; waba_id?: string; phone_number_id?: string }) =>
+    post<{ status?: string; step?: string; options?: {id:string;name?:string;number?:string}[]; user_token?: string; waba_id?: string; phone_number_id?: string; message?: string }>(
+      `/admin/${storeId}/whatsapp/connect`, body),
+  waDisconnect: (storeId: string) =>
+    del<{ status: string; message: string }>(`/admin/${storeId}/whatsapp/connect`),
+
   // Pricing calculator settings
   getPricing: (storeId: string) =>
     get<PricingConfig>(`/admin/${storeId}/settings/pricing`),
@@ -778,6 +787,7 @@ export interface AIConfig {
   whatsapp_enabled?: boolean
   whatsapp_phone_id?: string
   whatsapp_token?: string
+  whatsapp_waba_id?: string
   whatsapp_webhook?: string
   whatsapp_verify_token?: string
 }

@@ -140,6 +140,141 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     return {"status": "ok", "message": "تم حفظ إعدادات الذكاء الاصطناعي ✅"}
 
 
+# ── WhatsApp Embedded Signup ───────────────────────────────────────────────────
+
+@router.get("/admin/{store_id}/whatsapp/meta-app-id")
+async def get_meta_app_id(store_id: str):
+    """Return the public META_APP_ID so the frontend can init the FB SDK."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    app_id = os.getenv("META_APP_ID", "")
+    if not app_id:
+        raise HTTPException(503, "META_APP_ID غير مضبوط في بيئة الخادم — راجع Railway env vars")
+    return {"app_id": app_id, "graph_version": "v21.0"}
+
+
+@router.post("/admin/{store_id}/whatsapp/connect")
+async def whatsapp_connect(store_id: str, request: Request):
+    """
+    Exchange the short-lived user token (from FB.login / Embedded Signup)
+    for a long-lived token, discover the WABA and phone number, then
+    save everything to ai_config.
+
+    Body JSON:
+        { "user_token": "...", "waba_id": "..." (optional), "phone_number_id": "..." (optional) }
+    """
+    import httpx as _httpx
+
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    body = await request.json()
+    user_token      = (body.get("user_token") or "").strip()
+    chosen_waba_id  = (body.get("waba_id") or "").strip()
+    chosen_phone_id = (body.get("phone_number_id") or "").strip()
+
+    if not user_token:
+        raise HTTPException(400, "user_token مطلوب")
+
+    app_id     = os.getenv("META_APP_ID", "")
+    app_secret = os.getenv("META_APP_SECRET", "")
+    if not app_id or not app_secret:
+        raise HTTPException(503, "META_APP_ID / META_APP_SECRET غير مضبوطين في بيئة الخادم")
+
+    gv = "v21.0"
+    base = f"https://graph.facebook.com/{gv}"
+
+    async with _httpx.AsyncClient(timeout=30) as client:
+        # 1. Exchange short-lived → long-lived token
+        resp = await client.get(f"{base}/oauth/access_token", params={
+            "grant_type":        "fb_exchange_token",
+            "client_id":         app_id,
+            "client_secret":     app_secret,
+            "fb_exchange_token": user_token,
+        })
+        if resp.status_code != 200:
+            raise HTTPException(400, f"فشل تبادل التوكن: {resp.text}")
+        long_token = resp.json().get("access_token", "")
+        if not long_token:
+            raise HTTPException(400, "لم يُرجع Meta توكناً صالحاً")
+
+        # 2. Get WABA accounts linked to this user
+        if not chosen_waba_id:
+            resp2 = await client.get(f"{base}/me/businesses", params={
+                "fields":       "whatsapp_business_accounts{id,name}",
+                "access_token": long_token,
+            })
+            data2 = resp2.json() if resp2.status_code == 200 else {}
+            wabas: list[dict] = []
+            for biz in (data2.get("data") or []):
+                for w in ((biz.get("whatsapp_business_accounts") or {}).get("data") or []):
+                    wabas.append({"id": w["id"], "name": w.get("name", w["id"])})
+
+            if not wabas:
+                raise HTTPException(400, "لم يُعثر على حسابات WhatsApp Business مرتبطة بهذا الحساب")
+            if len(wabas) > 1:
+                # Ask frontend to let the user pick
+                return {"step": "choose_waba", "options": wabas, "user_token": long_token}
+            chosen_waba_id = wabas[0]["id"]
+
+        # 3. Get phone numbers for the WABA
+        if not chosen_phone_id:
+            resp3 = await client.get(f"{base}/{chosen_waba_id}/phone_numbers", params={
+                "fields":       "id,display_phone_number,verified_name",
+                "access_token": long_token,
+            })
+            data3 = resp3.json() if resp3.status_code == 200 else {}
+            phones: list[dict] = [({"id": p["id"], "number": p.get("display_phone_number", p["id"]), "name": p.get("verified_name", "")})
+                                  for p in (data3.get("data") or [])]
+            if not phones:
+                raise HTTPException(400, "لم يُعثر على أرقام واتساب في هذا WABA")
+            if len(phones) > 1:
+                return {"step": "choose_phone", "options": phones,
+                        "user_token": long_token, "waba_id": chosen_waba_id}
+            chosen_phone_id = phones[0]["id"]
+
+    # 4. Save to ai_config
+    existing = sm.get_ai_config(store_id)
+    config = dict(existing)
+    config.update({
+        "whatsapp_token":    long_token,
+        "whatsapp_phone_id": chosen_phone_id,
+        "whatsapp_waba_id":  chosen_waba_id,
+        "whatsapp_enabled":  True,
+    })
+    await sm.set_ai_config(store_id, config)
+    await db.save_ai_config(store_id, config)
+
+    await audit(request, "whatsapp_embedded_signup", target_store=store_id,
+                details={"waba_id": chosen_waba_id, "phone_id": chosen_phone_id})
+
+    return {
+        "status":          "connected",
+        "phone_number_id": chosen_phone_id,
+        "waba_id":         chosen_waba_id,
+        "message":         "✅ تم ربط واتساب بنجاح",
+    }
+
+
+@router.delete("/admin/{store_id}/whatsapp/connect")
+async def whatsapp_disconnect(store_id: str, request: Request):
+    """Remove WhatsApp credentials from ai_config."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    existing = sm.get_ai_config(store_id)
+    config = dict(existing)
+    config.update({
+        "whatsapp_token":    "",
+        "whatsapp_phone_id": "",
+        "whatsapp_waba_id":  "",
+        "whatsapp_enabled":  False,
+    })
+    await sm.set_ai_config(store_id, config)
+    await db.save_ai_config(store_id, config)
+    await audit(request, "whatsapp_disconnect", target_store=store_id)
+    return {"status": "ok", "message": "تم إلغاء ربط واتساب"}
+
+
 # ── AI Brain ──────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/settings/brain")
