@@ -67,7 +67,7 @@ export default function Login() {
         {/* Logo */}
         <div className="text-center mb-8 space-y-3">
           <img
-            src="/uploads/logo.png"
+            src="/logo.png"
             alt="حياك"
             style={{ maxWidth: '100%', height: 'auto', width: '180px' }}
             className="mx-auto"

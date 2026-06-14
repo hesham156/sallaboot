@@ -214,7 +214,7 @@ export default function StoresList() {
         {/* Brand */}
         <div className="flex items-center gap-3">
           <img
-            src="/uploads/logo.png"
+            src="/logo.png"
             alt="حياك"
             style={{ maxWidth: '100%', height: 'auto', width: '100px' }}
             className="flex-shrink-0"

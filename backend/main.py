@@ -114,6 +114,22 @@ if _ADMIN_DIST_DIR.exists():
     if _assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="admin-assets")
 
+# Serve logo from admin-dist (committed to git, survives Railway deploys).
+# Falls back to uploads/ if admin-dist copy is missing.
+from fastapi.responses import FileResponse as _FR
+@app.get("/logo.png", include_in_schema=False)
+async def serve_logo():
+    dist_logo = _ADMIN_DIST_DIR / "logo.png"
+    if dist_logo.exists():
+        return _FR(str(dist_logo), media_type="image/png",
+                   headers={"Cache-Control": "public, max-age=86400"})
+    upload_logo = UPLOAD_DIR / "logo.png"
+    if upload_logo.exists():
+        return _FR(str(upload_logo), media_type="image/png",
+                   headers={"Cache-Control": "public, max-age=86400"})
+    from fastapi import HTTPException as _HE
+    raise _HE(404, "logo not found")
+
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 import middleware as _mw
