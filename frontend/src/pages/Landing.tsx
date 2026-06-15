@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion'
-import { AnimatedSection, StaggerContainer, StaggerItem, fadeUpVariants, staggerVariants } from '../components/AnimatedSection'
+import { motion, AnimatePresence } from 'framer-motion'
+import { gsap } from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import { useGSAP } from '@gsap/react'
+import { AnimatedSection, StaggerContainer, StaggerItem, fadeUpVariants } from '../components/AnimatedSection'
 import { getToken, getIsSuper, getStoreId } from '../api'
+import { useLenis } from '../hooks/useLenis'
+
+gsap.registerPlugin(ScrollTrigger, useGSAP)
 
 // Inject the marketing chat widget once per page mount. The widget reads
 // window.SallaChatConfig BEFORE its <script> evaluates, so we set the
@@ -41,13 +47,19 @@ function useSallabotWidget() {
   }, [])
 }
 
-/* ─────────────────────────── Local motion helpers ─────────────────────────── */
-const EASE = [0.25, 0.46, 0.45, 0.94] as const
+/* ─────────────────────────── Motion language ───────────────────────────
+   Single source of truth for timing + easing. Reused across the hero
+   timeline and the stats count-up so the whole page feels coherent.
+─────────────────────────────────────────────────────────────────────── */
+const EASE_OUT  = 'power3.out'      // entrance — fast pull-in, smooth settle
+const EASE_SOFT = 'power2.out'      // micro-anims (counts, hovers)
+const STAGGER   = 0.08              // standard stagger between siblings
+const DURATION  = 0.7               // standard entrance duration
 
-const float = (delay = 0) => ({
-  animate: { y: [0, -10, 0] },
-  transition: { duration: 4, repeat: Infinity, ease: 'easeInOut', delay },
-})
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
 
 /* ─────────────────────────── Icon helper ─────────────────────────── */
 /* ─────────────────────────── FAQ Section ───────────────────────────
@@ -194,12 +206,21 @@ const FEATURES = [
   { icon: ICONS.brain, title: 'يتعلّم ويتطوّر',               desc: 'يستفيد من كل محادثة، ويطبّق تصحيحاتك، وما يكررش نفس الخطأ.', color: 'rose' },
   { icon: ICONS.globe, title: 'عربي بطلاقة',                 desc: 'يفهم لهجات الخليج ويرد بأسلوب ودّي طبيعي يناسب عملاءك.', color: 'sky' },
 ]
-const STATS = [
-  { num: '+200', label: 'متجر يثق بحياك' },
-  { num: '٪89',  label: 'توفير في تكلفة الردود' },
-  { num: '٪40',  label: 'زيادة في التحويل' },
-  { num: '٢٤/٧', label: 'دعم بدون توقّف' },
+/* Stats: countTo lets the count-up animate to a numeric target.
+   ratio entries (٢٤/٧) keep countTo=null so the GSAP block skips them. */
+const STATS: Array<{ num: string; label: string; countTo: number | null; prefix: string; suffix: string }> = [
+  { num: '+200', label: 'متجر يثق بحياك',         countTo: 200, prefix: '+',  suffix: ''   },
+  { num: '٪89',  label: 'توفير في تكلفة الردود',  countTo: 89,  prefix: '٪',  suffix: ''   },
+  { num: '٪40',  label: 'زيادة في التحويل',       countTo: 40,  prefix: '٪',  suffix: ''   },
+  { num: '٢٤/٧', label: 'دعم بدون توقّف',         countTo: null,prefix: '',   suffix: ''   },
 ]
+
+/** Convert a Western numeral to Arabic-Indic digits (e.g. 89 → ٨٩).
+    Used by the count-up so the rendered text matches the static design. */
+function toArabicDigits(n: number): string {
+  const map = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩']
+  return Math.round(n).toString().split('').map(d => map[+d] ?? d).join('')
+}
 const STEPS = [
   { n: '١', title: 'اربط متجرك', desc: 'تكامل مباشر مع سلة في دقيقة — بدون أكواد.' },
   { n: '٢', title: 'درّب البوت', desc: 'يقرأ منتجاتك وأسعارك تلقائياً، وتضيف لمساتك.' },
@@ -219,13 +240,112 @@ const COLOR_MAP: Record<string, string> = {
 export default function Landing() {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-  const { scrollY } = useScroll()
-  const heroY = useTransform(scrollY, [0, 500], [0, 60])
+  const pageRef = useRef<HTMLDivElement>(null)
 
   // Mount the marketing chat widget (Sallabot answering questions about
   // itself). Backed by the "sallabot" demo store that bootstrap.py
   // registers on the backend at startup.
   useSallabotWidget()
+
+  // Global smooth scroll — gives the whole page that "premium" feel.
+  // Bypassed under prefers-reduced-motion; see hooks/useLenis.ts.
+  useLenis()
+
+  /* ── GSAP: hero cinematic entrance + nav scroll polish + stats count-up
+     Single useGSAP scoped to the page so cleanup is automatic on unmount.
+     gsap.matchMedia handles the reduced-motion fallback inline — every
+     animation lives inside the `(prefers-reduced-motion: no-preference)`
+     branch, the `reduce` branch just resets opacity so nothing is hidden. */
+  useGSAP(() => {
+    const mm = gsap.matchMedia()
+
+    /* ───── Motion-enabled users ───── */
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      // Set initial states so there's no flash before the timeline runs.
+      gsap.set('.hero-anim', { autoAlpha: 0, y: 24 })
+      gsap.set('.hero-mockup', { autoAlpha: 0, scale: 0.94, y: 16 })
+      gsap.set('.hero-float',  { autoAlpha: 0, scale: 0.85 })
+
+      // Hero entrance timeline. Stagger order is intentional — the reader's
+      // eye lands on the badge, then climbs through the headline before the
+      // CTAs become visually available.
+      const tl = gsap.timeline({ defaults: { ease: EASE_OUT, duration: DURATION } })
+      tl.to('.hero-badge',     { autoAlpha: 1, y: 0, duration: 0.5 })
+        .to('.hero-headline',  { autoAlpha: 1, y: 0 }, '-=0.3')
+        .to('.hero-desc',      { autoAlpha: 1, y: 0 }, '-=0.45')
+        .to('.hero-cta',       { autoAlpha: 1, y: 0, stagger: STAGGER }, '-=0.4')
+        .to('.hero-social',    { autoAlpha: 1, y: 0 }, '-=0.4')
+        .to('.hero-mockup',    { autoAlpha: 1, scale: 1, y: 0, duration: 0.9, ease: 'power2.out' }, '-=0.7')
+        .to('.hero-float',     { autoAlpha: 1, scale: 1, stagger: 0.2, duration: 0.5 }, '-=0.4')
+
+      // Continuous gentle float on the mockup badges. yoyo+repeat keeps the
+      // illusion that the cards are weightless without the timeline ever
+      // ending. Different delays prevent the two cards from oscillating
+      // in lock-step (which looks robotic).
+      gsap.to('.hero-float-a', {
+        y: -10, duration: 2.4, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.2,
+      })
+      gsap.to('.hero-float-b', {
+        y: -8, duration: 2.8, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.9,
+      })
+
+      // Parallax on the mockup — drifts down a touch as the user scrolls
+      // past the hero. Cleaner than Framer's useScroll/useTransform pair
+      // because ScrollTrigger pauses when off-screen.
+      gsap.to('.hero-mockup', {
+        yPercent: 12,
+        ease: 'none',
+        scrollTrigger: {
+          trigger:  '.hero-section',
+          start:    'top top',
+          end:      'bottom top',
+          scrub:    true,
+        },
+      })
+
+      // Navbar polish — deepens bg + adds shadow once the hero scrolls
+      // away. Subtle on purpose; a dramatic transform would distract.
+      ScrollTrigger.create({
+        trigger: '.hero-section',
+        start:   'top -60',
+        onEnter: () => document.querySelector('.site-nav')?.classList.add('is-scrolled'),
+        onLeaveBack: () => document.querySelector('.site-nav')?.classList.remove('is-scrolled'),
+      })
+
+      // Stats count-up. Fires once when the section enters view. Uses a
+      // proxy object so we never touch transforms — text-only mutation
+      // means no GPU layer, no compositing cost.
+      ScrollTrigger.create({
+        trigger: '.stats-section',
+        start:   'top 80%',
+        once:    true,
+        onEnter: () => {
+          const nums = gsap.utils.toArray<HTMLElement>('.stat-num[data-count-to]')
+          nums.forEach((el, i) => {
+            const to     = Number(el.dataset.countTo || '0')
+            const prefix = el.dataset.prefix || ''
+            const proxy  = { v: 0 }
+            gsap.to(proxy, {
+              v: to,
+              duration: 2,
+              ease: EASE_SOFT,
+              delay: i * 0.08,
+              onUpdate: () => { el.textContent = prefix + toArabicDigits(proxy.v) },
+            })
+          })
+        },
+      })
+    })
+
+    /* ───── Reduced-motion users ───── */
+    mm.add('(prefers-reduced-motion: reduce)', () => {
+      // Make sure nothing stays invisible. Static numbers + instant content.
+      gsap.set('.hero-anim, .hero-mockup, .hero-float', { autoAlpha: 1, y: 0, scale: 1 })
+      // Numbers display their pre-formatted Arabic value directly — no count-up.
+    })
+
+    return () => mm.revert()
+  }, { scope: pageRef })
 
   const loggedIn = !!getToken()
   function goDashboard() {
@@ -235,7 +355,13 @@ export default function Landing() {
   const cta = loggedIn ? 'لوحة التحكم' : 'ابدأ مجاناً'
 
   return (
-    <div dir="rtl" className="min-h-screen bg-white text-slate-800 font-arabic overflow-x-hidden">
+    <div ref={pageRef} dir="rtl" className="min-h-screen bg-white text-slate-800 font-arabic overflow-x-hidden">
+
+      {/* Scroll-state nav styling. GSAP toggles `.is-scrolled` on scroll. */}
+      <style>{`
+        .site-nav { transition: background-color 250ms ease, box-shadow 250ms ease, border-color 250ms ease; }
+        .site-nav.is-scrolled { background-color: rgba(255,255,255,0.92); box-shadow: 0 4px 24px rgba(15,23,42,0.06); border-bottom-color: transparent; }
+      `}</style>
 
       {/* ── Promo bar ── */}
       <div className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-center text-xs sm:text-sm font-semibold py-2 px-4">
@@ -246,7 +372,7 @@ export default function Landing() {
       </div>
 
       {/* ── Navbar ── */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
+      <header className="site-nav sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
         <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2.5">
           <img src='/logo.png' style={{ maxWidth: '100%', height: 'auto', width: '140px' }}/>
@@ -304,40 +430,40 @@ export default function Landing() {
       </AnimatePresence>
 
       {/* ═══════════════ HERO ═══════════════ */}
-      <section className="relative">
+      <section className="hero-section relative">
         {/* soft background glows */}
         <div className="absolute top-[-6rem] right-[-6rem] w-[34rem] h-[34rem] bg-teal-300/30 rounded-full blur-[130px] pointer-events-none" />
         <div className="absolute top-[10rem] left-[-8rem] w-[30rem] h-[30rem] bg-cyan-300/20 rounded-full blur-[130px] pointer-events-none" />
         <div className="absolute inset-0 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:26px_26px] opacity-40 pointer-events-none" />
 
         <div className="relative max-w-7xl mx-auto px-5 sm:px-8 pt-16 sm:pt-24 pb-20 grid lg:grid-cols-2 gap-12 lg:gap-8 items-center">
-          {/* copy */}
-          <motion.div initial="hidden" animate="visible" variants={staggerVariants} className="text-center lg:text-right">
-            <motion.div variants={fadeUpVariants} className="inline-flex items-center gap-2 bg-teal-50 border border-teal-100 text-teal-700 text-xs font-bold rounded-full px-3.5 py-1.5 mb-5">
+          {/* copy — GSAP-driven entrance, class names match the timeline targets */}
+          <div className="text-center lg:text-right">
+            <div className="hero-anim hero-badge inline-flex items-center gap-2 bg-teal-50 border border-teal-100 text-teal-700 text-xs font-bold rounded-full px-3.5 py-1.5 mb-5">
               <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
               مدعوم بالذكاء الاصطناعي — لمتاجر سلة
-            </motion.div>
-            <motion.h1 variants={fadeUpVariants} className="text-4xl sm:text-5xl lg:text-[3.4rem] font-black leading-[1.15] text-slate-900 tracking-tight">
+            </div>
+            <h1 className="hero-anim hero-headline text-4xl sm:text-5xl lg:text-[3.4rem] font-black leading-[1.15] text-slate-900 tracking-tight">
               حوّل زوّار متجرك إلى
               <span className="text-gradient"> عملاء يشترون</span>
               <br className="hidden sm:block" /> بمساعد ذكي يبيع نيابةً عنك
-            </motion.h1>
-            <motion.p variants={fadeUpVariants} className="mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto lg:mx-0">
+            </h1>
+            <p className="hero-anim hero-desc mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl mx-auto lg:mx-0">
               حياك يجاوب عملاءك فوراً، يحسب الأسعار، يسترجع السلات المتروكة، ويتعلّم من كل محادثة — كل ده على متجرك في سلة، بالعربي.
-            </motion.p>
-            <motion.div variants={fadeUpVariants} className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-3">
+            </p>
+            <div className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-3">
               <button onClick={goDashboard}
-                className="inline-flex items-center gap-2 text-base font-bold text-white bg-gradient-to-r from-teal-500 to-cyan-500 rounded-full px-7 py-3.5 shadow-xl shadow-teal-500/25 hover:shadow-teal-500/40 hover:-translate-y-0.5 transition-all">
+                className="hero-anim hero-cta inline-flex items-center gap-2 text-base font-bold text-white bg-gradient-to-r from-teal-500 to-cyan-500 rounded-full px-7 py-3.5 shadow-xl shadow-teal-500/25 hover:shadow-teal-500/40 hover:-translate-y-0.5 transition-all">
                 {cta}
                 <Icon d={ICONS.arrow} size={18} className="rotate-180" />
               </button>
-              <a href="#how" className="inline-flex items-center gap-2 text-base font-bold text-slate-700 bg-white border border-slate-200 rounded-full px-6 py-3.5 hover:border-teal-300 hover:text-teal-600 transition-all">
+              <a href="#how" className="hero-anim hero-cta inline-flex items-center gap-2 text-base font-bold text-slate-700 bg-white border border-slate-200 rounded-full px-6 py-3.5 hover:border-teal-300 hover:text-teal-600 transition-all">
                 <Icon d={ICONS.bolt} size={18} />
                 شاهد كيف يعمل
               </a>
-            </motion.div>
+            </div>
             {/* social proof */}
-            <motion.div variants={fadeUpVariants} className="mt-8 flex items-center justify-center lg:justify-start gap-3">
+            <div className="hero-anim hero-social mt-8 flex items-center justify-center lg:justify-start gap-3">
               <div className="flex -space-x-2 space-x-reverse">
                 {['#14b8a6', '#06b6d4', '#0ea5e9', '#8b5cf6'].map((c, i) => (
                   <span key={i} className="w-9 h-9 rounded-full border-2 border-white flex items-center justify-center text-white text-xs font-bold" style={{ background: c }}>
@@ -351,12 +477,12 @@ export default function Landing() {
                 </div>
                 <p className="text-xs font-semibold text-slate-500 mt-0.5">+200 متجر يبيع أكتر مع حياك</p>
               </div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
 
-          {/* hero mockup */}
-          <motion.div style={{ y: heroY }} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.7, ease: EASE }} className="relative mx-auto w-full max-w-md">
+          {/* hero mockup — GSAP fades + scales it in, ScrollTrigger parallaxes
+              it down a touch as the user scrolls past. */}
+          <div className="hero-mockup relative mx-auto w-full max-w-md">
             <div className="relative rounded-[2rem] bg-gradient-to-br from-teal-400 to-cyan-500 p-5 shadow-2xl shadow-teal-500/30">
               {/* chat card */}
               <div className="rounded-3xl bg-white p-4 shadow-xl">
@@ -377,25 +503,39 @@ export default function Landing() {
               </div>
             </div>
 
-            {/* floating cards */}
-            <motion.div {...float(0)} className="absolute -top-4 -left-5 bg-white rounded-2xl shadow-xl border border-slate-100 px-3.5 py-2.5 flex items-center gap-2.5">
+            {/* Floating cards — GSAP gives each a different yoyo delay so they
+                drift independently. Looks organic, not synchronized. */}
+            <div className="hero-float hero-float-a absolute -top-4 -left-5 bg-white rounded-2xl shadow-xl border border-slate-100 px-3.5 py-2.5 flex items-center gap-2.5">
               <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center"><Icon d={ICONS.check} size={16} /></span>
               <div><p className="text-[10px] text-slate-400 font-semibold">طلب جديد</p><p className="text-sm font-black text-slate-800">+103.50 ر.س</p></div>
-            </motion.div>
-            <motion.div {...float(1.2)} className="absolute -bottom-5 -right-4 bg-white rounded-2xl shadow-xl border border-slate-100 px-3.5 py-2.5 flex items-center gap-2.5">
+            </div>
+            <div className="hero-float hero-float-b absolute -bottom-5 -right-4 bg-white rounded-2xl shadow-xl border border-slate-100 px-3.5 py-2.5 flex items-center gap-2.5">
               <span className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center"><Icon d={ICONS.chart} size={16} /></span>
               <div><p className="text-[10px] text-slate-400 font-semibold">التحويل</p><p className="text-sm font-black text-slate-800">٪40 ▲</p></div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* ═══════════════ STATS ═══════════════ */}
-      <section id="stats" className="border-y border-slate-100 bg-slate-50/60">
+      <section id="stats" className="stats-section border-y border-slate-100 bg-slate-50/60">
         <StaggerContainer className="max-w-7xl mx-auto px-5 sm:px-8 py-12 grid grid-cols-2 lg:grid-cols-4 gap-8">
           {STATS.map((s) => (
             <StaggerItem key={s.label} className="text-center">
-              <p className="text-3xl sm:text-4xl font-black text-gradient">{s.num}</p>
+              {s.countTo !== null ? (
+                /* GSAP rewrites .textContent when the section enters view.
+                   Initial render uses the static `num` so non-JS / failed-JS
+                   visits still see the right value (no flicker). */
+                <p
+                  className="stat-num text-3xl sm:text-4xl font-black text-gradient"
+                  data-count-to={s.countTo}
+                  data-prefix={s.prefix}
+                >
+                  {s.num}
+                </p>
+              ) : (
+                <p className="text-3xl sm:text-4xl font-black text-gradient">{s.num}</p>
+              )}
               <p className="text-sm font-semibold text-slate-500 mt-1">{s.label}</p>
             </StaggerItem>
           ))}
