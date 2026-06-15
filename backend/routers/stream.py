@@ -15,7 +15,7 @@ from routers.deps import audit, super_viewing_other_store, _REASON_MIN_LENGTH, _
 router = APIRouter()
 
 # ── Ticket helpers ────────────────────────────────────────────────────────────
-_TICKET_TTL_SECONDS = 300
+_TICKET_TTL_SECONDS = 1800  # 30 min — long enough to survive Railway HTTP/2 resets + reconnect backoff
 _TICKET_SIG_LEN     = 16
 
 
@@ -91,16 +91,17 @@ async def admin_stream(store_id: str, ticket: str = "", request: Request = None)
 
     async def event_gen():
         yield _format_sse("connected", {"store_id": store_id})
-        last_beat = _time.time()
         async for event in realtime.subscribe(f"store:{store_id}"):
-            if event["type"] == "_shutdown":
+            etype = event["type"]
+            if etype == "_shutdown":
                 yield _format_sse("shutdown", {"reason": "server restart"})
                 return
-            yield _format_sse(event["type"], event["data"])
-            now = _time.time()
-            if now - last_beat > 25:
+            if etype == "_heartbeat":
+                # SSE comment line — keeps the socket alive on idle without
+                # surfacing a spurious event to the client.
                 yield ": heartbeat\n\n"
-                last_beat = now
+                continue
+            yield _format_sse(etype, event["data"])
 
     return StreamingResponse(
         event_gen(),
@@ -132,16 +133,15 @@ async def chat_stream(session_id: str):
         except Exception as exc:
             print(f"[stream] flush-on-connect for {session_id} failed: {exc}")
 
-        last_beat = _time.time()
         async for event in realtime.subscribe(f"session:{session_id}"):
-            if event["type"] == "_shutdown":
+            etype = event["type"]
+            if etype == "_shutdown":
                 yield _format_sse("shutdown", {"reason": "server restart"})
                 return
-            yield _format_sse(event["type"], event["data"])
-            now = _time.time()
-            if now - last_beat > 25:
+            if etype == "_heartbeat":
                 yield ": heartbeat\n\n"
-                last_beat = now
+                continue
+            yield _format_sse(etype, event["data"])
 
     return StreamingResponse(
         event_gen(),

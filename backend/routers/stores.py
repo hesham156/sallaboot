@@ -437,29 +437,12 @@ async def db_diagnostic(request: Request):
     return result
 
 
-# ── Backward-compat aliases ───────────────────────────────────────────────────
-
-@router.post("/admin/sync")
-async def admin_sync_compat():
-    stores = sm.list_stores()
-    if not stores:
-        raise HTTPException(400, "لا يوجد متاجر مسجّلة")
-    return await store_sync_endpoint(stores[0]["store_id"])
-
-
-@router.get("/admin/products")
-async def admin_products_compat():
-    stores = sm.list_stores()
-    if not stores:
-        return {"products": [], "total_products": 0}
-    return await store_products(stores[0]["store_id"])
-
-
-@router.get("/admin/debug")
-async def admin_debug_compat():
-    stores = sm.list_stores()
-    if not stores:
-        return {"error": "no stores registered"}
-    return await store_debug(stores[0]["store_id"])
+# ── Removed: unauthenticated backward-compat aliases ──────────────────────────
+# The store-less /admin/sync (POST), /admin/products and /admin/debug aliases
+# were deleted. Like the conversation aliases, they bypassed the admin auth
+# middleware (single-segment paths) with no inline auth — /admin/sync let an
+# anonymous caller trigger a catalogue sync, /admin/debug leaked store internals
+# — and they targeted stores[0], which is arbitrary under multi-tenant. Use the
+# authenticated /admin/{store_id}/{sync,products,debug} routes instead.
 
 

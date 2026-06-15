@@ -73,6 +73,13 @@ _subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
 # silently re-fetch — better than the whole broker stalling.
 SUBSCRIBER_QUEUE_SIZE = 100
 
+# Idle keep-alive. SSE connections that sit silent get reaped by proxies
+# (Railway's edge, nginx, corporate middleboxes) after ~30-60s. We surface a
+# heartbeat tick to the consumer whenever no real event arrives within this
+# window so the endpoint can write an SSE comment and keep the socket warm.
+# Must be comfortably under the typical 30s idle-timeout.
+HEARTBEAT_INTERVAL_SECONDS = 20
+
 
 # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -228,13 +235,26 @@ async def subscribe(channel: str) -> AsyncIterator[dict]:
 
     Yields dicts: {"type": str, "data": dict}
 
+    Emits {"type": "_heartbeat", "data": {}} every HEARTBEAT_INTERVAL_SECONDS
+    of silence so the consuming SSE endpoint can keep the connection alive —
+    without this the loop would block indefinitely on an idle channel and the
+    socket would be reaped by an upstream proxy.
+
     Yields a final {"type": "_shutdown", "data": {}} if the broker stops.
     """
     q: asyncio.Queue = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
     _subscribers[channel].add(q)
     try:
         while True:
-            event = await q.get()
+            try:
+                event = await asyncio.wait_for(
+                    q.get(), timeout=HEARTBEAT_INTERVAL_SECONDS
+                )
+            except asyncio.TimeoutError:
+                # No real event in the window — tick so the endpoint can write
+                # a keep-alive and loop again.
+                yield {"type": "_heartbeat", "data": {}}
+                continue
             if event is None:
                 # Broker stop sentinel.
                 yield {"type": "_shutdown", "data": {}}

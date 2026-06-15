@@ -6,7 +6,18 @@ lifecycle hooks, middleware, and routers. Feature logic lives in the
 routers/ package.
 """
 import os
+import sys
 from pathlib import Path
+
+# Force UTF-8 on stdout/stderr before importing anything that prints emoji
+# startup banners (crypto.py / auth.py warn with ⚠️). On a Windows console the
+# default cp1252 codec raises UnicodeEncodeError at import time, which would
+# otherwise crash `uvicorn main:app` locally. No-op on Linux (already UTF-8).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except (AttributeError, ValueError):
+        pass
 
 from dotenv import load_dotenv
 
@@ -178,6 +189,30 @@ _process_salla_event     = _webhooks_router.process_salla_event
 _handle_whatsapp_message = _webhooks_router.handle_whatsapp_message
 _verify_signature        = _webhooks_router._verify_signature
 _log_event               = _webhooks_router._log_event
+
+# Stream-ticket + daily-budget helpers were moved into routers during the
+# Phase-2 split; tests (and any old import sites) still reach them via main.*.
+# `_stream_time` is the shared `time` module the ticket helpers call — tests
+# monkeypatch `main._stream_time.time` to simulate clock skew / expiry, which
+# works because routers/stream.py imports the same singleton module object.
+import time as _stream_time
+_issue_stream_ticket   = _stream_router._issue_stream_ticket
+_consume_stream_ticket = _stream_router._consume_stream_ticket
+_TICKET_TTL_SECONDS    = _stream_router._TICKET_TTL_SECONDS
+from routers.deps import daily_token_budget as _daily_token_budget
+
+
+# ── SPA deep-link fallback for /admin/{store_id} (MUST stay registered last) ──
+# Browser hard-navigation/refresh to a per-store admin deep link needs the SPA
+# shell back so React Router can take over client-side. This catch-all is
+# declared AFTER every API router on purpose: a `/admin/{store_id}` path-param
+# route shadows any literal `/admin/<name>` JSON endpoint registered before it
+# (audit-log, db-test, registry-vs-db, conversations, products, debug). Keeping
+# it last means those literal endpoints win for XHR while genuine deep links
+# still fall through to here.
+@app.get("/admin/{store_id}", response_class=HTMLResponse, include_in_schema=False)
+async def _admin_store_spa(store_id: str):
+    return _public_router._serve_react_or_legacy()
 
 # ── Browser-friendly error pages ──────────────────────────────────────────────
 _API_ONLY_PREFIXES = (

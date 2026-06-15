@@ -63,6 +63,22 @@ def _serve_react_or_legacy() -> HTMLResponse:
     )
 
 
+def _is_browser_nav(request: Request) -> bool:
+    """
+    True when the caller is a person hard-navigating/refreshing a URL in the
+    browser address bar, rather than the SPA's fetch() wrapper.
+
+    A few `/admin/<name>` paths are BOTH a client-side SPA route AND a JSON API
+    endpoint (e.g. /admin/audit-log, /admin/platform-ops). For XHR we want the
+    JSON; for a hard refresh we want the SPA shell so React Router can render
+    the page (which then makes the authenticated XHR itself). The api.ts
+    fetch wrapper never sends `Accept: text/html`, so this is a clean signal.
+    """
+    if request.method != "GET":
+        return False
+    return "text/html" in (request.headers.get("Accept") or "").lower()
+
+
 @router.get("/", response_class=HTMLResponse)
 async def root_index():
     return _serve_react_or_legacy()
@@ -506,6 +522,12 @@ async def platform_ops(request: Request):
       • stores      — one row per registered store with status flags +
                       coarse token status (no actual tokens / keys)
     """
+    # Hard refresh / typed URL on this dual-purpose path → serve the SPA shell
+    # (no Bearer header is attached on a browser navigation, so the auth check
+    # below would otherwise 401 the page itself, not just the data).
+    if _is_browser_nav(request):
+        return _serve_react_or_legacy()
+
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     claims = _auth.verify_token(token)
     if not claims or not claims.get("su"):
@@ -623,10 +645,12 @@ async def platform_ops(request: Request):
     }
 
 
-@router.get("/admin/{store_id}", response_class=HTMLResponse)
-async def admin_store_page(store_id: str):
-    """Per-store admin dashboard — serves the React SPA."""
-    return _serve_react_or_legacy()
+# NOTE: the SPA deep-link catch-all for `/admin/{store_id}` is intentionally
+# NOT defined here. A path parameter route registered in this router would
+# shadow every literal `/admin/<name>` JSON endpoint declared after it
+# (audit-log below, plus conversations/db-test/registry-vs-db/products/debug in
+# other routers included later). main.py registers that catch-all LAST, after
+# all API routers, so the literal endpoints always win for XHR calls.
 
 
 # ── Audit log viewers ────────────────────────────────────────────────────
@@ -638,6 +662,12 @@ async def audit_log_global(request: Request, limit: int = 200, offset: int = 0,
                             action: str | None = None,
                             store_id: str | None = None):
     """Super-admin: every sensitive action across all stores."""
+    # Hard refresh / typed URL on this dual-purpose path (it's also the SPA
+    # route /admin/audit-log) → serve the SPA shell; React Router renders the
+    # page and re-fetches this endpoint with the Bearer header attached.
+    if _is_browser_nav(request):
+        return _serve_react_or_legacy()
+
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     claims = _auth.verify_token(token)
     if not claims or not claims.get("su"):

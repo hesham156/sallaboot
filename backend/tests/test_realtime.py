@@ -259,11 +259,17 @@ class TestSseEndpoints:
                     break
             assert b"event: connected" in chunk
 
-    async def test_ticket_is_single_use(self, app_client, register_test_store, make_token):
-        await register_test_store("test-single-use")
-        token = make_token("test-single-use")
+    async def test_ticket_is_reusable_within_ttl(self, app_client, register_test_store, make_token):
+        """Stream tickets are intentionally stateless (HMAC + TTL + store
+        binding), NOT single-use — that's what lets any web replica validate a
+        ticket without shared state, and lets a reconnecting EventSource reuse
+        the ticket it already holds. So the same ticket must validate twice
+        within its TTL. (See tests/test_stream_tickets.py for the unit-level
+        statement of this contract.)"""
+        await register_test_store("test-reuse")
+        token = make_token("test-reuse")
         r = await app_client.post(
-            "/admin/test-single-use/stream/ticket",
+            "/admin/test-reuse/stream/ticket",
             headers={"Authorization": f"Bearer {token}"},
         )
         ticket = r.json()["ticket"]
@@ -274,7 +280,7 @@ class TestSseEndpoints:
         # First use OK.
         async with app_client.stream(
             "GET",
-            f"/admin/test-single-use/stream?ticket={ticket}",
+            f"/admin/test-reuse/stream?ticket={ticket}",
         ) as s:
             assert s.status_code == 200
             # Drain just the connected event.
@@ -282,9 +288,15 @@ class TestSseEndpoints:
                 if b"event: connected" in piece:
                     break
 
-        # Second use of same ticket → 401.
-        r2 = await app_client.get(f"/admin/test-single-use/stream?ticket={ticket}")
-        assert r2.status_code == 401
+        # Second use of the SAME ticket still works (reusable within TTL).
+        async with app_client.stream(
+            "GET",
+            f"/admin/test-reuse/stream?ticket={ticket}",
+        ) as s2:
+            assert s2.status_code == 200
+            async for piece in s2.aiter_bytes():
+                if b"event: connected" in piece:
+                    break
 
     async def test_chat_stream_requires_session_id(self, app_client):
         r = await app_client.get("/chat/stream")

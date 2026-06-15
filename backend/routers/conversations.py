@@ -315,41 +315,12 @@ async def store_end_conversation(
     return {"status": "ok", "session_id": session_id, "messages": conv.get("messages", [])[-3:]}
 
 
-# ── Backward-compat aliases ───────────────────────────────────────────────────
-
-@router.get("/admin/conversations")
-async def admin_conversations_compat(limit: int = 100, offset: int = 0):
-    stores = sm.list_stores()
-    if not stores:
-        return {"total": 0, "conversations": []}
-    return await cs.summary_list(stores[0]["store_id"], limit=limit, offset=offset)
-
-
-@router.get("/admin/conversations/{session_id}")
-async def admin_conversation_detail_compat(session_id: str):
-    await cs.restore_to_memory(session_id)
-    conv = cs.all_conversations().get(session_id)
-    if not conv:
-        return {"session_id": session_id, "messages": [], "bot_enabled": True}
-    return conv
-
-
-@router.post("/admin/conversations/{session_id}/reply")
-async def admin_reply_compat(session_id: str, req: AdminReplyRequest):
-    await cs.restore_to_memory(session_id)
-    msg = await cs.add_message(session_id, "admin", req.message, "default")
-    return {"status": "sent", "message": msg}
-
-
-@router.post("/admin/conversations/{session_id}/takeover")
-async def admin_takeover_compat(session_id: str):
-    await cs.restore_to_memory(session_id)
-    await cs.set_session_bot(session_id, False)
-    return {"status": "ok", "bot_enabled": False}
-
-
-@router.post("/admin/conversations/{session_id}/handback")
-async def admin_handback_compat(session_id: str):
-    await cs.restore_to_memory(session_id)
-    await cs.set_session_bot(session_id, True)
-    return {"status": "ok", "bot_enabled": True}
+# ── Removed: unauthenticated backward-compat aliases ──────────────────────────
+# The store-less /admin/conversations[...] aliases (list, detail, reply,
+# takeover, handback) were deleted. They sat OUTSIDE the admin auth middleware
+# (single-segment paths the regex doesn't cover) AND carried no inline auth, so
+# anyone could read a conversation or post an "admin" reply / toggle the bot
+# without logging in. They also operated on stores[0] — meaningless in a
+# multi-tenant deployment. The authenticated, store-scoped routes above
+# (/admin/{store_id}/conversations/...) are the supported surface; the SPA and
+# widget only ever call those.
