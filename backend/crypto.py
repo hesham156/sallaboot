@@ -181,6 +181,7 @@ AI_CONFIG_SECRET_FIELDS = (
     "anthropic_api_key",
     "openai_api_key",
     "whatsapp_token",
+    "page_token",        # Facebook Page access token (Messenger + Instagram)
 )
 
 

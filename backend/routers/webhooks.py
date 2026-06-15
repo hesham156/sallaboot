@@ -754,24 +754,56 @@ async def whatsapp_verify(request: Request):
 
 
 @router.post("/whatsapp/webhook")
-async def whatsapp_incoming(request: Request):
+async def meta_webhook(request: Request):
     """
-    Persist each incoming WhatsApp message to webhook_inbox, ack 200.
+    Unified Meta webhook — WhatsApp, Messenger AND Instagram all POST here.
+    Meta tells them apart by the top-level `object` field:
+        whatsapp_business_account → WhatsApp (whatsapp.py)
+        page                      → Messenger (messenger.py)
+        instagram                 → Instagram Direct (messenger.py)
 
-    Meta retries on 5xx for ~24h, so we must respond fast and never lose
-    a message. Each individual message becomes its own inbox row (partial
-    failure on one doesn't block the rest). The dedup_key is the
-    WhatsApp message id, atomic via the unique index.
+    Each message becomes its own webhook_inbox row (dedup by message id) and is
+    acked fast (< 100 ms); the drainer processes it out-of-band. Falls back to
+    synchronous handling when the DB is down so a message is never lost. Meta
+    retries on 5xx for ~24h, so we must always respond 200.
     """
     import whatsapp as wa
+    import messenger as ms
     try:
         payload = await request.json()
     except Exception:
         return {"status": "ignored"}
 
+    obj    = payload.get("object", "")
     queued = 0
+
+    # ── Messenger / Instagram ────────────────────────────────────────────
+    if obj in ("page", "instagram"):
+        for msg in ms.extract_messages(payload):
+            msg_id  = (msg.get("msg_id") or "").strip()
+            channel = msg.get("channel", "messenger")
+            if not db.available():
+                print(f"[{channel}] ⛔ DB down — processing synchronously")
+                asyncio.create_task(handle_messenger_message(msg))
+                continue
+            result = await db.inbox_insert(
+                source     = channel,
+                event_type = f"{channel}.message",
+                dedup_key  = f"{channel}:{msg_id}" if msg_id else "",
+                store_id   = "",
+                payload    = msg,
+                meta       = {},
+            )
+            if result["inserted"]:
+                queued += 1
+        return {"status": "ok", "queued": queued}
+
+    # ── WhatsApp (default) ───────────────────────────────────────────────
     for msg in wa.extract_messages(payload):
-        msg_id = str(msg.get("id") or msg.get("message_id") or "").strip()
+        # extract_messages keys the id as "msg_id" — the previous code read
+        # "id"/"message_id" (always empty), so dedup never engaged and Meta
+        # retries could double-process. Fixed here.
+        msg_id = (msg.get("msg_id") or "").strip()
         if not db.available():
             print(f"[whatsapp] ⛔ DB down — processing synchronously msg_id={msg_id!r}")
             asyncio.create_task(handle_whatsapp_message(msg))
@@ -946,3 +978,65 @@ async def handle_whatsapp_message(msg: dict):
         print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
     except Exception as exc:
         print(f"[whatsapp] handle error: {exc}")
+
+
+async def handle_messenger_message(msg: dict):
+    """
+    Route one inbound Facebook Messenger / Instagram Direct message → bot →
+    reply. Channel-agnostic mirror of handle_whatsapp_message: the same agent
+    answers, and the thread shows in the admin inbox tagged by channel. Never
+    raises — the inbox drainer logs failures and applies backoff.
+
+    Public (no leading underscore) because the drainer reaches it via
+    main._process_inbox_row.
+    """
+    import messenger as ms
+    try:
+        channel      = msg.get("channel", "messenger")
+        recipient_id = str(msg.get("recipient_id", "") or "")   # page_id / ig_id
+        sender       = str(msg.get("from", "") or "")           # PSID / IGSID
+        text         = msg.get("text", "")
+
+        print(f"[{channel}] 📨 incoming: recipient={recipient_id!r} from={sender!r} text={text[:60]!r}")
+        if not (recipient_id and sender and text):
+            return
+
+        store_id = sm.find_store_by_page_id(recipient_id)
+        if not store_id:
+            print(f"[{channel}] ❌ no store for recipient_id={recipient_id!r}")
+            return
+
+        cfg     = sm.get_ai_config(store_id) or {}
+        token   = (cfg.get("page_token") or "").strip()
+        page_id = (cfg.get("page_id") or recipient_id).strip()
+        enabled = bool(cfg.get("instagram_enabled") if channel == "instagram"
+                       else cfg.get("messenger_enabled"))
+        if not (enabled and token):
+            print(f"[{channel}] ⛔ disabled or no page_token for store {store_id!r}")
+            return
+
+        # Stable per-customer session keyed by PSID/IGSID — persists and shows
+        # in the admin inbox just like a widget or WhatsApp chat.
+        session_id = f"{'ig' if channel == 'instagram' else 'msgr'}:{sender}"
+        await cs.restore_to_memory(session_id)
+        cs.get_or_create(session_id, store_id)
+        info = cs.get_customer_info(session_id) or {}
+        if not info.get("channel"):
+            await cs.set_customer_info(session_id, {
+                "name":    msg.get("name", "") or info.get("name", ""),
+                "channel": channel,
+            })
+
+        if not cs.is_bot_enabled(session_id):
+            # Admin took this thread over — just record the message.
+            await cs.add_message(session_id, "user", text, store_id)
+            return
+
+        agent = sm.get_agent(store_id)
+        if agent is None:
+            return
+        reply = await agent.chat(message=text, session_id=session_id)
+        await ms.send_text(token, page_id, sender, reply, channel=channel)
+        print(f"[{channel}] ↩ replied to {sender} (store {store_id})")
+    except Exception as exc:
+        print(f"[messenger] handle error: {exc}")

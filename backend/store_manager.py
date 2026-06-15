@@ -437,6 +437,23 @@ def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
     return ""
 
 
+def find_store_by_page_id(page_id: str) -> str:
+    """
+    Reverse-lookup the store that owns a Facebook Page ID — routes inbound
+    Messenger (and Instagram, via the linked page) webhook events to the right
+    store's bot. Matches against both `page_id` and `ig_id` so an event whose
+    recipient is the IG account id still resolves. Returns "" when none match.
+    """
+    pid = str(page_id or "").strip()
+    if not pid:
+        return ""
+    for sid, entry in _registry.items():
+        cfg = (entry.get("tokens", {}) or {}).get("ai_config", {}) or {}
+        if pid in (str(cfg.get("page_id", "")).strip(), str(cfg.get("ig_id", "")).strip()):
+            return str(sid)
+    return ""
+
+
 async def set_ai_config(store_id: str, config: dict):
     """Save AI settings for a store and reset its agent.
 

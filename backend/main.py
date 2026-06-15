@@ -78,6 +78,9 @@ async def _process_inbox_row(row: dict) -> None:
     if source == "whatsapp":
         await _webhooks_router.handle_whatsapp_message(payload)
         return
+    if source in ("messenger", "instagram"):
+        await _webhooks_router.handle_messenger_message(payload)
+        return
     raise ValueError(f"unknown inbox source: {source!r}")
 
 

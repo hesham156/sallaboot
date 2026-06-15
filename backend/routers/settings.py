@@ -72,6 +72,14 @@ async def get_ai_settings(store_id: str):
         "whatsapp_waba_id":    cfg.get("whatsapp_waba_id", ""),
         "whatsapp_webhook":    (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
         "whatsapp_verify_token": _wa.VERIFY_TOKEN,
+        # Messenger + Instagram (Facebook Page) connection status — token masked.
+        "messenger_enabled":   bool(cfg.get("messenger_enabled")),
+        "instagram_enabled":   bool(cfg.get("instagram_enabled")),
+        "page_id":             cfg.get("page_id", ""),
+        "page_name":           cfg.get("page_name", ""),
+        "page_token_set":      bool(cfg.get("page_token")),
+        "ig_id":               cfg.get("ig_id", ""),
+        "ig_username":         cfg.get("ig_username", ""),
         "coupons_enabled":           bool(cfg.get("coupons_enabled")),
         "coupon_max_percent":        int(cfg.get("coupon_max_percent", 15) or 15),
         "coupon_max_discount_value": float(cfg.get("coupon_max_discount_value", 200) or 200),
@@ -112,6 +120,10 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
         config["whatsapp_token"] = req.whatsapp_token.strip()
     if req.whatsapp_waba_id is not None:
         config["whatsapp_waba_id"] = req.whatsapp_waba_id.strip()
+    if req.messenger_enabled is not None:
+        config["messenger_enabled"] = bool(req.messenger_enabled)
+    if req.instagram_enabled is not None:
+        config["instagram_enabled"] = bool(req.instagram_enabled)
 
     # ── AI coupon settings (clamped server-side; agent re-clamps too) ─────────
     if req.coupons_enabled is not None:
@@ -250,7 +262,12 @@ async def whatsapp_connect(store_id: str, request: Request):
                         "user_token": long_token, "waba_id": chosen_waba_id}
             chosen_phone_id = phones[0]["id"]
 
-    # 4. Save to ai_config
+    # 4. Subscribe our app to this WABA so Meta actually delivers message
+    #    webhooks — previously the merchant had to wire this manually in Meta.
+    import whatsapp as _wa
+    subscribed = await _wa.subscribe_waba(long_token, chosen_waba_id)
+
+    # 5. Save to ai_config
     existing = sm.get_ai_config(store_id)
     config = dict(existing)
     config.update({
@@ -263,14 +280,126 @@ async def whatsapp_connect(store_id: str, request: Request):
     await db.save_ai_config(store_id, config)
 
     await audit(request, "whatsapp_embedded_signup", target_store=store_id,
-                details={"waba_id": chosen_waba_id, "phone_id": chosen_phone_id})
+                details={"waba_id": chosen_waba_id, "phone_id": chosen_phone_id,
+                         "subscribed": subscribed})
 
     return {
         "status":          "connected",
         "phone_number_id": chosen_phone_id,
         "waba_id":         chosen_waba_id,
-        "message":         "✅ تم ربط واتساب بنجاح",
+        "webhook_subscribed": subscribed,
+        "message":         "✅ تم ربط واتساب بنجاح" + ("" if subscribed else " (لكن تعذّر اشتراك الـ webhook تلقائياً)"),
     }
+
+
+# ── Messenger + Instagram connect ──────────────────────────────────────────────
+
+@router.post("/admin/{store_id}/meta/connect-pages")
+async def meta_connect_pages(store_id: str, request: Request):
+    """
+    Connect Facebook Messenger + Instagram Direct via Facebook Login.
+
+    Flow (mirrors the WhatsApp Embedded Signup):
+      1. Exchange the short-lived user token for a long-lived one.
+      2. List the user's Pages (each carries its own Page token + linked IG).
+      3. If >1 page, ask the frontend to pick.
+      4. Subscribe the chosen Page to our app's webhooks, persist the Page
+         token + IG id, and enable the channels.
+
+    Body JSON: { "user_token": "...", "page_id": "..." (optional) }
+    """
+    import httpx as _httpx
+    import messenger as _ms
+
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    body           = await request.json()
+    user_token     = (body.get("user_token") or "").strip()
+    chosen_page_id = (body.get("page_id") or "").strip()
+    if not user_token:
+        raise HTTPException(400, "user_token مطلوب")
+
+    app_id     = os.getenv("META_APP_ID", "")
+    app_secret = os.getenv("META_APP_SECRET", "")
+    if not app_id or not app_secret:
+        raise HTTPException(503, "META_APP_ID / META_APP_SECRET غير مضبوطين في بيئة الخادم")
+
+    base = "https://graph.facebook.com/v21.0"
+    async with _httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{base}/oauth/access_token", params={
+            "grant_type":        "fb_exchange_token",
+            "client_id":         app_id,
+            "client_secret":     app_secret,
+            "fb_exchange_token": user_token,
+        })
+        if resp.status_code != 200:
+            raise HTTPException(400, f"فشل تبادل التوكن: {resp.text}")
+        long_user_token = resp.json().get("access_token", "") or user_token
+
+    pages = await _ms.list_pages(long_user_token)
+    if not pages:
+        raise HTTPException(400, "لم يُعثر على صفحات فيسبوك يديرها هذا الحساب. "
+                                 "تأكد من منح صلاحيات إدارة الصفحات والرسائل.")
+    if not chosen_page_id and len(pages) > 1:
+        return {"step": "choose_page",
+                "options": [{"id": p["id"], "name": p["name"],
+                             "ig_username": p.get("ig_username", "")} for p in pages],
+                "user_token": long_user_token}
+
+    page = (next((p for p in pages if p["id"] == chosen_page_id), None)
+            if chosen_page_id else pages[0]) or pages[0]
+    page_token = page.get("access_token", "")
+    page_id    = page.get("id", "")
+    ig_id      = page.get("ig_id", "")
+    if not (page_token and page_id):
+        raise HTTPException(400, "تعذّر الحصول على توكن الصفحة — أعد المحاولة ومنح الصلاحيات كاملة.")
+
+    subscribed = await _ms.subscribe_page(page_token, page_id)
+
+    existing = sm.get_ai_config(store_id)
+    config = dict(existing)
+    config.update({
+        "page_id":           page_id,
+        "page_name":         page.get("name", ""),
+        "page_token":        page_token,
+        "messenger_enabled": True,
+        "ig_id":             ig_id,
+        "ig_username":       page.get("ig_username", ""),
+        "instagram_enabled": bool(ig_id),
+    })
+    await sm.set_ai_config(store_id, config)
+    await db.save_ai_config(store_id, config)
+
+    await audit(request, "meta_pages_connect", target_store=store_id,
+                details={"page_id": page_id, "ig_id": ig_id, "subscribed": subscribed})
+
+    return {
+        "status":            "connected",
+        "page_id":           page_id,
+        "page_name":         page.get("name", ""),
+        "instagram_enabled": bool(ig_id),
+        "ig_username":       page.get("ig_username", ""),
+        "webhook_subscribed": subscribed,
+        "message": ("✅ تم ربط ماسنجر" + ("وإنستقرام" if ig_id else "") + " بنجاح"
+                    + ("" if subscribed else " (لكن تعذّر اشتراك الـ webhook تلقائياً)")),
+    }
+
+
+@router.delete("/admin/{store_id}/meta/connect-pages")
+async def meta_disconnect_pages(store_id: str, request: Request):
+    """Remove Messenger/Instagram credentials from ai_config."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    config = dict(sm.get_ai_config(store_id))
+    for k in ("page_id", "page_name", "page_token", "ig_id", "ig_username"):
+        config.pop(k, None)
+    config["messenger_enabled"] = False
+    config["instagram_enabled"] = False
+    await sm.set_ai_config(store_id, config)
+    await db.save_ai_config(store_id, config)
+    await audit(request, "meta_pages_disconnect", target_store=store_id)
+    return {"status": "disconnected", "message": "تم فصل ماسنجر وإنستقرام"}
 
 
 @router.delete("/admin/{store_id}/whatsapp/connect")

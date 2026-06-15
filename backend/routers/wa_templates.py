@@ -137,6 +137,70 @@ async def send_template(store_id: str, name: str, request: Request):
     return {"status": "ok", "message": f"✅ تم إرسال القالب '{name}' إلى {to}"}
 
 
+# ── Create a NEW template on Meta (submit for approval) ───────────────────────
+
+@router.post("/admin/{store_id}/whatsapp/templates/create-on-meta")
+async def create_template_on_meta(store_id: str, request: Request):
+    """
+    Create a brand-new template ON Meta (submitted for approval) and mirror it
+    locally as `pending`. Differs from POST /templates which only stores a local
+    draft. Requires the WABA id. Body: {name, body_text, language?, category?,
+    header_text?, footer_text?, buttons?, body_examples?}.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    token, _, waba_id = _wa_cfg(store_id)
+    if not waba_id:
+        raise HTTPException(400, "whatsapp_waba_id غير محدد — اربط واتساب أولاً")
+
+    body      = await request.json()
+    name      = (body.get("name") or "").strip().replace(" ", "_").lower()
+    body_text = (body.get("body_text") or "").strip()
+    if not name:
+        raise HTTPException(400, "name مطلوب")
+    if not body_text:
+        raise HTTPException(400, "body_text مطلوب")
+
+    res = await wa.create_meta_template(
+        token, waba_id,
+        name          = name,
+        body_text     = body_text,
+        language      = body.get("language", "ar"),
+        category      = body.get("category", "MARKETING"),
+        header_text   = (body.get("header_text") or "").strip(),
+        footer_text   = (body.get("footer_text") or "").strip(),
+        buttons       = body.get("buttons") or None,
+        body_examples = body.get("body_examples") or None,
+    )
+    if not res.get("ok"):
+        raise HTTPException(400, f"فشل إنشاء القالب على Meta: {res.get('error', 'خطأ غير معروف')}")
+
+    # Mirror locally as pending (status flips to approved on the next
+    # import-from-meta once Meta reviews it).
+    import re
+    vars_found = re.findall(r"\{\{(\w+)\}\}", body_text)
+    tpl = {
+        "name":        name,
+        "language":    body.get("language", "ar"),
+        "category":    (body.get("category", "MARKETING")).upper(),
+        "header_type": "TEXT" if body.get("header_text") else "",
+        "header_text": (body.get("header_text") or "").strip(),
+        "body_text":   body_text,
+        "footer_text": (body.get("footer_text") or "").strip(),
+        "buttons":     body.get("buttons", []),
+        "variables":   vars_found,
+        "status":      str(res.get("status", "PENDING")).lower(),
+        "notes":       f"أُنشئ على Meta (id={res.get('id', '')})",
+    }
+    await db.wa_template_save(store_id, tpl)
+
+    return {
+        "status":  "ok",
+        "meta":    res,
+        "message": f"✅ تم إرسال القالب '{name}' إلى Meta للمراجعة (الحالة: {res.get('status', 'PENDING')})",
+    }
+
+
 # ── Fetch templates from Meta API directly ────────────────────────────────────
 
 @router.get("/admin/{store_id}/whatsapp/templates/meta")

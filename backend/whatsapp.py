@@ -302,6 +302,97 @@ async def list_meta_templates(token: str, waba_id: str) -> list[dict]:
         return []
 
 
+async def create_meta_template(
+    token: str,
+    waba_id: str,
+    *,
+    name: str,
+    body_text: str,
+    language: str = "ar",
+    category: str = "MARKETING",
+    header_text: str = "",
+    footer_text: str = "",
+    buttons: list[dict] | None = None,
+    body_examples: list[str] | None = None,
+) -> dict:
+    """
+    Submit a new message template to Meta for approval.
+    POST /{waba_id}/message_templates
+
+    Meta requires an `example` value for every {{n}} placeholder in the body,
+    so we auto-fill placeholders when the caller doesn't supply examples.
+    Returns {"ok": bool, "id", "status", "category"} or {"ok": False, "error"}.
+    Never raises. New templates come back as status "PENDING" until Meta reviews.
+    """
+    if not (token and waba_id and name and body_text):
+        return {"ok": False, "error": "missing token / waba_id / name / body_text"}
+
+    import re
+    components: list[dict] = []
+    if header_text:
+        components.append({"type": "HEADER", "format": "TEXT", "text": header_text})
+
+    body_comp: dict = {"type": "BODY", "text": body_text}
+    nvars = len(re.findall(r"\{\{\s*\d+\s*\}\}", body_text))
+    if nvars:
+        ex = list(body_examples or [])[:nvars]
+        ex += [f"مثال{i + 1}" for i in range(len(ex), nvars)]
+        body_comp["example"] = {"body_text": [ex]}
+    components.append(body_comp)
+
+    if footer_text:
+        components.append({"type": "FOOTER", "text": footer_text})
+    if buttons:
+        components.append({"type": "BUTTONS", "buttons": buttons})
+
+    payload = {
+        "name":       name,
+        "language":   language,
+        "category":   (category or "MARKETING").upper(),
+        "components": components,
+    }
+    url     = f"https://graph.facebook.com/{GRAPH_VERSION}/{waba_id}/message_templates"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            data = r.json() if r.content else {}
+            if r.status_code >= 400:
+                err = (data.get("error") or {}).get("message") or r.text[:300]
+                print(f"[whatsapp] create_meta_template {r.status_code}: {err}")
+                return {"ok": False, "error": err, "status_code": r.status_code}
+            return {
+                "ok":       True,
+                "id":       data.get("id", ""),
+                "status":   data.get("status", "PENDING"),
+                "category": data.get("category", category),
+            }
+    except Exception as exc:
+        print(f"[whatsapp] create_meta_template error: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+
+async def subscribe_waba(token: str, waba_id: str) -> bool:
+    """
+    Subscribe THIS app to the merchant's WhatsApp Business Account so Meta
+    delivers message webhooks for it. POST /{waba_id}/subscribed_apps.
+    Idempotent on Meta's side. Returns True on success; never raises.
+    """
+    if not (token and waba_id):
+        return False
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{waba_id}/subscribed_apps"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(url, headers={"Authorization": f"Bearer {token}"})
+            if r.status_code >= 400:
+                print(f"[whatsapp] subscribe_waba {r.status_code}: {r.text[:200]}")
+                return False
+            return True
+    except Exception as exc:
+        print(f"[whatsapp] subscribe_waba error: {exc}")
+        return False
+
+
 def _split(text: str, limit: int) -> list[str]:
     if len(text) <= limit:
         return [text]
