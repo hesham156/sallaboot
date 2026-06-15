@@ -211,6 +211,36 @@ async def sitemap_xml():
     return Response(content="\n".join(lines), media_type="application/xml")
 
 
+# ── Web App Manifest (PWA + richer favicons/app icons) ───────────────────
+# Served dynamically so the icon always points at the live /logo.png and the
+# brand colours stay in one place. Referenced from index.html.
+
+@router.get("/manifest.webmanifest")
+async def web_manifest():
+    import json as _json
+    manifest = {
+        "name":             "حياك — مساعد ذكي لمتاجر سلة",
+        "short_name":       "حياك",
+        "description":      "بوت ذكاء اصطناعي يربط متجر سلة بواتساب وانستقرام وماسنجر — خدمة عملاء ٢٤/٧.",
+        "start_url":        "/",
+        "scope":            "/",
+        "display":          "standalone",
+        "background_color": "#f8f9fe",
+        "theme_color":      "#14b8a6",
+        "lang":             "ar",
+        "dir":              "rtl",
+        "icons": [
+            {"src": "/logo.png", "sizes": "any",     "type": "image/png", "purpose": "any"},
+            {"src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    return Response(
+        content=_json.dumps(manifest, ensure_ascii=False),
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 # ── Health / diagnostics ─────────────────────────────────────────────────
 
 @router.get("/health")

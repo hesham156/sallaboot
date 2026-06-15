@@ -39,6 +39,7 @@ function useArticleSchema(post: BlogPostType) {
       '@type':           'Article',
       'headline':        post.title,
       'description':     post.description,
+      'image':           ['https://7ayak.app/logo.png'],
       'datePublished':   post.published_at,
       'dateModified':    post.updated_at,
       'author': {
@@ -112,6 +113,8 @@ export default function BlogPost() {
     title:       post ? `${post.title} | مدونة حياك` : 'جاري التحميل…',
     description: post?.description || '',
     canonical:   post ? `https://7ayak.app/blog/${post.slug}` : undefined,
+    type:        'article',
+    keywords:    post?.tags?.join(', ') || undefined,
   })
   useArticleSchema(post || {
     title: '', description: '', published_at: null, updated_at: '',

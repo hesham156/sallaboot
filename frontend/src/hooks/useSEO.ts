@@ -5,53 +5,59 @@ interface SEO {
   description?: string
   canonical?:   string
   noindex?:     boolean
+  /** og:image + twitter:image. Defaults to the brand card when omitted. */
+  image?:       string
+  /** og:type — "website" (default) or "article" for blog posts. */
+  type?:        'website' | 'article'
+  /** Comma-separated keywords for the meta keywords tag. */
+  keywords?:    string
+}
+
+const DEFAULT_OG_IMAGE = 'https://7ayak.app/logo.png'
+
+/** Create-or-update a <meta> tag by name or property attribute. */
+function setMeta(attr: 'name' | 'property', key: string, value: string) {
+  let el = document.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
+  if (!el) {
+    el = document.createElement('meta')
+    el.setAttribute(attr, key)
+    document.head.appendChild(el)
+  }
+  el.setAttribute('content', value)
 }
 
 /**
- * Per-page SEO helper. Sets the document <title>, the meta description,
- * the canonical URL and (optionally) a robots noindex flag for the
- * page that mounts it. Restores nothing on unmount — the next page
- * sets its own values.
+ * Per-page SEO helper. Sets <title>, meta description + keywords, canonical,
+ * the Open Graph + Twitter tags (title/description/url/image/type) and a robots
+ * flag for the page that mounts it.
  *
- * The static defaults in index.html cover the landing page; this hook
- * is what every other page uses to differentiate its <title> in Google
- * SERPs and social previews.
+ * The static defaults in index.html cover the landing page; this hook is what
+ * every other route uses to differentiate its <title>, social preview and
+ * canonical in search + when shared.
  */
-export function useSEO({ title, description, canonical, noindex }: SEO) {
+export function useSEO({ title, description, canonical, noindex, image, type, keywords }: SEO) {
   useEffect(() => {
     document.title = title
 
-    // Meta description
     if (description) {
-      let el = document.querySelector<HTMLMetaElement>('meta[name="description"]')
-      if (!el) {
-        el = document.createElement('meta')
-        el.setAttribute('name', 'description')
-        document.head.appendChild(el)
-      }
-      el.setAttribute('content', description)
+      setMeta('name', 'description', description)
+      setMeta('property', 'og:description', description)
+      setMeta('name', 'twitter:description', description)
+    }
+    if (keywords) {
+      setMeta('name', 'keywords', keywords)
     }
 
-    // Open Graph title (mirror page title so WhatsApp previews stay correct)
-    let ogTitle = document.querySelector<HTMLMetaElement>('meta[property="og:title"]')
-    if (!ogTitle) {
-      ogTitle = document.createElement('meta')
-      ogTitle.setAttribute('property', 'og:title')
-      document.head.appendChild(ogTitle)
-    }
-    ogTitle.setAttribute('content', title)
+    setMeta('property', 'og:title', title)
+    setMeta('name', 'twitter:title', title)
+    setMeta('property', 'og:type', type || 'website')
 
-    if (description) {
-      let ogDesc = document.querySelector<HTMLMetaElement>('meta[property="og:description"]')
-      if (!ogDesc) {
-        ogDesc = document.createElement('meta')
-        ogDesc.setAttribute('property', 'og:description')
-        document.head.appendChild(ogDesc)
-      }
-      ogDesc.setAttribute('content', description)
-    }
+    const img = image || DEFAULT_OG_IMAGE
+    setMeta('property', 'og:image', img)
+    setMeta('name', 'twitter:image', img)
+    setMeta('name', 'twitter:card', 'summary_large_image')
 
-    // Canonical URL — defaults to the current path on 7ayak.app
+    // Canonical URL — defaults to the current path on 7ayak.app.
     const canonicalHref = canonical || `https://7ayak.app${window.location.pathname}`
     let link = document.querySelector<HTMLLinkElement>('link[rel="canonical"]')
     if (!link) {
@@ -60,23 +66,10 @@ export function useSEO({ title, description, canonical, noindex }: SEO) {
       document.head.appendChild(link)
     }
     link.setAttribute('href', canonicalHref)
+    setMeta('property', 'og:url', canonicalHref)
+    setMeta('name', 'twitter:url', canonicalHref)
 
-    // og:url mirrors canonical
-    let ogUrl = document.querySelector<HTMLMetaElement>('meta[property="og:url"]')
-    if (!ogUrl) {
-      ogUrl = document.createElement('meta')
-      ogUrl.setAttribute('property', 'og:url')
-      document.head.appendChild(ogUrl)
-    }
-    ogUrl.setAttribute('content', canonicalHref)
-
-    // Robots
-    let robots = document.querySelector<HTMLMetaElement>('meta[name="robots"]')
-    if (!robots) {
-      robots = document.createElement('meta')
-      robots.setAttribute('name', 'robots')
-      document.head.appendChild(robots)
-    }
-    robots.setAttribute('content', noindex ? 'noindex, nofollow' : 'index, follow, max-image-preview:large')
-  }, [title, description, canonical, noindex])
+    setMeta('name', 'robots',
+      noindex ? 'noindex, nofollow' : 'index, follow, max-image-preview:large, max-snippet:-1')
+  }, [title, description, canonical, noindex, image, type, keywords])
 }
