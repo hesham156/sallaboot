@@ -8,6 +8,25 @@ from typing import Optional
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
 
+# Process-wide caches for Salla geo metadata (countries/cities). These IDs are
+# global — identical for every store — so we resolve them once and reuse.
+_COUNTRY_CACHE: dict = {}              # normalized name/code -> {"id", "name"}
+_CITY_CACHE: dict = {}                 # country_id -> {normalized_city_name: id}
+_CITY_PAGES_SCANNED: dict = {}         # country_id -> highest page already cached
+_MAX_CITY_PAGES = 8                    # bound the lazy city scan (≈120 cities)
+
+
+def _norm_geo(s: str) -> str:
+    """Normalise a country/city name for fuzzy matching (Arabic alef variants,
+    tatweel, case, surrounding whitespace)."""
+    s = (s or "").strip().lower()
+    if not s:
+        return ""
+    for a in ("أ", "إ", "آ"):
+        s = s.replace(a, "ا")
+    s = s.replace("ـ", "").replace("ة", "ه")
+    return s
+
 
 def normalize_mobile_e164(phone: str, default_dial: str = "966") -> str:
     """
@@ -595,6 +614,116 @@ class SallaClient:
         Scope required: coupons.read
         """
         return await self._request("GET", f"/coupons/statistics/{coupon_id}")
+
+    # ── Live inventory / variants ───────────────────────────────────────────────
+
+    async def get_product_variants(self, product_id) -> dict:
+        """
+        GET /admin/v2/products/{product}/variants — live per-variant stock + price.
+        Each item: {id, price{amount,currency}, stock_quantity, sku,
+        related_option_values[], weight, weight_type}. Scope: products.read
+        """
+        return await self._request("GET", f"/products/{product_id}/variants")
+
+    # ── Shipments / live tracking ───────────────────────────────────────────────
+
+    async def get_shipments(self, order_id=None, per_page: int = 10) -> dict:
+        """GET /admin/v2/shipments — optionally filtered by order_id. Scope: shipping.read"""
+        params: dict = {"per_page": per_page}
+        if order_id:
+            params["order_id"] = order_id
+        return await self._request("GET", "/shipments", params=params)
+
+    async def get_shipment_tracking(self, shipment_id) -> dict:
+        """
+        GET /admin/v2/shipments/{id}/tracking — live status + history.
+        Returns {status, courier_name, tracking_number, tracking_link,
+        history[{status, note, create_at}]}. Scope: shipping.read
+        """
+        return await self._request("GET", f"/shipments/{shipment_id}/tracking")
+
+    # ── Geo metadata + live shipping-rate estimate ──────────────────────────────
+
+    async def list_countries(self, page: int = 1) -> dict:
+        """GET /admin/v2/countries — paginated. Scope: metadata.read"""
+        return await self._request("GET", "/countries", params={"page": page})
+
+    async def list_cities(self, country_id, page: int = 1) -> dict:
+        """GET /admin/v2/countries/{country}/cities — paginated. Scope: metadata.read"""
+        return await self._request("GET", f"/countries/{country_id}/cities", params={"page": page})
+
+    async def estimate_shipping_rates(self, city_id, country_id, order_id=None) -> dict:
+        """
+        GET /admin/v2/shipping/companies/estimate-rate — live carrier rates + ETA
+        for a destination. Requires city_id + country_id (verified against the
+        OAS: both are mandatory query params). Returns data[] of
+        {title, total{amount,currency}, working_days, services[]}.
+        """
+        params: dict = {"city_id": city_id, "country_id": country_id}
+        if order_id:
+            params["order_id"] = order_id
+        return await self._request("GET", "/shipping/companies/estimate-rate", params=params)
+
+    # Geo metadata is GLOBAL (same IDs for every store), so resolution results are
+    # cached process-wide. Cities have no search param and number in the hundreds
+    # per country (≈900 for SA over ~61 pages) — but the major cities sit on the
+    # first pages, so we lazily scan a bounded number of pages and cache as we go.
+    async def resolve_country_id(self, country_name: str = "") -> Optional[int]:
+        key = _norm_geo(country_name) or "sa"
+        if key in _COUNTRY_CACHE:
+            return _COUNTRY_CACHE[key]["id"]
+        for page in range(1, 4):
+            try:
+                data = await self.list_countries(page=page)
+            except Exception:
+                break
+            for c in data.get("data", []) or []:
+                cid = c.get("id")
+                for cand in (c.get("name"), c.get("name_en"), c.get("code")):
+                    nc = _norm_geo(cand)
+                    if nc:
+                        _COUNTRY_CACHE[nc] = {"id": cid, "name": c.get("name")}
+                if (c.get("code") or "").lower() == "sa":
+                    _COUNTRY_CACHE["sa"] = {"id": cid, "name": c.get("name")}
+            if key in _COUNTRY_CACHE:
+                return _COUNTRY_CACHE[key]["id"]
+            if not (data.get("pagination", {}).get("links") or {}).get("next"):
+                break
+        return _COUNTRY_CACHE.get("sa", {}).get("id")
+
+    async def resolve_city_id(self, country_id, city_name: str) -> Optional[int]:
+        target = _norm_geo(city_name)
+        if not target or not country_id:
+            return None
+        cache = _CITY_CACHE.setdefault(country_id, {})
+        if target in cache:
+            return cache[target]
+        page = _CITY_PAGES_SCANNED.get(country_id, 0) + 1
+        while page <= _MAX_CITY_PAGES:
+            try:
+                data = await self.list_cities(country_id, page=page)
+            except Exception:
+                break
+            rows = data.get("data", []) or []
+            if not rows:
+                break
+            for ct in rows:
+                cid = ct.get("id")
+                for cand in (ct.get("name"), ct.get("name_en")):
+                    nc = _norm_geo(cand)
+                    if nc:
+                        cache[nc] = cid
+            _CITY_PAGES_SCANNED[country_id] = page
+            if target in cache:
+                return cache[target]
+            if not (data.get("pagination", {}).get("links") or {}).get("next"):
+                break
+            page += 1
+        # Loose fallback: substring match against whatever we've cached so far.
+        for nc, cid in cache.items():
+            if target in nc or nc in target:
+                return cid
+        return None
 
     # ── Abandoned Carts endpoints ──────────────────────────────────────────────
 

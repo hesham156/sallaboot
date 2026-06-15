@@ -310,6 +310,53 @@ TOOLS = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    # ── Live inventory + shipping ─────────────────────────────────────────────
+    {
+        "name": "check_stock",
+        "description": (
+            "تحقّق من توفّر منتج ومخزونه اللحظي مباشرة من سلة، مع المقاسات/الألوان "
+            "وأسعارها إن كان للمنتج خيارات. استخدمها لما يسأل العميل: متوفر؟ / "
+            "فيه مقاس L؟ / عندكم اللون الأحمر؟ / كم باقي بالمخزون؟"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "product_id":   {"type": "string", "description": "معرّف المنتج إن عُرف"},
+                "product_name": {"type": "string", "description": "اسم المنتج للبحث إن لم يُعرف المعرّف"},
+            },
+        },
+    },
+    {
+        "name": "estimate_shipping",
+        "description": (
+            "احسب تكلفة الشحن ومدة التوصيل المتوقعة لمدينة العميل عبر شركات الشحن "
+            "الفعلية المرتبطة بالمتجر. استخدمها لما يسأل العميل: كم الشحن لجدة؟ / "
+            "متى يوصل الطلب؟ / كم التوصيل لمدينتي؟"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city":    {"type": "string", "description": "اسم مدينة العميل (مثل: جدة، الرياض، الدمام)"},
+                "country": {"type": "string", "description": "الدولة (اختياري — الافتراضي السعودية)"},
+            },
+            "required": ["city"],
+        },
+    },
+    {
+        "name": "track_shipment",
+        "description": (
+            "تتبّع شحنة طلب لحظياً: الحالة الحالية + سجل الحركة + رقم ورابط التتبع. "
+            "استخدمها لما يسأل العميل: وين شحنتي؟ / فين طلبي؟ / وصل لأي مرحلة؟ "
+            "مع رقم الطلب."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_reference": {"type": "string", "description": "رقم الطلب المرجعي"},
+            },
+            "required": ["order_reference"],
+        },
+    },
     {
         "name": "search_by_category",
         "description": (
@@ -839,6 +886,29 @@ def _clamp_float(value, default: float, *, lo: float, hi: float) -> float:
         return default
 
 
+# Salla shipment status → Arabic label (for track_shipment). Keys match the
+# `status` enum from GET /shipments.
+_SHIPMENT_STATUS_AR = {
+    "created":               "تم إنشاء الشحنة",
+    "in_progress":           "قيد التجهيز",
+    "in_transit":            "في الطريق",
+    "received_at_final_hub": "وصلت لمركز التوزيع",
+    "to_be_reattempted":     "ستُعاد محاولة التسليم",
+    "reattempted":           "أُعيدت محاولة التسليم",
+    "unable_to_deliver":     "تعذّر التسليم",
+    "delivering":            "خرجت للتوصيل",
+    "delivered":             "تم التسليم ✅",
+    "partially_delivered":   "تم التسليم جزئياً",
+    "shipped":               "تم الشحن",
+    "cancelled":             "أُلغيت",
+    "lost":                  "مفقودة",
+    "damaged":               "تالفة",
+    "return_to_origin":      "مُرتجعة للمصدر",
+    "return_in_progress":    "جارٍ الإرجاع",
+    "creating":              "قيد الإنشاء",
+}
+
+
 def _is_printing_store(ai_cfg: dict) -> bool:
     """
     Decide whether a store should get printing features.
@@ -1180,6 +1250,204 @@ class PrintingAgent:
             "أبلغ العميل بالكود وشجّعه على إتمام الطلب."
         )
         return terms
+
+    # ── Live inventory + shipping ───────────────────────────────────────────────
+    async def _check_stock(self, inputs: dict) -> str:
+        """Live per-variant (or product-level) stock + price straight from Salla."""
+        if not self.salla:
+            return "⚠️ لم يتم ربط المتجر بعد."
+        pid   = str(inputs.get("product_id") or "").strip()
+        pname = (inputs.get("product_name") or "").strip()
+
+        store = get_store_data(self.store_id)
+        prods = store.get("products", []) or []
+        prod  = None
+        if pid:
+            prod = next((p for p in prods if str(p.get("id")) == pid), None)
+        if not prod and pname:
+            nl = pname.lower()
+            prod = (next((p for p in prods if nl == (p.get("name", "") or "").lower()), None)
+                    or next((p for p in prods if nl in (p.get("name", "") or "").lower()), None))
+        if not prod and pid:
+            prod = {"id": pid, "name": pname or f"#{pid}"}
+        if not prod:
+            return "لم أجد هذا المنتج. اذكر اسمه بدقة أكثر أو استخدم suggest_products أولاً."
+
+        product_id = prod.get("id")
+        pdisplay   = prod.get("name", f"#{product_id}")
+
+        try:
+            vdata    = await self.salla.get_product_variants(product_id)
+            variants = vdata.get("data", []) or []
+        except Exception as exc:
+            print(f"[check_stock] variants failed pid={product_id}: {exc}")
+            variants = []
+
+        if not variants:
+            # Simple product (no options) — fall back to cached availability.
+            if prod.get("unlimited_quantity"):
+                return f"✅ {pdisplay}: متوفر."
+            q = prod.get("quantity")
+            if isinstance(q, (int, float)) and q > 0:
+                return f"✅ {pdisplay}: متوفر ({int(q)} قطعة في المخزون)."
+            if q == 0:
+                return f"⛔ {pdisplay}: غير متوفر حالياً (نفد المخزون)."
+            return f"{pdisplay}: لم أتمكن من تأكيد المخزون اللحظي، تواصل معنا للتأكيد."
+
+        # Resolve option-value ids → human labels (best-effort, from raw product).
+        label_map: dict = {}
+        try:
+            pd = await self.salla.get_product(product_id)
+            for o in (pd.get("data", {}).get("options") or []):
+                for v in (o.get("values") or []):
+                    if v.get("id") is not None:
+                        label_map[v["id"]] = v.get("name") or str(v["id"])
+        except Exception:
+            pass
+
+        lines = [f"📦 توفّر **{pdisplay}** (لحظي):"]
+        any_avail = False
+        for v in variants[:12]:
+            labels = [str(label_map.get(x, "")) for x in (v.get("related_option_values") or [])]
+            labels = [l for l in labels if l]
+            label  = " / ".join(labels) if labels else (v.get("sku") or f"#{v.get('id')}")
+            stock  = v.get("stock_quantity")
+            price  = (v.get("price") or {}).get("amount")
+            if isinstance(stock, (int, float)) and stock > 0:
+                any_avail = True
+                extra = f" — {price} ريال" if price else ""
+                lines.append(f"• {label}: ✅ متوفر ({int(stock)}){extra}")
+            else:
+                lines.append(f"• {label}: ⛔ غير متوفر")
+        if not any_avail:
+            lines.append("\nجميع الخيارات غير متوفرة حالياً.")
+        return "\n".join(lines)
+
+    async def _estimate_shipping(self, inputs: dict) -> str:
+        """Live carrier rates + ETA to the customer's city via Salla estimate-rate."""
+        if not self.salla:
+            return "⚠️ لم يتم ربط المتجر بعد."
+        city    = (inputs.get("city") or "").strip()
+        country = (inputs.get("country") or "").strip()
+        if not city:
+            return "اذكر اسم مدينتك لأحسب لك تكلفة الشحن ومدة التوصيل."
+
+        try:
+            country_id = await self.salla.resolve_country_id(country)
+            city_id    = await self.salla.resolve_city_id(country_id, city) if country_id else None
+        except Exception as exc:
+            print(f"[estimate_shipping] geo resolve failed: {exc}")
+            country_id = city_id = None
+
+        if not (country_id and city_id):
+            # Couldn't pin the city → generic carrier list rather than a dead end.
+            carriers = brain.get_shipping_companies(self.store_id) or []
+            names = "، ".join(c.get("name", "") for c in carriers[:6] if c.get("name"))
+            if names:
+                return (f"نشحن عبر: {names}. لمعرفة التكلفة الدقيقة لـ «{city}» تأكد من "
+                        "اسم المدينة، أو أكمل الطلب لعرض خيارات الشحن وأسعارها.")
+            return f"تعذّر تحديد مدينة «{city}». تأكد من الاسم وحاول مجدداً."
+
+        try:
+            data  = await self.salla.estimate_shipping_rates(city_id, country_id)
+            rates = data.get("data", []) or []
+        except Exception as exc:
+            print(f"[estimate_shipping] estimate failed city={city_id}: {exc}")
+            return "تعذّر جلب أسعار الشحن لحظياً. حاول لاحقاً أو أكمل الطلب لعرض الخيارات."
+
+        if not rates:
+            return f"لا توجد خيارات شحن متاحة إلى {city} حالياً."
+
+        rates.sort(key=lambda r: float((r.get("total") or {}).get("amount") or 1e9))
+        lines = [f"🚚 خيارات الشحن إلى {city}:"]
+        for r in rates[:6]:
+            title = r.get("title", "شركة شحن")
+            total = r.get("total") or {}
+            amt   = total.get("amount")
+            cur   = total.get("currency", "SAR")
+            days  = (r.get("working_days") or "").strip()
+            line  = f"• {title}: {amt} {cur}"
+            if days:
+                line += f" — {days}"
+            cod = next((s for s in (r.get("services") or []) if s.get("name") == "cod"), None)
+            cod_amt = ((cod or {}).get("amount") or {}).get("amount")
+            if cod_amt:
+                line += f" (الدفع عند الاستلام +{cod_amt})"
+            lines.append(line)
+        return "\n".join(lines)
+
+    async def _track_shipment(self, inputs: dict) -> str:
+        """Resolve order → shipment → live tracking (status + history + link)."""
+        if not self.salla:
+            return "⚠️ لم يتم ربط المتجر بعد."
+        ref = (inputs.get("order_reference") or "").strip()
+        if not ref:
+            return "اذكر رقم الطلب لأتتبّع شحنتك."
+
+        order: dict = {}
+        try:
+            order = (await self.salla.get_order(ref)).get("data", {}) or {}
+        except Exception:
+            pass
+        if not order:
+            try:
+                rows  = (await self.salla.get_orders(reference_id=ref, per_page=5)).get("data", [])
+                order = rows[0] if rows else {}
+            except Exception:
+                pass
+        order_id = order.get("id")
+        if not order_id:
+            return f"لم أجد طلباً برقم {ref}. تأكد من الرقم وحاول مجدداً."
+
+        try:
+            shipments = (await self.salla.get_shipments(order_id=order_id, per_page=10)).get("data", []) or []
+        except Exception as exc:
+            print(f"[track_shipment] list shipments failed order={order_id}: {exc}")
+            shipments = []
+
+        outbound = [s for s in shipments if s.get("type") != "return"] or shipments
+        if not outbound:
+            st = order.get("status") or {}
+            st_name = st.get("name", "") if isinstance(st, dict) else str(st)
+            return (f"طلبك #{ref}: لم تُجهَّز الشحنة بعد. "
+                    f"الحالة الحالية: {st_name or '—'}. سنُعلمك فور شحنه.")
+
+        ship    = outbound[0]
+        ship_id = ship.get("id")
+        tracking: dict = {}
+        try:
+            tracking = (await self.salla.get_shipment_tracking(ship_id)).get("data", {}) or {}
+        except Exception:
+            tracking = ship   # fall back to the shipment summary
+
+        status  = tracking.get("status") or ship.get("status") or "—"
+        courier = tracking.get("courier_name") or ship.get("courier_name") or ""
+        tnum    = tracking.get("tracking_number") or ship.get("tracking_number") or ""
+        tlink   = tracking.get("tracking_link") or ship.get("tracking_link") or ""
+
+        lines = [f"🚚 تتبّع شحنة الطلب #{ref}:", f"الحالة: {_SHIPMENT_STATUS_AR.get(status, status)}"]
+        if courier:
+            lines.append(f"شركة الشحن: {courier}")
+        if tnum and str(tnum) != "0":
+            lines.append(f"رقم التتبع: {tnum}")
+
+        history = tracking.get("history") or []
+        if history:
+            lines.append("\nآخر التحديثات:")
+            for h in history[:4]:
+                hs   = _SHIPMENT_STATUS_AR.get(h.get("status", ""), h.get("status", ""))
+                note = (h.get("note") or "").strip()
+                ca   = h.get("create_at") or {}
+                when = (ca.get("date", "")[:16] if isinstance(ca, dict) else "")
+                seg  = f"• {hs}"
+                if note:
+                    seg += f" — {note}"
+                if when:
+                    seg += f" ({when})"
+                lines.append(seg)
+        if tlink:
+            lines.append(f"\nرابط التتبع: {tlink}")
+        return "\n".join(lines)
 
     # ── Tool runner ────────────────────────────────────────────────────────────
     async def _run_tool(self, name: str, inputs: dict, session_id: str = "") -> str:
@@ -2367,6 +2635,16 @@ class PrintingAgent:
             # ── generate_discount_coupon ────────────────────────────────────
             elif name == "generate_discount_coupon":
                 return await self._issue_coupon(inputs, session_id)
+
+            # ── check_stock / estimate_shipping / track_shipment ────────────
+            elif name == "check_stock":
+                return await self._check_stock(inputs)
+
+            elif name == "estimate_shipping":
+                return await self._estimate_shipping(inputs)
+
+            elif name == "track_shipment":
+                return await self._track_shipment(inputs)
 
             # ── get_printing_options ─────────────────────────────────────────
             elif name == "get_printing_options":
