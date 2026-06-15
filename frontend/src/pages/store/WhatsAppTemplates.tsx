@@ -87,6 +87,33 @@ export default function WhatsAppTemplates({ storeId }: { storeId: string }) {
     }
   }
 
+  // Submit the template to Meta for approval (vs. handleSave which only stores
+  // a local draft). Meta reviews it; it becomes sendable once approved.
+  const handleCreateOnMeta = async () => {
+    setFormError('')
+    if (!form.name?.trim()) { setFormError('اسم القالب مطلوب'); return }
+    if (!form.body_text?.trim()) { setFormError('نص الرسالة مطلوب'); return }
+    setSaving(true)
+    try {
+      const res = await api.createTemplateOnMeta(storeId, {
+        name:        form.name!.trim(),
+        body_text:   form.body_text!.trim(),
+        language:    form.language || 'ar',
+        category:    form.category || 'MARKETING',
+        header_text: form.header_text || '',
+        footer_text: form.footer_text || '',
+      })
+      setShowForm(false)
+      setForm(EMPTY_FORM)
+      setImportMsg(res.message || '✅ تم الإرسال إلى Meta للمراجعة')
+      await load()
+    } catch (e) {
+      setFormError(e instanceof ApiError ? e.detail : 'فشل الإنشاء على Meta')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleDelete = async (name: string) => {
     if (!confirm(`حذف القالب "${name}"؟`)) return
     try {
@@ -374,17 +401,25 @@ export default function WhatsAppTemplates({ storeId }: { storeId: string }) {
 
               {formError && <p className="text-sm text-red-600">{formError}</p>}
 
+              {formError && <p className="text-xs text-amber-600">💡 «إنشاء على Meta» يرسل القالب للمراجعة (يحتاج ربط واتساب). «حفظ كمسودة» يخزّنه محلياً فقط.</p>}
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={handleSave}
+                  onClick={handleCreateOnMeta}
                   disabled={saving}
                   className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60"
                 >
-                  {saving ? <Spinner size="sm" color="white" /> : 'حفظ القالب'}
+                  {saving ? <Spinner size="sm" color="white" /> : 'إنشاء على Meta'}
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex-1 border border-blue-200 text-blue-700 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors disabled:opacity-60"
+                >
+                  حفظ كمسودة
                 </button>
                 <button
                   onClick={() => setShowForm(false)}
-                  className="flex-1 border border-gray-200 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                  className="px-4 border border-gray-200 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
                 >
                   إلغاء
                 </button>

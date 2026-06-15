@@ -208,6 +208,13 @@ export const api = {
   waDisconnect: (storeId: string) =>
     del<{ status: string; message: string }>(`/admin/${storeId}/whatsapp/connect`),
 
+  // Messenger + Instagram (Facebook Page) connect
+  metaConnectPages: (storeId: string, body: { user_token: string; page_id?: string }) =>
+    post<{ status?: string; step?: string; options?: {id:string;name?:string;ig_username?:string}[]; user_token?: string; page_id?: string; instagram_enabled?: boolean; ig_username?: string; webhook_subscribed?: boolean; message?: string }>(
+      `/admin/${storeId}/meta/connect-pages`, body),
+  metaDisconnectPages: (storeId: string) =>
+    del<{ status: string; message: string }>(`/admin/${storeId}/meta/connect-pages`),
+
   // Pricing calculator settings
   getPricing: (storeId: string) =>
     get<PricingConfig>(`/admin/${storeId}/settings/pricing`),
@@ -285,6 +292,8 @@ export const api = {
     get<{ templates: MetaTemplate[]; count: number }>(`/admin/${storeId}/whatsapp/templates/meta`),
   importMetaTemplates: (storeId: string) =>
     post<{ status: string; imported: number; total: number; message: string }>(`/admin/${storeId}/whatsapp/templates/import-from-meta`),
+  createTemplateOnMeta: (storeId: string, tpl: { name: string; body_text: string; language?: string; category?: string; header_text?: string; footer_text?: string }) =>
+    post<{ status: string; meta: { id?: string; status?: string }; message: string }>(`/admin/${storeId}/whatsapp/templates/create-on-meta`, tpl),
 
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
@@ -790,6 +799,14 @@ export interface AIConfig {
   whatsapp_waba_id?: string
   whatsapp_webhook?: string
   whatsapp_verify_token?: string
+  // Messenger + Instagram (Facebook Page)
+  messenger_enabled?: boolean
+  instagram_enabled?: boolean
+  page_id?: string
+  page_name?: string
+  page_token_set?: boolean
+  ig_id?: string
+  ig_username?: string
   // AI-issued discount coupons (opt-in)
   coupons_enabled?: boolean
   coupon_max_percent?: number

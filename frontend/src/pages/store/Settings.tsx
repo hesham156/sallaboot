@@ -110,6 +110,12 @@ export default function Settings({ storeId }: Props) {
   const [waPendingWaba, setWaPendingWaba]   = useState('')
   const [fbLoaded, setFbLoaded]     = useState(false)
   const [waManual, setWaManual]     = useState(false)
+
+  /* Messenger + Instagram (Facebook Page) — connection status read from `cfg` */
+  const [metaConnecting, setMetaConnecting] = useState(false)
+  const [metaMsg, setMetaMsg]               = useState('')
+  const [metaPendingToken, setMetaPendingToken] = useState('')
+  const [metaPageOptions, setMetaPageOptions]   = useState<{id:string;name?:string;ig_username?:string}[]>([])
   const fbRef = useRef(false)
 
   /* Notifications */
@@ -284,6 +290,51 @@ export default function Settings({ storeId }: Props) {
       setWaMsg('✅ تم إلغاء الربط')
       load()
     } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+  }
+
+  // ── Messenger + Instagram connect (Facebook Page) ──
+  async function startPagesConnect() {
+    if (!window.FB) { setMetaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة وحاول'); return }
+    setMetaConnecting(true); setMetaMsg('')
+    window.FB.login(async (res: { authResponse?: { accessToken: string } }) => {
+      if (!res.authResponse) { setMetaConnecting(false); setMetaMsg('❌ تم إلغاء الربط'); return }
+      try {
+        const data = await api.metaConnectPages(storeId, { user_token: res.authResponse.accessToken })
+        await handlePagesResponse(data)
+      } catch (e: unknown) {
+        setMetaMsg(e instanceof Error ? e.message : '❌ فشل الاتصال')
+      } finally { setMetaConnecting(false) }
+    }, {
+      scope: 'pages_messaging,pages_show_list,pages_manage_metadata,instagram_basic,instagram_manage_messages,business_management',
+    })
+  }
+
+  async function handlePagesResponse(data: Awaited<ReturnType<typeof api.metaConnectPages>>) {
+    if (data.step === 'choose_page') {
+      setMetaPendingToken(data.user_token || '')
+      setMetaPageOptions(data.options || [])
+    } else {
+      setMetaPageOptions([]); setMetaPendingToken('')
+      setMetaMsg(data.message || '✅ تم الربط')
+      load()
+    }
+  }
+
+  async function pickPage(pageId: string) {
+    setMetaConnecting(true); setMetaPageOptions([])
+    try {
+      const data = await api.metaConnectPages(storeId, { user_token: metaPendingToken, page_id: pageId })
+      await handlePagesResponse(data)
+    } catch (e: unknown) { setMetaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+    finally { setMetaConnecting(false) }
+  }
+
+  async function disconnectPages() {
+    if (!confirm('هل تريد فصل ماسنجر وإنستقرام؟')) return
+    try {
+      await api.metaDisconnectPages(storeId)
+      setMetaMsg('✅ تم الفصل'); load()
+    } catch (e: unknown) { setMetaMsg(e instanceof Error ? e.message : '❌ خطأ') }
   }
 
   async function saveNotif() {
@@ -663,6 +714,50 @@ export default function Settings({ storeId }: Props) {
                 )}
               </div>
             )}
+
+            {/* ── Messenger + Instagram (Facebook Page) ── */}
+            <section className="space-y-3 border-t border-divider pt-5">
+              <div className="flex items-center gap-2">
+                <span className="text-base">💬</span>
+                <h3 className="text-sm font-bold text-foreground">ماسنجر + إنستقرام</h3>
+              </div>
+              <p className="text-xs text-default-500 leading-relaxed">
+                اربط صفحة فيسبوك (وحساب إنستقرام المرتبط بها) ليرد البوت تلقائياً على رسائل
+                ماسنجر وإنستقرام دايركت — بنفس ذكاء بوت المتجر.
+              </p>
+
+              {cfg.page_id ? (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2">
+                  <p className="text-sm font-bold text-emerald-600">✅ متصل: {cfg.page_name || cfg.page_id}</p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-default-600">
+                    <span>ماسنجر: {cfg.messenger_enabled ? 'مفعّل ✓' : 'متوقف'}</span>
+                    <span className="text-default-300">•</span>
+                    <span>إنستقرام: {cfg.instagram_enabled ? `مفعّل ✓ ${cfg.ig_username ? '(@' + cfg.ig_username + ')' : ''}` : 'غير مرتبط'}</span>
+                  </div>
+                  <Button size="sm" color="danger" variant="flat" onPress={disconnectPages} className="mt-1">
+                    فصل ماسنجر وإنستقرام
+                  </Button>
+                </div>
+              ) : metaPageOptions.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-default-500">اختر الصفحة:</p>
+                  {metaPageOptions.map(p => (
+                    <button key={p.id} onClick={() => pickPage(p.id)}
+                      className="w-full text-right rounded-xl border border-divider bg-content2 p-3 hover:border-primary/40 transition-all">
+                      <p className="text-sm font-bold text-foreground">{p.name || p.id}</p>
+                      {p.ig_username && <p className="text-[11px] text-default-400 mt-0.5">إنستقرام: @{p.ig_username}</p>}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <Button color="primary" isLoading={metaConnecting} isDisabled={!fbLoaded}
+                  onPress={startPagesConnect}
+                  className="font-bold h-10 bg-gradient-to-r from-blue-600 to-indigo-600">
+                  {fbLoaded ? 'ربط ماسنجر + إنستقرام' : 'جارٍ تحميل Facebook…'}
+                </Button>
+              )}
+              <Msg text={metaMsg} />
+            </section>
           </div>
         )}
 
