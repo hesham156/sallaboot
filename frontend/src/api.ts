@@ -790,6 +790,12 @@ export interface AIConfig {
   whatsapp_waba_id?: string
   whatsapp_webhook?: string
   whatsapp_verify_token?: string
+  // AI-issued discount coupons (opt-in)
+  coupons_enabled?: boolean
+  coupon_max_percent?: number
+  coupon_max_discount_value?: number
+  coupon_min_order?: number
+  coupon_ttl_hours?: number
 }
 
 // ── AI Brain / store knowledge ─────────────────────────────────────────────
@@ -1191,13 +1197,13 @@ export function openAdminStream(
     })
 
     es.onerror = () => {
-      // EventSource auto-retries on transient errors. We trigger our own
-      // reconnect only when the readyState shows the connection is
-      // permanently CLOSED — otherwise we'd double-reconnect.
-      if (es && es.readyState === 2 /* CLOSED */) {
-        handlers.onDisconnect?.()
-        scheduleReconnect()
-      }
+      // Close immediately to prevent EventSource's built-in auto-retry from
+      // reusing the same (potentially expired) ticket URL. Our scheduleReconnect
+      // always fetches a fresh ticket before opening a new EventSource.
+      try { es?.close() } catch {/**/}
+      es = null
+      handlers.onDisconnect?.()
+      scheduleReconnect()
     }
   }
 

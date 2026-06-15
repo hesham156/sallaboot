@@ -88,6 +88,14 @@ export default function Settings({ storeId }: Props) {
   const [aiSaving, setAiSaving]   = useState(false)
   const [aiMsg, setAiMsg]         = useState('')
 
+  /* coupons (AI-issued discounts) */
+  const [couponsEnabled, setCouponsEnabled] = useState(false)
+  const [couponMaxPct, setCouponMaxPct]     = useState(15)
+  const [couponMaxVal, setCouponMaxVal]     = useState(200)
+  const [couponMinOrder, setCouponMinOrder] = useState(0)
+  const [couponSaving, setCouponSaving]     = useState(false)
+  const [couponMsg, setCouponMsg]           = useState('')
+
   /* WhatsApp */
   const [waEnabled, setWaEnabled]   = useState(false)
   const [waPhoneId, setWaPhoneId]   = useState('')
@@ -141,6 +149,10 @@ export default function Settings({ storeId }: Props) {
       setBotName(ai.bot_name || '')
       setModel(ai.ai_model || '')
       setStoreType(ai.store_type === 'printing' ? 'printing' : 'general')
+      setCouponsEnabled(!!ai.coupons_enabled)
+      setCouponMaxPct(ai.coupon_max_percent ?? 15)
+      setCouponMaxVal(ai.coupon_max_discount_value ?? 200)
+      setCouponMinOrder(ai.coupon_min_order ?? 0)
       setWaEnabled(!!ai.whatsapp_enabled)
       setWaPhoneId(ai.whatsapp_phone_id || '')
       setWaWabaId((ai as AIConfig & { whatsapp_waba_id?: string }).whatsapp_waba_id || '')
@@ -185,6 +197,20 @@ export default function Settings({ storeId }: Props) {
       setApiKey(''); load()
     } catch (e: unknown) { setAiMsg(e instanceof Error ? e.message : 'خطأ') }
     finally { setAiSaving(false) }
+  }
+
+  async function saveCoupons() {
+    setCouponSaving(true); setCouponMsg('')
+    try {
+      await api.setAI(storeId, {
+        coupons_enabled:           couponsEnabled,
+        coupon_max_percent:        Math.max(1, Math.min(couponMaxPct || 15, 90)),
+        coupon_max_discount_value: Math.max(0, couponMaxVal || 0),
+        coupon_min_order:          Math.max(0, couponMinOrder || 0),
+      })
+      setCouponMsg('✅ تم حفظ إعدادات الكوبونات'); load()
+    } catch (e: unknown) { setCouponMsg(e instanceof Error ? e.message : 'خطأ') }
+    finally { setCouponSaving(false) }
   }
 
   async function saveWhatsApp() {
@@ -435,6 +461,40 @@ export default function Settings({ storeId }: Props) {
                 className="w-full font-bold h-10 bg-gradient-to-r from-blue-600 to-indigo-600">
                 {aiSaving ? '' : 'حفظ إعدادات AI'}
               </Button>
+
+              {/* ── AI discount coupons ── */}
+              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-3 mt-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-sm text-foreground">🎁 كوبونات الخصم الذكية</p>
+                    <p className="text-[11px] text-default-400 mt-0.5">
+                      يسمح للبوت بإصدار كوبون خصم شخصي لإقناع العميل بالشراء أو استرجاع سلة متروكة.
+                    </p>
+                  </div>
+                  <Switch isSelected={couponsEnabled} onValueChange={setCouponsEnabled} />
+                </div>
+
+                {couponsEnabled && (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      <TextField label="أقصى نسبة خصم ٪" type="number" value={String(couponMaxPct)}
+                        onChange={(v) => setCouponMaxPct(parseInt(v) || 0)} placeholder="15" />
+                      <TextField label="أقصى قيمة (ريال)" type="number" value={String(couponMaxVal)}
+                        onChange={(v) => setCouponMaxVal(parseFloat(v) || 0)} placeholder="200" />
+                      <TextField label="حد أدنى للطلب" type="number" value={String(couponMinOrder)}
+                        onChange={(v) => setCouponMinOrder(parseFloat(v) || 0)} placeholder="0" />
+                    </div>
+                    <p className="text-[11px] text-amber-500">
+                      ⚠️ يتطلب صلاحية <code>coupons.read_write</code> في تطبيق سلة. كل كوبون لاستخدام واحد وصالح ٢٤ ساعة.
+                    </p>
+                    <Msg text={couponMsg} />
+                    <Button size="sm" color="primary" variant="flat" isLoading={couponSaving}
+                      onPress={saveCoupons} className="font-bold">
+                      {couponSaving ? '' : 'حفظ إعدادات الكوبونات'}
+                    </Button>
+                  </>
+                )}
+              </section>
             </div>
           )
         )}

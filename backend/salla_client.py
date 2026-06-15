@@ -535,6 +535,67 @@ class SallaClient:
             payload["birthday"] = birthday
         return await self._request("POST", "/customers", json=payload)
 
+    # ── Coupons ─────────────────────────────────────────────────────────────────
+
+    async def create_coupon(
+        self,
+        code: str,
+        amount: float,
+        *,
+        coupon_type: str = "percentage",       # "percentage" | "fixed"
+        expiry_date: str = "",                  # "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS"
+        maximum_amount: Optional[float] = None,  # cap on the discount value
+        minimum_amount: Optional[float] = None,  # minimum order subtotal to qualify
+        usage_limit: int = 1,
+        usage_limit_per_user: int = 1,
+        free_shipping: bool = False,
+        exclude_sale_products: bool = True,
+        status: str = "active",
+    ) -> dict:
+        """
+        Create a SINGLE store coupon.
+        POST /admin/v2/coupons  (scope: coupons.read_write)
+
+        Verified against the Salla Platform Docs OAS
+        (#/components/schemas/post_coupon_request_body):
+          • Required for a single coupon: code, type, amount, free_shipping,
+            expiry_date, exclude_sale_products.
+          • `is_group` defaults to TRUE in Salla's schema — we MUST send
+            `false` explicitly or Salla creates a *group* coupon instead.
+          • `expiry_date` MUST be at least one day later than today.
+          • `maximum_amount` is required when type is percentage (it caps the
+            SAR value of the discount — our main guard against runaway
+            discounts from an AI-issued coupon).
+          • `type` accepts "percentage"/"fixed" (and single-letter aliases).
+        """
+        is_percentage = str(coupon_type).lower().startswith("p")
+        payload: dict = {
+            "code":                  code,
+            "type":                  "percentage" if is_percentage else "fixed",
+            "amount":                round(float(amount), 2),
+            "free_shipping":         bool(free_shipping),
+            "expiry_date":           expiry_date,
+            "exclude_sale_products": bool(exclude_sale_products),
+            "is_group":              False,   # ← critical: schema default is true
+            "status":                status,
+            "usage_limit":           int(usage_limit),
+            "usage_limit_per_user":  int(usage_limit_per_user),
+        }
+        # maximum_amount is required for percentage; harmless to omit for fixed.
+        if is_percentage and maximum_amount is not None:
+            payload["maximum_amount"] = round(float(maximum_amount), 2)
+        if minimum_amount:
+            payload["minimum_amount"] = round(float(minimum_amount), 2)
+        return await self._request("POST", "/coupons", json=payload)
+
+    async def get_coupon_statistics(self, coupon_id) -> dict:
+        """
+        GET /admin/v2/coupons/statistics/{coupon} — usage + revenue stats for a
+        coupon. Used by the dashboard to show the ROI of AI-issued coupons.
+        Scope required: coupons.read
+        """
+        return await self._request("GET", f"/coupons/statistics/{coupon_id}")
+
     # ── Abandoned Carts endpoints ──────────────────────────────────────────────
 
     async def get_abandoned_carts(

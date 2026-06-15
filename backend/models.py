@@ -89,6 +89,12 @@ class AIConfigRequest(BaseModel):
     whatsapp_phone_id: Optional[str] = None  # Phone Number ID
     whatsapp_waba_id:  Optional[str] = None  # WhatsApp Business Account ID
     whatsapp_enabled:  Optional[bool] = None
+    # AI-issued discount coupons (opt-in — the bot can create real Salla coupons)
+    coupons_enabled:           Optional[bool]  = None
+    coupon_max_percent:        Optional[int]   = None  # hard cap on discount %
+    coupon_max_discount_value: Optional[float] = None  # SAR cap per coupon
+    coupon_min_order:          Optional[float] = None  # min order subtotal to qualify
+    coupon_ttl_hours:          Optional[int]   = None  # validity window (>= 24h)
 
 
 class CustomKnowledgeRequest(BaseModel):

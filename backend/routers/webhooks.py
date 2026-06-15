@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import json as _json
 import os
+import secrets as _secrets
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -470,6 +471,50 @@ async def _wa_send(store_id: str, cfg: dict, phone: str, text: str) -> None:
         print(f"[webhook] WhatsApp send failed for {phone}: {exc}")
 
 
+async def _recovery_coupon_line(store_id: str, cfg: dict) -> str:
+    """
+    Issue a one-use, 24h recovery coupon for an abandoned cart (only when the
+    merchant opted into AI coupons) and return a WhatsApp-ready line. Best-effort:
+    returns "" on any failure so the reminder still goes out without a coupon.
+
+    Caps mirror agent._issue_coupon so the cart channel can't hand out a bigger
+    discount than the in-chat one. Requires the coupons.read_write scope.
+    """
+    if not cfg.get("coupons_enabled"):
+        return ""
+    token = sm.get_access_token(store_id)
+    if not token:
+        return ""
+    try:
+        pct       = max(1, min(int(cfg.get("coupon_max_percent", 15) or 15), 90))
+        cap       = float(cfg.get("coupon_max_discount_value", 200) or 200)
+        min_order = float(cfg.get("coupon_min_order", 0) or 0)
+    except (TypeError, ValueError):
+        pct, cap, min_order = 15, 200.0, 0.0
+
+    expiry_dt = (_dt.datetime.utcnow() + _dt.timedelta(days=1)).replace(
+        hour=23, minute=59, second=59, microsecond=0)
+    code = "CART" + _secrets.token_hex(3).upper()
+    try:
+        from salla_client import SallaClient
+        client = SallaClient(token, store_id=store_id)
+        await client.create_coupon(
+            code=code, amount=pct, coupon_type="percentage",
+            expiry_date=expiry_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            maximum_amount=cap, minimum_amount=(min_order or None),
+            usage_limit=1, usage_limit_per_user=1,
+        )
+    except Exception as exc:
+        print(f"[cart-coupon] failed store={store_id!r}: {exc}")
+        return ""
+
+    line = f"هدية خاصة لإتمام طلبك: استخدم كود *{code}* لخصم {pct}٪"
+    if min_order:
+        line += f" (للطلبات من {int(min_order)} ريال فأكثر)"
+    line += " — صالح ٢٤ ساعة فقط ⏳"
+    return line
+
+
 async def _handle_abandoned_cart(merchant_id: str, data: dict):
     """
     abandoned.cart — customer added items but didn't complete checkout.
@@ -531,6 +576,11 @@ async def _handle_abandoned_cart(merchant_id: str, data: dict):
             f"لاحظنا أنك تركت سلة التسوق في {store_name} بدون إتمام الطلب.\n\n"
             f"إجمالي سلتك: *{total_str}*\n"
         )
+        # Optional AI recovery coupon (opt-in per store) — created before the
+        # checkout link so the customer sees the incentive right next to it.
+        coupon_line = await _recovery_coupon_line(store_id, cfg)
+        if coupon_line:
+            msg += f"\n🎁 {coupon_line}\n"
         if checkout:
             msg += f"\nأكمل طلبك الآن: {checkout}"
         msg += "\n\nنحن هنا لمساعدتك إذا كان لديك أي استفسار 😊"

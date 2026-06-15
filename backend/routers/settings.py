@@ -72,6 +72,11 @@ async def get_ai_settings(store_id: str):
         "whatsapp_waba_id":    cfg.get("whatsapp_waba_id", ""),
         "whatsapp_webhook":    (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
         "whatsapp_verify_token": _wa.VERIFY_TOKEN,
+        "coupons_enabled":           bool(cfg.get("coupons_enabled")),
+        "coupon_max_percent":        int(cfg.get("coupon_max_percent", 15) or 15),
+        "coupon_max_discount_value": float(cfg.get("coupon_max_discount_value", 200) or 200),
+        "coupon_min_order":          float(cfg.get("coupon_min_order", 0) or 0),
+        "coupon_ttl_hours":          int(cfg.get("coupon_ttl_hours", 24) or 24),
     }
 
 
@@ -107,6 +112,18 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
         config["whatsapp_token"] = req.whatsapp_token.strip()
     if req.whatsapp_waba_id is not None:
         config["whatsapp_waba_id"] = req.whatsapp_waba_id.strip()
+
+    # ── AI coupon settings (clamped server-side; agent re-clamps too) ─────────
+    if req.coupons_enabled is not None:
+        config["coupons_enabled"] = bool(req.coupons_enabled)
+    if req.coupon_max_percent is not None:
+        config["coupon_max_percent"] = max(1, min(int(req.coupon_max_percent), 90))
+    if req.coupon_max_discount_value is not None:
+        config["coupon_max_discount_value"] = max(0.0, float(req.coupon_max_discount_value))
+    if req.coupon_min_order is not None:
+        config["coupon_min_order"] = max(0.0, float(req.coupon_min_order))
+    if req.coupon_ttl_hours is not None:
+        config["coupon_ttl_hours"] = max(24, min(int(req.coupon_ttl_hours), 720))
 
     if groq_key:
         config["anthropic_api_key"] = ""

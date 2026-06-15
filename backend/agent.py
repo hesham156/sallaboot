@@ -699,6 +699,31 @@ TOOLS = [
             "required": ["product_type", "quantity"],
         },
     },
+    # ── Sales: AI-issued discount coupon (opt-in per store) ───────────────────
+    {
+        "name": "generate_discount_coupon",
+        "description": (
+            "أصدر كوبون خصم شخصي محدود بوقت لإقناع العميل بإتمام الشراء. "
+            "استخدمها بحكمة وفقط عند: تردد واضح على السعر، أو نية مغادرة، أو "
+            "طلب صريح لخصم — ومرة واحدة فقط لكل عميل في نفس المحادثة. "
+            "النظام يطبّق تلقائياً حداً أقصى للنسبة وقيمة الخصم، فلا تَعِد بنسبة "
+            "محددة قبل استدعاء الأداة؛ اذكر الكود والشروط كما تُعيدها الأداة فقط."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "discount_percent": {
+                    "type": "number",
+                    "description": "نسبة الخصم المقترحة (٪). تُقيَّد تلقائياً بالحد الأقصى المسموح للمتجر.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "سبب مختصر لإصدار الكوبون (للسجل): مثل 'تردد على السعر' أو 'استرجاع سلة'.",
+                },
+            },
+            "required": ["discount_percent"],
+        },
+    },
     # ── Advanced printing calculator (uses store-specific pricing config) ─────
     {
         "name": "get_printing_options",
@@ -778,11 +803,40 @@ PRINTING_TOOL_NAMES = {
 }
 
 
-def active_tools(printing: bool) -> list:
-    """Return the tool list for a store: all tools, or core-only when not printing."""
-    if printing:
+# Tools gated behind an explicit opt-in (they take real money-affecting actions
+# on the merchant's store, so they're OFF unless the merchant enables them).
+COUPON_TOOL_NAMES = {"generate_discount_coupon"}
+
+
+def active_tools(printing: bool, coupons: bool = False) -> list:
+    """
+    Return the tool list for a store. Printing-only tools are dropped for
+    non-printing stores; the coupon tool is dropped unless the merchant has
+    opted into AI-issued discounts.
+    """
+    drop: set = set()
+    if not printing:
+        drop |= PRINTING_TOOL_NAMES
+    if not coupons:
+        drop |= COUPON_TOOL_NAMES
+    if not drop:
         return TOOLS
-    return [t for t in TOOLS if t["name"] not in PRINTING_TOOL_NAMES]
+    return [t for t in TOOLS if t["name"] not in drop]
+
+
+def _clamp_int(value, default: int, *, lo: int, hi: int) -> int:
+    """Coerce a config value to an int within [lo, hi], falling back to default."""
+    try:
+        return max(lo, min(int(value), hi))
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp_float(value, default: float, *, lo: float, hi: float) -> float:
+    try:
+        return max(lo, min(float(value), hi))
+    except (TypeError, ValueError):
+        return default
 
 
 def _is_printing_store(ai_cfg: dict) -> bool:
@@ -911,7 +965,18 @@ class PrintingAgent:
         # back to a heuristic so existing stores that already configured pricing
         # keep working (they're clearly printing shops).
         self.printing_enabled = _is_printing_store(ai_cfg)
-        self._tools = active_tools(self.printing_enabled)
+
+        # ── AI-issued coupons (opt-in, money-affecting → conservative guards) ──
+        # All knobs are hard-capped here so a misconfigured store (or a clever
+        # customer) can never produce a runaway discount. The tool is only
+        # exposed to the model when `coupons_enabled` is true.
+        self.coupons_enabled = bool(ai_cfg.get("coupons_enabled"))
+        self.coupon_max_percent        = _clamp_int(ai_cfg.get("coupon_max_percent"), 15, lo=1,  hi=90)
+        self.coupon_ttl_hours          = _clamp_int(ai_cfg.get("coupon_ttl_hours"),  24, lo=24, hi=720)
+        self.coupon_max_discount_value = _clamp_float(ai_cfg.get("coupon_max_discount_value"), 200.0, lo=0.0,   hi=100000.0)
+        self.coupon_min_order          = _clamp_float(ai_cfg.get("coupon_min_order"),            0.0, lo=0.0,   hi=100000.0)
+
+        self._tools = active_tools(self.printing_enabled, self.coupons_enabled)
 
         # Per-store model override — sensible defaults per provider
         cfg_model = ai_cfg.get("ai_model", "").strip()
@@ -1040,6 +1105,81 @@ class PrintingAgent:
             print(f"[_ensure_salla_customer] failed (will fall back to raw fields): {e}")
 
         return customer
+
+    # ── AI-issued discount coupon ───────────────────────────────────────────────
+    async def _issue_coupon(self, inputs: dict, session_id: str) -> str:
+        """
+        Create a single, one-use, time-boxed percentage coupon on the merchant's
+        Salla store and return its code + terms for the model to present.
+
+        Guards (all enforced server-side, never trusted to the model):
+          • Only runs when the merchant opted in (`coupons_enabled`).
+          • Percentage clamped to `coupon_max_percent`.
+          • SAR value capped via `maximum_amount` (`coupon_max_discount_value`).
+          • One coupon per chat session — a repeat call returns the same code.
+          • usage_limit = 1 so a leaked code can't be reused.
+        """
+        if not self.coupons_enabled:
+            return "ميزة كوبونات الخصم غير مفعّلة لهذا المتجر."
+        if not self.salla:
+            return "تعذّر إصدار كوبون الآن — المتجر غير مربوط بسلة."
+
+        # One coupon per session: reuse the previously-issued code if any.
+        conv = cs.all_conversations().get(session_id) or {}
+        prev = conv.get("issued_coupon")
+        if prev:
+            return (
+                f"سبق إصدار كوبون لك في هذه المحادثة: *{prev['code']}* "
+                f"(خصم {prev['percent']}٪، صالح حتى {prev['expiry']}). استخدمه عند الدفع."
+            )
+
+        pct = _clamp_int(inputs.get("discount_percent"), self.coupon_max_percent,
+                         lo=1, hi=self.coupon_max_percent)
+
+        import datetime as _d
+        import secrets as _s
+        ttl_days  = max(1, round(self.coupon_ttl_hours / 24))
+        expiry_dt = (_d.datetime.utcnow() + _d.timedelta(days=ttl_days)).replace(
+            hour=23, minute=59, second=59, microsecond=0)
+        # Salla requires expiry_date to be at least one day later than today.
+        code = "AI" + _s.token_hex(3).upper()   # e.g. AI4F9C2A
+
+        try:
+            await self.salla.create_coupon(
+                code=code,
+                amount=pct,
+                coupon_type="percentage",
+                expiry_date=expiry_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                maximum_amount=self.coupon_max_discount_value,
+                minimum_amount=(self.coupon_min_order or None),
+                usage_limit=1,
+                usage_limit_per_user=1,
+            )
+        except Exception as exc:
+            # 403 = merchant didn't grant coupons.read_write; others = transient.
+            print(f"[coupon] create failed store={self.store_id!r} reason={inputs.get('reason','')!r}: {exc}")
+            return "تعذّر إصدار الكوبون حالياً. يمكنك المتابعة وسيساعدك فريقنا إن احتجت."
+
+        expiry_date = expiry_dt.strftime("%Y-%m-%d")
+        issued = {"code": code, "percent": pct, "expiry": expiry_date}
+        if session_id in cs.all_conversations():
+            cs.all_conversations()[session_id]["issued_coupon"] = issued
+            cs.mark_dirty(session_id)
+            try:
+                await cs.flush(session_id)
+            except Exception:
+                pass
+        print(f"[coupon] issued {code} ({pct}%) store={self.store_id!r} session={session_id!r}")
+
+        terms = f"كود الخصم: *{code}* — خصم {pct}٪"
+        if self.coupon_min_order:
+            terms += f" على الطلبات من {int(self.coupon_min_order)} ريال فأكثر"
+        terms += (
+            f"، بحد أقصى {int(self.coupon_max_discount_value)} ريال، "
+            f"صالح حتى {expiry_date}، لاستخدام واحد فقط. "
+            "أبلغ العميل بالكود وشجّعه على إتمام الطلب."
+        )
+        return terms
 
     # ── Tool runner ────────────────────────────────────────────────────────────
     async def _run_tool(self, name: str, inputs: dict, session_id: str = "") -> str:
@@ -2223,6 +2363,10 @@ class PrintingAgent:
                         + (f"\n  رابط إكمال الطلب: {checkout}" if checkout else "")
                     )
                 return "\n".join(lines)
+
+            # ── generate_discount_coupon ────────────────────────────────────
+            elif name == "generate_discount_coupon":
+                return await self._issue_coupon(inputs, session_id)
 
             # ── get_printing_options ─────────────────────────────────────────
             elif name == "get_printing_options":
