@@ -497,6 +497,20 @@ export const api = {
     put<BlogPost>(`/admin/blog/posts/${id}`, data),
   blogDelete: (id: number) =>
     req<{ status: string; deleted_id: number }>('DELETE', `/admin/blog/posts/${id}`),
+
+  // ── WhatsApp Campaigns ──────────────────────────────────────────────────
+  listCampaigns: (storeId: string) =>
+    get<{ campaigns: Campaign[]; count: number }>(`/admin/${storeId}/campaigns`),
+  getCampaign: (storeId: string, id: number) =>
+    get<Campaign & { stats: { sent: number; failed: number; pending: number } }>(`/admin/${storeId}/campaigns/${id}`),
+  createCampaign: (storeId: string, data: Partial<Campaign>) =>
+    post<{ id: number; status: string; message: string }>(`/admin/${storeId}/campaigns`, data),
+  launchCampaign: (storeId: string, id: number, scheduled_at?: string) =>
+    post<{ message: string; status: string }>(`/admin/${storeId}/campaigns/${id}/launch`, { scheduled_at: scheduled_at || '' }),
+  previewCampaign: (storeId: string, id: number) =>
+    get<{ count: number; sample: { phone: string; name: string }[] }>(`/admin/${storeId}/campaigns/${id}/preview`),
+  deleteCampaign: (storeId: string, id: number) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/campaigns/${id}`),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -1014,6 +1028,26 @@ export interface MetaTemplate {
   category: string
   body: string
   components: unknown[]
+}
+
+// ── WhatsApp Campaigns ─────────────────────────────────────────────────
+
+export interface Campaign {
+  id: number
+  name: string
+  template_name: string
+  template_lang: string
+  header_params: string[]
+  body_params: string[]
+  audience_type: 'chat_users' | 'salla_customers' | 'abandoned_carts' | 'manual'
+  phone_list?: string[]
+  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed'
+  scheduled_at?: string
+  sent_at?: string
+  total_count: number
+  sent_count: number
+  failed_count: number
+  created_at: string
 }
 
 // ── Support-access grants ──────────────────────────────────────────────

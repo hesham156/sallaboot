@@ -196,6 +196,18 @@ async def periodic_cleanup_loop() -> None:
         await asyncio.sleep(6 * 3600)
 
 
+async def campaign_scheduler_loop() -> None:
+    """Every 60s: fire any scheduled campaigns whose time has come."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            from campaign_sender import maybe_fire_scheduled
+            await maybe_fire_scheduled()
+        except Exception as exc:
+            print(f"[campaign_scheduler] ❌ {exc}")
+        await asyncio.sleep(60)
+
+
 async def followup_loop() -> None:
     """
     Every 30 min: send due WhatsApp follow-ups to classified customers.
@@ -364,6 +376,7 @@ async def startup() -> None:
         asyncio.create_task(periodic_flush_loop())
         asyncio.create_task(periodic_cleanup_loop())
         asyncio.create_task(followup_loop())
+        asyncio.create_task(campaign_scheduler_loop())
         print("[startup] 🔄💾🧹 Periodic loops registered (leader-elected)")
     else:
         print("[startup] ⏸ Periodic loops disabled (ENABLE_PERIODIC=false)")

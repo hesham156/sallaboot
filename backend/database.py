@@ -427,6 +427,45 @@ async def _create_tables():
             CREATE INDEX IF NOT EXISTS idx_widget_outbox_delivered
                 ON widget_outbox (delivered_at)
                 WHERE delivered_at IS NOT NULL;
+
+            -- ── WhatsApp broadcast campaigns ────────────────────────────────
+            CREATE TABLE IF NOT EXISTS wa_campaigns (
+                id            BIGSERIAL PRIMARY KEY,
+                store_id      TEXT NOT NULL,
+                name          TEXT NOT NULL,
+                template_name TEXT NOT NULL,
+                template_lang TEXT NOT NULL DEFAULT 'ar',
+                header_params JSONB NOT NULL DEFAULT '[]',
+                body_params   JSONB NOT NULL DEFAULT '[]',
+                audience_type TEXT NOT NULL DEFAULT 'chat_users',
+                phone_list    JSONB NOT NULL DEFAULT '[]',
+                status        TEXT NOT NULL DEFAULT 'draft',
+                scheduled_at  TIMESTAMPTZ,
+                sent_at       TIMESTAMPTZ,
+                total_count   INT NOT NULL DEFAULT 0,
+                sent_count    INT NOT NULL DEFAULT 0,
+                failed_count  INT NOT NULL DEFAULT 0,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_campaigns_store_ts
+                ON wa_campaigns (store_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_campaigns_status
+                ON wa_campaigns (status, scheduled_at)
+                WHERE status = 'scheduled';
+
+            CREATE TABLE IF NOT EXISTS wa_campaign_recipients (
+                id          BIGSERIAL PRIMARY KEY,
+                campaign_id BIGINT NOT NULL REFERENCES wa_campaigns(id) ON DELETE CASCADE,
+                phone       TEXT NOT NULL,
+                name        TEXT NOT NULL DEFAULT '',
+                status      TEXT NOT NULL DEFAULT 'pending',
+                error       TEXT NOT NULL DEFAULT '',
+                sent_at     TIMESTAMPTZ,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_camp_recip_campaign
+                ON wa_campaign_recipients (campaign_id, status);
         """)
 
 
@@ -3316,3 +3355,199 @@ async def blog_delete(post_id: int) -> bool:
     except Exception as e:
         print(f"[db] blog_delete({post_id}) error: {e}")
         return False
+
+
+# ── WhatsApp Campaigns ─────────────────────────────────────────────────────────
+
+async def campaign_create(store_id: str, data: dict) -> dict | None:
+    if not _pool:
+        return None
+    import json as _j
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO wa_campaigns
+                    (store_id, name, template_name, template_lang,
+                     header_params, body_params, audience_type, phone_list,
+                     status, scheduled_at)
+                VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8::jsonb,$9,$10)
+                RETURNING *
+                """,
+                store_id,
+                data["name"],
+                data["template_name"],
+                data.get("template_lang", "ar"),
+                _j.dumps(data.get("header_params", [])),
+                _j.dumps(data.get("body_params", [])),
+                data.get("audience_type", "chat_users"),
+                _j.dumps(data.get("phone_list", [])),
+                data.get("status", "draft"),
+                data.get("scheduled_at"),
+            )
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[db] campaign_create error: {e}")
+        return None
+
+
+async def campaign_list(store_id: str) -> list[dict]:
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, name, template_name, template_lang,
+                       audience_type, status, scheduled_at, sent_at,
+                       total_count, sent_count, failed_count, created_at
+                FROM wa_campaigns
+                WHERE store_id = $1
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                store_id,
+            )
+        return [
+            {
+                "id":            r["id"],
+                "name":          r["name"],
+                "template_name": r["template_name"],
+                "template_lang": r["template_lang"],
+                "audience_type": r["audience_type"],
+                "status":        r["status"],
+                "scheduled_at":  _iso_z(r["scheduled_at"]),
+                "sent_at":       _iso_z(r["sent_at"]),
+                "total_count":   r["total_count"],
+                "sent_count":    r["sent_count"],
+                "failed_count":  r["failed_count"],
+                "created_at":    _iso_z(r["created_at"]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[db] campaign_list error: {e}")
+        return []
+
+
+async def campaign_get(campaign_id: int) -> dict | None:
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM wa_campaigns WHERE id = $1", campaign_id
+            )
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[db] campaign_get error: {e}")
+        return None
+
+
+async def campaign_update_status(
+    campaign_id: int,
+    status: str,
+    *,
+    total: int | None = None,
+    sent: int | None = None,
+    failed: int | None = None,
+    sent_at=None,
+) -> None:
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE wa_campaigns
+                SET status       = $2,
+                    total_count  = COALESCE($3, total_count),
+                    sent_count   = COALESCE($4, sent_count),
+                    failed_count = COALESCE($5, failed_count),
+                    sent_at      = COALESCE($6, sent_at),
+                    updated_at   = NOW()
+                WHERE id = $1
+                """,
+                campaign_id, status, total, sent, failed, sent_at,
+            )
+    except Exception as e:
+        print(f"[db] campaign_update_status error: {e}")
+
+
+async def campaign_delete(store_id: str, campaign_id: int) -> bool:
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                "DELETE FROM wa_campaigns WHERE id=$1 AND store_id=$2",
+                campaign_id, store_id,
+            )
+        return r.endswith("1")
+    except Exception as e:
+        print(f"[db] campaign_delete error: {e}")
+        return False
+
+
+async def campaign_add_recipients(campaign_id: int, recipients: list[dict]) -> int:
+    """Bulk-insert recipients. Returns inserted count."""
+    if not _pool or not recipients:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            await conn.executemany(
+                """
+                INSERT INTO wa_campaign_recipients (campaign_id, phone, name)
+                VALUES ($1, $2, $3)
+                ON CONFLICT DO NOTHING
+                """,
+                [(campaign_id, r["phone"], r.get("name", "")) for r in recipients],
+            )
+        return len(recipients)
+    except Exception as e:
+        print(f"[db] campaign_add_recipients error: {e}")
+        return 0
+
+
+async def campaign_mark_recipient(
+    campaign_id: int, phone: str, *, ok: bool, error: str = ""
+) -> None:
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE wa_campaign_recipients
+                SET status = $3, error = $4, sent_at = CASE WHEN $3='sent' THEN NOW() ELSE NULL END
+                WHERE campaign_id = $1 AND phone = $2
+                """,
+                campaign_id, phone,
+                "sent" if ok else "failed",
+                error,
+            )
+    except Exception as e:
+        print(f"[db] campaign_mark_recipient error: {e}")
+
+
+async def campaign_recipient_stats(campaign_id: int) -> dict:
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)                                       AS total,
+                    COUNT(*) FILTER (WHERE status='sent')         AS sent,
+                    COUNT(*) FILTER (WHERE status='failed')       AS failed,
+                    COUNT(*) FILTER (WHERE status='pending')      AS pending
+                FROM wa_campaign_recipients
+                WHERE campaign_id = $1
+                """,
+                campaign_id,
+            )
+        return dict(row) if row else {}
+    except Exception as e:
+        print(f"[db] campaign_recipient_stats error: {e}")
+        return {}

@@ -22,6 +22,7 @@ const SupportAccess    = lazy(() => import('./store/SupportAccess'))
 const WhatsAppEvents     = lazy(() => import('./store/WhatsAppEvents'))
 const WhatsAppTemplates  = lazy(() => import('./store/WhatsAppTemplates'))
 const CustomerSegments   = lazy(() => import('./store/CustomerSegments'))
+const Campaigns          = lazy(() => import('./store/Campaigns'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -159,6 +160,15 @@ const NAV_ITEMS: Array<{
     activeColor: 'text-orange-500',
     activeBg: 'bg-orange-500/10',
     activeBorder: 'border-r-orange-500',
+    roles: ['owner', 'manager'],
+  },
+  {
+    key: 'campaigns',
+    label: 'حملات WhatsApp',
+    icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
+    activeColor: 'text-lime-500',
+    activeBg: 'bg-lime-500/10',
+    activeBorder: 'border-r-lime-500',
     roles: ['owner', 'manager'],
   },
   {
@@ -560,6 +570,7 @@ export default function StoreDashboard() {
               <Route path="training"        element={<Training        storeId={storeId} />} />
               <Route path="llm-usage"       element={<LlmUsage        storeId={storeId} />} />
               <Route path="customer-segments"  element={<CustomerSegments  storeId={storeId} />} />
+              <Route path="campaigns"          element={<Campaigns         storeId={storeId} />} />
               <Route path="whatsapp-templates" element={<WhatsAppTemplates storeId={storeId} />} />
               <Route path="whatsapp-events" element={<WhatsAppEvents    storeId={storeId} />} />
             </>}
