@@ -108,8 +108,14 @@ export default function Settings({ storeId }: Props) {
   const [waOptions, setWaOptions]   = useState<{id:string;name?:string;number?:string}[]>([])
   const [waPendingToken, setWaPendingToken] = useState('')
   const [waPendingWaba, setWaPendingWaba]   = useState('')
-  const [fbLoaded, setFbLoaded]     = useState(false)
-  const [waManual, setWaManual]     = useState(false)
+  // FB SDK status — `loading` (initial probe in flight), `ready` (SDK
+  // loaded + FB.init ran), or `unavailable` (META_APP_ID env var missing
+  // on backend, or the SDK script failed to load). Three states instead
+  // of a single boolean so the UI can tell the user *why* the Connect
+  // button is disabled instead of spinning "جاري تحميل…" forever.
+  const [fbStatus, setFbStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+  const fbLoaded = fbStatus === 'ready'
+  const [waManual, setWaManual] = useState(false)
 
   /* Messenger + Instagram (Facebook Page) — connection status read from `cfg` */
   const [metaConnecting, setMetaConnecting] = useState(false)
@@ -168,21 +174,32 @@ export default function Settings({ storeId }: Props) {
     finally { setAiLoading(false) }
   }
 
-  /* ── Load Facebook JS SDK once ── */
+  /* ── Load Facebook JS SDK once ──
+     If META_APP_ID isn't set on the backend, /admin/{store}/whatsapp/meta-app-id
+     throws and we mark `unavailable` so the UI can fall back to the manual
+     entry path (or hide the Messenger/Instagram section entirely). Likewise
+     if the SDK script fails to load — onerror flips us to `unavailable` so
+     the Connect button never sits in a permanent loading state. */
   useEffect(() => {
     if (fbRef.current) return
     fbRef.current = true
     api.waGetMetaAppId(storeId).then(({ app_id, graph_version }) => {
-      if (document.getElementById('fb-sdk')) { setFbLoaded(true); return }
+      if (!app_id) { setFbStatus('unavailable'); return }
+      if (document.getElementById('fb-sdk')) { setFbStatus('ready'); return }
       window.fbAsyncInit = () => {
-        window.FB.init({ appId: app_id, version: graph_version, cookie: true, xfbml: false })
-        setFbLoaded(true)
+        try {
+          window.FB.init({ appId: app_id, version: graph_version, cookie: true, xfbml: false })
+          setFbStatus('ready')
+        } catch {
+          setFbStatus('unavailable')
+        }
       }
       const s = document.createElement('script')
       s.id  = 'fb-sdk'
       s.src = 'https://connect.facebook.net/en_US/sdk.js'
+      s.onerror = () => setFbStatus('unavailable')
       document.body.appendChild(s)
-    }).catch(() => { /* META_APP_ID not set — will fall back to manual */ })
+    }).catch(() => { setFbStatus('unavailable') })
   }, [storeId])
 
   /* ── actions ── */
@@ -670,9 +687,12 @@ export default function Settings({ storeId }: Props) {
                     )}
                   </Button>
 
-                  {!fbLoaded && (
-                    <p className="text-[11px] text-default-400">
-                      {fbLoaded === false ? 'جاري تحميل Facebook SDK…' : 'META_APP_ID غير مضبوط — استخدم الإدخال اليدوي'}
+                  {fbStatus === 'loading' && (
+                    <p className="text-[11px] text-default-400">جاري تحميل Facebook SDK…</p>
+                  )}
+                  {fbStatus === 'unavailable' && !waManual && (
+                    <p className="text-[11px] text-amber-600">
+                      الربط التلقائي غير متاح حالياً — استخدم الإدخال اليدوي بالأسفل.
                     </p>
                   )}
                 </div>
@@ -748,6 +768,21 @@ export default function Settings({ storeId }: Props) {
                       {p.ig_username && <p className="text-[11px] text-default-400 mt-0.5">إنستقرام: @{p.ig_username}</p>}
                     </button>
                   ))}
+                </div>
+              ) : fbStatus === 'unavailable' ? (
+                /* Backend hasn't configured META_APP_ID, so the Facebook
+                   Login popup can't be opened. Be explicit about the
+                   reason — endless "loading" silently is worse than a
+                   clear unavailable state with a path to resolution. */
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 leading-relaxed">
+                  <p className="font-bold mb-1">ربط ماسنجر/إنستقرام غير متاح حالياً</p>
+                  <p>
+                    يحتاج إعداد <code className="px-1 py-0.5 bg-amber-100 rounded">META_APP_ID</code> + <code className="px-1 py-0.5 bg-amber-100 rounded">META_APP_SECRET</code> على
+                    الخادم، وتسجيل تطبيق Facebook في{' '}
+                    <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener noreferrer"
+                       className="font-bold underline">Meta Developers</a>.
+                    تواصل مع المدير العام لتفعيل التكامل.
+                  </p>
                 </div>
               ) : (
                 <Button color="primary" isLoading={metaConnecting} isDisabled={!fbLoaded}

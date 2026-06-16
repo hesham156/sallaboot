@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "gsap-animated-frontend": {
+      "source": "yousefabdallah171/gsap-animated-frontend",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "7be9b7882bd5dbe9218670fd2791e99d4925099390db9abf6739e0febb58f27e"
+    }
+  }
+}
