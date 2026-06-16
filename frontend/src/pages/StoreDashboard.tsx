@@ -48,6 +48,15 @@ function Icon({ paths, size = 16, className = '' }: {
 // `roles` lists who can see/access the item. Omit → everyone.
 type Role = 'owner' | 'manager' | 'agent'
 
+type NavChild = {
+  key: string
+  label: string
+  icon: string[]
+  activeColor: string
+  activeBg: string
+  activeBorder: string
+}
+
 const NAV_ITEMS: Array<{
   key: string
   label: string
@@ -57,6 +66,7 @@ const NAV_ITEMS: Array<{
   activeBorder: string
   printingOnly?: boolean
   roles?: Role[]
+  children?: NavChild[]
 }> = [
   {
     key: '',
@@ -173,31 +183,39 @@ const NAV_ITEMS: Array<{
     roles: ['owner', 'manager'],
   },
   {
-    key: 'campaigns',
-    label: 'حملات WhatsApp',
-    icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
-    activeColor: 'text-lime-500',
-    activeBg: 'bg-lime-500/10',
-    activeBorder: 'border-r-lime-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'whatsapp-templates',
-    label: 'قوالب WhatsApp',
-    icon: ['M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'],
-    activeColor: 'text-teal-500',
-    activeBg: 'bg-teal-500/10',
-    activeBorder: 'border-r-teal-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'whatsapp-events',
-    label: 'أحداث WhatsApp',
+    key: 'whatsapp-group',
+    label: 'واتساب',
     icon: ['M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z', 'M11.5 2C6.253 2 2 6.253 2 11.5c0 1.82.487 3.53 1.338 5.003L2 22l5.588-1.326A9.45 9.45 0 0 0 11.5 21c5.247 0 9.5-4.253 9.5-9.5S16.747 2 11.5 2z'],
     activeColor: 'text-green-500',
     activeBg: 'bg-green-500/10',
     activeBorder: 'border-r-green-500',
     roles: ['owner', 'manager'],
+    children: [
+      {
+        key: 'campaigns',
+        label: 'الحملات',
+        icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
+        activeColor: 'text-lime-500',
+        activeBg: 'bg-lime-500/10',
+        activeBorder: 'border-r-lime-500',
+      },
+      {
+        key: 'whatsapp-templates',
+        label: 'القوالب',
+        icon: ['M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'],
+        activeColor: 'text-teal-500',
+        activeBg: 'bg-teal-500/10',
+        activeBorder: 'border-r-teal-500',
+      },
+      {
+        key: 'whatsapp-events',
+        label: 'الأحداث',
+        icon: ['M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z', 'M11.5 2C6.253 2 2 6.253 2 11.5c0 1.82.487 3.53 1.338 5.003L2 22l5.588-1.326A9.45 9.45 0 0 0 11.5 21c5.247 0 9.5-4.253 9.5-9.5S16.747 2 11.5 2z'],
+        activeColor: 'text-green-500',
+        activeBg: 'bg-green-500/10',
+        activeBorder: 'border-r-green-500',
+      },
+    ],
   },
   {
     key: 'support-access',
@@ -252,6 +270,7 @@ export default function StoreDashboard() {
   const [loadingBot, setLoadingBot]   = useState(false)
   const [storeType, setStoreType]     = useState<'printing' | 'general'>('printing')
   const [sidebarOpen, setSidebarOpen] = useState(false)   // mobile drawer
+  const [openGroups, setOpenGroups]   = useState<Set<string>>(new Set())
   // Initial-load error status so we can render a real error page instead
   // of an infinite spinner. Holds the HTTP status (403, 500, …) or null.
   const [loadErrorStatus, setLoadErrorStatus] = useState<number | null>(null)
@@ -266,7 +285,7 @@ export default function StoreDashboard() {
   // conversation (/conversations/:sessionId).
   const relativePath = location.pathname.replace(basePath, '').replace(/^\//, '')
   const topSegment   = relativePath.split('/')[0]
-  const activeKey    = NAV_ITEMS.find(n => n.key === topSegment)?.key ?? ''
+  const activeKey    = topSegment
   const employee     = getEmployee()
   const role         = getCurrentRole()
   const canSee = (item: { roles?: Role[] }) =>
@@ -447,29 +466,98 @@ export default function StoreDashboard() {
             .filter(item => !item.printingOnly || storeType === 'printing')
             .filter(canSee)
             .map(item => {
-            const isActive = activeKey === item.key
-            return (
-              <button
-                key={item.key}
-                onClick={() => goTab(item.key)}
-                className={`
-                  w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-right
-                  border-r-2 transition-all duration-150
-                  ${isActive
-                    ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}`
-                    : 'border-r-transparent text-default-500 hover:text-foreground hover:bg-content2'
-                  }
-                `}
-              >
-                <Icon
-                  paths={item.icon}
-                  size={16}
-                  className={`flex-shrink-0 ${isActive ? item.activeColor : 'text-default-400'}`}
-                />
-                <span>{item.label}</span>
-              </button>
-            )
-          })}
+              if (item.children) {
+                const isGroupActive = item.children.some(c => c.key === activeKey)
+                const isOpen        = openGroups.has(item.key) || isGroupActive
+                const toggle = () => setOpenGroups(prev => {
+                  const next = new Set(prev)
+                  if (next.has(item.key)) next.delete(item.key); else next.add(item.key)
+                  return next
+                })
+                return (
+                  <div key={item.key}>
+                    {/* Group header */}
+                    <button
+                      onClick={toggle}
+                      className={`
+                        w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-right
+                        border-r-2 transition-all duration-150
+                        ${isGroupActive
+                          ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}`
+                          : 'border-r-transparent text-default-500 hover:text-foreground hover:bg-content2'
+                        }
+                      `}
+                    >
+                      <Icon
+                        paths={item.icon}
+                        size={16}
+                        className={`flex-shrink-0 ${isGroupActive ? item.activeColor : 'text-default-400'}`}
+                      />
+                      <span className="flex-1 text-right">{item.label}</span>
+                      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+                        className={`flex-shrink-0 transition-transform duration-200 ${isOpen ? '-rotate-90' : 'rotate-90'}`}>
+                        <path d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+
+                    {/* Children */}
+                    {isOpen && (
+                      <div className="border-r-2 border-default-100 mr-5 mb-0.5">
+                        {item.children.map(child => {
+                          const isActive = child.key === activeKey
+                          return (
+                            <button
+                              key={child.key}
+                              onClick={() => goTab(child.key)}
+                              className={`
+                                w-full flex items-center gap-2.5 pr-4 pl-3 py-2 text-xs font-medium text-right
+                                transition-all duration-150 rounded-l-xl
+                                ${isActive
+                                  ? `${child.activeBg} ${child.activeColor} font-bold`
+                                  : 'text-default-400 hover:text-foreground hover:bg-content2'
+                                }
+                              `}
+                            >
+                              <Icon
+                                paths={child.icon}
+                                size={13}
+                                className={`flex-shrink-0 ${isActive ? child.activeColor : 'text-default-300'}`}
+                              />
+                              <span>{child.label}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              // Regular item
+              const isActive = activeKey === item.key
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => goTab(item.key)}
+                  className={`
+                    w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-right
+                    border-r-2 transition-all duration-150
+                    ${isActive
+                      ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}`
+                      : 'border-r-transparent text-default-500 hover:text-foreground hover:bg-content2'
+                    }
+                  `}
+                >
+                  <Icon
+                    paths={item.icon}
+                    size={16}
+                    className={`flex-shrink-0 ${isActive ? item.activeColor : 'text-default-400'}`}
+                  />
+                  <span>{item.label}</span>
+                </button>
+              )
+            })}
         </nav>
 
         {/* ── Footer ── */}
