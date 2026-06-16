@@ -949,17 +949,43 @@ PRINTING_TOOL_NAMES = {
 COUPON_TOOL_NAMES = {"generate_discount_coupon"}
 
 
-def active_tools(printing: bool, coupons: bool = False) -> list:
+# ── Per-store data-access permission groups ────────────────────────────────────
+# Each key maps to an ai_config flag (bool). Default = None = ON (backward-
+# compatible). The merchant can set a flag to False to remove those tools from
+# the bot, preventing it from accessing that category of Salla data.
+PERMISSION_GROUPS: dict[str, set[str]] = {
+    "access_orders":            {"track_order"},
+    "access_invoices":          {"get_order_invoice"},
+    "access_customers":         {"lookup_customer"},
+    "access_reviews":           {"get_product_reviews"},
+    "access_abandoned_carts":   {"get_abandoned_carts"},
+    "access_shipments":         {"track_shipment", "estimate_shipping"},
+    "access_delivery_promises": {"get_delivery_promises"},
+}
+
+
+def active_tools(
+    printing: bool,
+    coupons: bool = False,
+    permissions: dict | None = None,
+) -> list:
     """
-    Return the tool list for a store. Printing-only tools are dropped for
-    non-printing stores; the coupon tool is dropped unless the merchant has
-    opted into AI-issued discounts.
+    Return the tool list for a store.
+
+    - Printing-only tools are dropped for non-printing stores.
+    - The coupon tool is dropped unless the merchant opted in.
+    - Any PERMISSION_GROUPS key set to False in `permissions` drops those tools
+      (None or missing = keep, i.e. default-on for backward compat).
     """
     drop: set = set()
     if not printing:
         drop |= PRINTING_TOOL_NAMES
     if not coupons:
         drop |= COUPON_TOOL_NAMES
+    if permissions:
+        for flag, tools in PERMISSION_GROUPS.items():
+            if permissions.get(flag) is False:
+                drop |= tools
     if not drop:
         return TOOLS
     return [t for t in TOOLS if t["name"] not in drop]
@@ -1140,7 +1166,9 @@ class PrintingAgent:
         self.coupon_max_discount_value = _clamp_float(ai_cfg.get("coupon_max_discount_value"), 200.0, lo=0.0,   hi=100000.0)
         self.coupon_min_order          = _clamp_float(ai_cfg.get("coupon_min_order"),            0.0, lo=0.0,   hi=100000.0)
 
-        self._tools = active_tools(self.printing_enabled, self.coupons_enabled)
+        # Read per-store permission overrides (None = default ON)
+        self._permissions = {flag: ai_cfg.get(flag) for flag in PERMISSION_GROUPS}
+        self._tools = active_tools(self.printing_enabled, self.coupons_enabled, self._permissions)
 
         # Per-store model override — sensible defaults per provider
         cfg_model = ai_cfg.get("ai_model", "").strip()

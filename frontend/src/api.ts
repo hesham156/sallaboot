@@ -813,6 +813,14 @@ export interface AIConfig {
   coupon_max_discount_value?: number
   coupon_min_order?: number
   coupon_ttl_hours?: number
+  // Data-access permissions (null/undefined = ON by default)
+  access_orders?: boolean | null
+  access_invoices?: boolean | null
+  access_customers?: boolean | null
+  access_reviews?: boolean | null
+  access_abandoned_carts?: boolean | null
+  access_shipments?: boolean | null
+  access_delivery_promises?: boolean | null
   // Bot personality & response style
   bot_language?: 'ar' | 'en' | 'auto'
   bot_tone?: 'formal' | 'friendly' | 'very_friendly'

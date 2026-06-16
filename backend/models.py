@@ -100,6 +100,17 @@ class AIConfigRequest(BaseModel):
     coupon_max_discount_value: Optional[float] = None  # SAR cap per coupon
     coupon_min_order:          Optional[float] = None  # min order subtotal to qualify
     coupon_ttl_hours:          Optional[int]   = None  # validity window (>= 24h)
+    # ── Data-access permissions ────────────────────────────────────────────────
+    # Each flag gates a group of tools. None/missing = ON (backward-compatible).
+    # Setting to False removes those tools from the bot so it cannot access that
+    # category of Salla data even if the customer asks.
+    access_orders:            Optional[bool] = None  # track_order
+    access_invoices:          Optional[bool] = None  # get_order_invoice
+    access_customers:         Optional[bool] = None  # lookup_customer
+    access_reviews:           Optional[bool] = None  # get_product_reviews
+    access_abandoned_carts:   Optional[bool] = None  # get_abandoned_carts
+    access_shipments:         Optional[bool] = None  # track_shipment + estimate_shipping
+    access_delivery_promises: Optional[bool] = None  # get_delivery_promises
     # ── Bot personality & response style ──────────────────────────────────────
     # These fields control how the bot speaks — language, tone, verbosity, etc.
     # They are injected into the system prompt at runtime so changes take

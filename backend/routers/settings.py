@@ -85,6 +85,21 @@ async def get_ai_settings(store_id: str):
         "coupon_max_discount_value": float(cfg.get("coupon_max_discount_value", 200) or 200),
         "coupon_min_order":          float(cfg.get("coupon_min_order", 0) or 0),
         "coupon_ttl_hours":          int(cfg.get("coupon_ttl_hours", 24) or 24),
+        # Data-access permissions (None in DB = True/enabled by default)
+        "access_orders":            cfg.get("access_orders",            None),
+        "access_invoices":          cfg.get("access_invoices",          None),
+        "access_customers":         cfg.get("access_customers",         None),
+        "access_reviews":           cfg.get("access_reviews",           None),
+        "access_abandoned_carts":   cfg.get("access_abandoned_carts",   None),
+        "access_shipments":         cfg.get("access_shipments",         None),
+        "access_delivery_promises": cfg.get("access_delivery_promises", None),
+        # Bot personality & response style
+        "bot_tone":            cfg.get("bot_tone",            "friendly"),
+        "bot_language":        cfg.get("bot_language",        "ar"),
+        "response_length":     cfg.get("response_length",     "normal"),
+        "use_emoji":           cfg.get("use_emoji",           None),
+        "greeting_message":    cfg.get("greeting_message",    ""),
+        "custom_instructions": cfg.get("custom_instructions", ""),
     }
 
 
@@ -137,6 +152,29 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     if req.coupon_ttl_hours is not None:
         config["coupon_ttl_hours"] = max(24, min(int(req.coupon_ttl_hours), 720))
 
+    # ── Data-access permissions ───────────────────────────────────────────────
+    _PERM_FLAGS = (
+        "access_orders", "access_invoices", "access_customers",
+        "access_reviews", "access_abandoned_carts",
+        "access_shipments", "access_delivery_promises",
+    )
+    for flag in _PERM_FLAGS:
+        val = getattr(req, flag, None)
+        if val is not None:
+            config[flag] = bool(val)
+
+    # ── Bot personality & response style ─────────────────────────────────────
+    _PERSONALITY_STR_FIELDS = (
+        "bot_language", "bot_tone", "response_length",
+        "greeting_message", "custom_instructions",
+    )
+    for field in _PERSONALITY_STR_FIELDS:
+        val = getattr(req, field, None)
+        if val is not None:
+            config[field] = str(val).strip()
+    if getattr(req, "use_emoji", None) is not None:
+        config["use_emoji"] = bool(req.use_emoji)
+
     if groq_key:
         config["anthropic_api_key"] = ""
         config["openai_api_key"]    = ""
@@ -151,6 +189,9 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, config)
+    # Rebuild the agent so permission / personality changes take effect immediately
+    # without waiting for the next natural agent expiry or server restart.
+    sm.reset_agent(store_id)
 
     _changed: list[str] = []
     for field in ("groq_api_key", "anthropic_api_key", "openai_api_key", "whatsapp_token"):

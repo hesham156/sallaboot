@@ -106,6 +106,17 @@ export default function Settings({ storeId }: Props) {
   const [personalitySaving, setPersonalitySaving] = useState(false)
   const [personalityMsg, setPersonalityMsg]       = useState('')
 
+  /* Data-access permissions */
+  const [accessOrders,           setAccessOrders]           = useState(true)
+  const [accessInvoices,         setAccessInvoices]         = useState(true)
+  const [accessCustomers,        setAccessCustomers]        = useState(true)
+  const [accessReviews,          setAccessReviews]          = useState(true)
+  const [accessAbandonedCarts,   setAccessAbandonedCarts]   = useState(true)
+  const [accessShipments,        setAccessShipments]        = useState(true)
+  const [accessDeliveryPromises, setAccessDeliveryPromises] = useState(true)
+  const [permissionsSaving, setPermissionsSaving] = useState(false)
+  const [permissionsMsg,    setPermissionsMsg]    = useState('')
+
   /* WhatsApp */
   const [waEnabled, setWaEnabled]   = useState(false)
   const [waPhoneId, setWaPhoneId]   = useState('')
@@ -184,6 +195,13 @@ export default function Settings({ storeId }: Props) {
       setUseEmoji(ai.use_emoji !== false)
       setGreetingMessage(ai.greeting_message || '')
       setCustomInstructions(ai.custom_instructions || '')
+      setAccessOrders(ai.access_orders !== false)
+      setAccessInvoices(ai.access_invoices !== false)
+      setAccessCustomers(ai.access_customers !== false)
+      setAccessReviews(ai.access_reviews !== false)
+      setAccessAbandonedCarts(ai.access_abandoned_carts !== false)
+      setAccessShipments(ai.access_shipments !== false)
+      setAccessDeliveryPromises(ai.access_delivery_promises !== false)
       setTokenStatus(tok)
       setNotif(n)
     } catch { /* ignore */ }
@@ -250,6 +268,24 @@ export default function Settings({ storeId }: Props) {
       setCouponMsg('✅ تم حفظ إعدادات الكوبونات'); load()
     } catch (e: unknown) { setCouponMsg(e instanceof Error ? e.message : 'خطأ') }
     finally { setCouponSaving(false) }
+  }
+
+  async function savePermissions() {
+    setPermissionsSaving(true); setPermissionsMsg('')
+    try {
+      await api.setAI(storeId, {
+        access_orders:            accessOrders,
+        access_invoices:          accessInvoices,
+        access_customers:         accessCustomers,
+        access_reviews:           accessReviews,
+        access_abandoned_carts:   accessAbandonedCarts,
+        access_shipments:         accessShipments,
+        access_delivery_promises: accessDeliveryPromises,
+      })
+      setPermissionsMsg('✅ تم حفظ الصلاحيات وتطبيقها فوراً')
+      load()
+    } catch (e: unknown) { setPermissionsMsg(e instanceof Error ? e.message : 'خطأ') }
+    finally { setPermissionsSaving(false) }
   }
 
   async function savePersonality() {
@@ -737,6 +773,94 @@ export default function Settings({ storeId }: Props) {
                   onPress={savePersonality} className="font-bold w-full h-9">
                   {personalitySaving ? '' : 'حفظ إعدادات الشخصية'}
                 </Button>
+              </section>
+
+              {/* ── Data-access permissions ── */}
+              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-1 mt-2">
+                <div className="mb-3">
+                  <p className="font-bold text-sm text-foreground">🔐 صلاحيات وصول البوت للبيانات</p>
+                  <p className="text-[11px] text-default-400 mt-0.5">
+                    تحكم في أي بيانات يُسمح للبوت بالاطلاع عليها والرد بناءً عليها.
+                    الإيقاف يحذف الأداة كلياً من البوت — العميل لن يتمكن من الحصول على تلك المعلومات.
+                  </p>
+                </div>
+
+                {([
+                  {
+                    flag: 'access_orders', val: accessOrders, set: setAccessOrders,
+                    icon: '📦', label: 'الطلبات',
+                    desc: 'البوت يتتبع الطلبات ويعرض حالاتها للعميل',
+                    risk: 'عام',
+                  },
+                  {
+                    flag: 'access_invoices', val: accessInvoices, set: setAccessInvoices,
+                    icon: '🧾', label: 'الفواتير',
+                    desc: 'البوت يستطيع عرض الفاتورة وتفاصيل الدفع',
+                    risk: 'حساس',
+                  },
+                  {
+                    flag: 'access_customers', val: accessCustomers, set: setAccessCustomers,
+                    icon: '👤', label: 'بيانات العملاء',
+                    desc: 'البوت يبحث عن الاسم والإيميل والطلبات السابقة',
+                    risk: 'حساس',
+                  },
+                  {
+                    flag: 'access_reviews', val: accessReviews, set: setAccessReviews,
+                    icon: '⭐', label: 'التقييمات',
+                    desc: 'البوت يعرض تقييمات العملاء لمنتجاتك',
+                    risk: 'عام',
+                  },
+                  {
+                    flag: 'access_abandoned_carts', val: accessAbandonedCarts, set: setAccessAbandonedCarts,
+                    icon: '🛒', label: 'السلات المتروكة',
+                    desc: 'البوت يطلع على الطلبات غير المكتملة',
+                    risk: 'حساس',
+                  },
+                  {
+                    flag: 'access_shipments', val: accessShipments, set: setAccessShipments,
+                    icon: '🚚', label: 'تتبع الشحنات',
+                    desc: 'البوت يتتبع الشحنات ويحسب تكلفة التوصيل',
+                    risk: 'عام',
+                  },
+                  {
+                    flag: 'access_delivery_promises', val: accessDeliveryPromises, set: setAccessDeliveryPromises,
+                    icon: '📅', label: 'وعود التسليم',
+                    desc: 'البوت يعرض مواعيد التسليم المضمونة',
+                    risk: 'عام',
+                  },
+                ] as const).map(item => (
+                  <div key={item.flag}
+                    className="flex items-center justify-between gap-3 py-2.5 border-b border-divider last:border-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-lg flex-shrink-0">{item.icon}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-bold text-foreground">{item.label}</p>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                            item.risk === 'حساس'
+                              ? 'bg-amber-500/15 text-amber-400'
+                              : 'bg-default-500/10 text-default-400'
+                          }`}>{item.risk}</span>
+                        </div>
+                        <p className="text-[10px] text-default-400 mt-0.5 truncate">{item.desc}</p>
+                      </div>
+                    </div>
+                    <Switch
+                      isSelected={item.val}
+                      onValueChange={item.set}
+                      size="sm"
+                      color={item.val ? 'success' : 'default'}
+                    />
+                  </div>
+                ))}
+
+                <div className="pt-2">
+                  <Msg text={permissionsMsg} />
+                  <Button size="sm" color="primary" variant="flat" isLoading={permissionsSaving}
+                    onPress={savePermissions} className="font-bold w-full h-9 mt-2">
+                    {permissionsSaving ? '' : 'حفظ الصلاحيات'}
+                  </Button>
+                </div>
               </section>
             </div>
           )
