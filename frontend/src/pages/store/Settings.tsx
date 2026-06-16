@@ -882,7 +882,10 @@ export default function Settings({ storeId }: Props) {
 
         {/* ══ WhatsApp ══ */}
         {tab === 'whatsapp' && (
-          <div className="max-w-xl space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+
+            {/* ── واتساب ── */}
+            <div className="space-y-4">
 
             {/* ── Connected state ── */}
             {waPhoneId && !waManual ? (
@@ -1048,8 +1051,10 @@ export default function Settings({ storeId }: Props) {
               </div>
             )}
 
-            {/* ── Messenger + Instagram (Facebook Page) ── */}
-            <section className="space-y-3 border-t border-divider pt-5">
+            </div>
+
+            {/* ── ماسنجر + إنستقرام ── */}
+            <div className="rounded-xl border border-divider bg-content2 p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Icon d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" size={14} className="text-primary" />
                 <h3 className="text-sm font-bold text-foreground">ماسنجر + إنستقرام</h3>
@@ -1105,13 +1110,16 @@ export default function Settings({ storeId }: Props) {
                 </Button>
               )}
               <InlineAlert text={metaMsg} />
-            </section>
+            </div>
           </div>
         )}
 
         {/* ══ Notifications ══ */}
         {tab === 'notifications' && (
-          <div className="max-w-xl space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+
+            {/* ── Right: Email + Triggers ── */}
+            <div className="space-y-4">
 
             {/* Email toggle */}
             <div className="flex items-center justify-between bg-content2 rounded-xl px-4 py-3 border border-divider">
@@ -1150,6 +1158,11 @@ export default function Settings({ storeId }: Props) {
               </div>
             </section>
 
+            </div>
+
+            {/* ── Left: Webhook + Controls ── */}
+            <div className="space-y-4">
+
             {/* Webhook */}
             <section>
               <label className="text-xs font-bold text-default-500 block mb-2">Webhook URL (Slack / Zapier)</label>
@@ -1181,12 +1194,13 @@ export default function Settings({ storeId }: Props) {
                 {notifSaving ? '' : 'حفظ الإشعارات'}
               </Button>
             </div>
+            </div>
           </div>
         )}
 
         {/* ══ Security ══ */}
         {tab === 'security' && (
-          <div className="max-w-xl space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
 
             {/* Token status */}
             {tokenStatus && (
