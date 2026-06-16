@@ -746,3 +746,57 @@ class SallaClient:
     async def get_abandoned_cart(self, cart_id: str) -> dict:
         """Get a single abandoned cart with status (active / purchased)."""
         return await self._request("GET", f"/carts/abandoned/{cart_id}")
+
+    # ── Invoice email ───────────────────────────────────────────────────────────
+
+    async def send_order_invoice(self, order_id: int) -> dict:
+        """
+        Send the order invoice to the customer's email.
+        POST /admin/v2/orders/{order_id}/send-invoice  (scope: orders.read_write)
+
+        Requires the customer to have an email address on their Salla profile.
+        Returns {"data": {"message": "تم ارسال رسالة الفاتورة بنجاح"}} on success.
+        """
+        return await self._request("POST", f"/orders/{order_id}/send-invoice")
+
+    # ── Delivery promises ───────────────────────────────────────────────────────
+
+    async def get_delivery_promises(self) -> dict:
+        """
+        GET /admin/v2/delivery-promises — delivery promise configs for the store.
+        (scope: shipping.read)
+
+        Returns data[] with: id, type (express/same_day/next_day/standard/international),
+        status (bool), name, description, location{country, region, cities[]},
+        delivery_time{from, to, type ("hours"|"days")}.
+        """
+        return await self._request("GET", "/delivery-promises")
+
+    # ── Product reviews ─────────────────────────────────────────────────────────
+
+    async def get_product_reviews(
+        self,
+        product_id=None,
+        per_page: int = 10,
+        stars: Optional[list] = None,
+        review_type: str = "rating",
+        publish: bool = True,
+    ) -> dict:
+        """
+        GET /admin/v2/reviews — product ratings and store reviews.
+        (scope: reviews.read)
+
+        review_type: "rating" (product stars) | "ask" (customer questions) |
+                     "shipping" (delivery rating) | "testimonial" (store review)
+        stars: filter by star values e.g. ["4","5"] for ≥4 stars.
+        publish: True → only published/approved reviews (default for bot display).
+        """
+        params: dict = {"per_page": per_page}
+        if product_id:
+            params["products[]"] = [str(product_id)]
+        if stars:
+            params["stars[]"] = [str(s) for s in stars]
+        if review_type:
+            params["type"] = review_type
+        params["publish"] = "true" if publish else "false"
+        return await self._request("GET", "/reviews", params=params)

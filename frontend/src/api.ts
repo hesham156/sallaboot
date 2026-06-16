@@ -813,6 +813,13 @@ export interface AIConfig {
   coupon_max_discount_value?: number
   coupon_min_order?: number
   coupon_ttl_hours?: number
+  // Bot personality & response style
+  bot_language?: 'ar' | 'en' | 'auto'
+  bot_tone?: 'formal' | 'friendly' | 'very_friendly'
+  response_length?: 'concise' | 'normal' | 'detailed'
+  use_emoji?: boolean
+  greeting_message?: string
+  custom_instructions?: string
 }
 
 // ── AI Brain / store knowledge ─────────────────────────────────────────────

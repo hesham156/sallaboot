@@ -234,6 +234,21 @@ async def _handle_product_event(event: str, merchant_id: str, data: dict):
         sm.reset_agent(store_id)
 
 
+async def _send_invoice_email(store_id: str, order_id: str, order_ref: str) -> None:
+    """Fire-and-forget: ask Salla to send the invoice PDF to the customer's email."""
+    from salla_client import SallaClient
+    try:
+        token = sm.get_access_token(store_id)
+        if not token:
+            return
+        client = SallaClient(token, store_id=store_id)
+        await client.send_order_invoice(int(order_id))
+        log.info("invoice_email_sent", extra={"store_id": store_id, "order_ref": order_ref})
+    except Exception as exc:
+        log.warning("invoice_email_failed", extra={"store_id": store_id,
+                                                    "order_ref": order_ref, "error": str(exc)})
+
+
 async def _handle_order_event(event: str, merchant_id: str, data: dict):
     """order.* — logs + sends WhatsApp notifications to the customer."""
     store_id    = merchant_id or "default"
@@ -269,6 +284,10 @@ async def _handle_order_event(event: str, merchant_id: str, data: dict):
                 )
         except Exception as _ce:
             log.warning("classify_buyer_error", extra={"error": str(_ce)})
+        # Auto-send invoice email if customer has an email address on file
+        customer_email = (data.get("customer") or {}).get("email", "")
+        if customer_email and order_id:
+            asyncio.create_task(_send_invoice_email(store_id, order_id, order_ref))
     elif event in ("order.status.updated", "order.updated"):
         await _wa_order_status(store_id, cfg, data, order_ref, status_name)
     elif event in ("order.invoice.created", "invoice.created"):

@@ -100,6 +100,16 @@ class AIConfigRequest(BaseModel):
     coupon_max_discount_value: Optional[float] = None  # SAR cap per coupon
     coupon_min_order:          Optional[float] = None  # min order subtotal to qualify
     coupon_ttl_hours:          Optional[int]   = None  # validity window (>= 24h)
+    # ── Bot personality & response style ──────────────────────────────────────
+    # These fields control how the bot speaks — language, tone, verbosity, etc.
+    # They are injected into the system prompt at runtime so changes take
+    # effect immediately without restarting the server.
+    bot_language:        Optional[str]  = None  # "ar" | "en" | "auto"
+    bot_tone:            Optional[str]  = None  # "formal" | "friendly" | "very_friendly"
+    response_length:     Optional[str]  = None  # "concise" | "normal" | "detailed"
+    use_emoji:           Optional[bool] = None  # False = strip all emoji from replies
+    greeting_message:    Optional[str]  = None  # first message shown when widget opens
+    custom_instructions: Optional[str]  = None  # merchant's extra rules injected into prompt
 
 
 class CustomKnowledgeRequest(BaseModel):

@@ -96,6 +96,16 @@ export default function Settings({ storeId }: Props) {
   const [couponSaving, setCouponSaving]     = useState(false)
   const [couponMsg, setCouponMsg]           = useState('')
 
+  /* Bot personality */
+  const [botTone, setBotTone]               = useState<'formal' | 'friendly' | 'very_friendly'>('friendly')
+  const [botLanguage, setBotLanguage]       = useState<'ar' | 'en' | 'auto'>('ar')
+  const [responseLength, setResponseLength] = useState<'concise' | 'normal' | 'detailed'>('normal')
+  const [useEmoji, setUseEmoji]             = useState(true)
+  const [greetingMessage, setGreetingMessage]     = useState('')
+  const [customInstructions, setCustomInstructions] = useState('')
+  const [personalitySaving, setPersonalitySaving] = useState(false)
+  const [personalityMsg, setPersonalityMsg]       = useState('')
+
   /* WhatsApp */
   const [waEnabled, setWaEnabled]   = useState(false)
   const [waPhoneId, setWaPhoneId]   = useState('')
@@ -168,6 +178,12 @@ export default function Settings({ storeId }: Props) {
       setWaEnabled(!!ai.whatsapp_enabled)
       setWaPhoneId(ai.whatsapp_phone_id || '')
       setWaWabaId((ai as AIConfig & { whatsapp_waba_id?: string }).whatsapp_waba_id || '')
+      setBotTone((ai.bot_tone as 'formal' | 'friendly' | 'very_friendly') || 'friendly')
+      setBotLanguage((ai.bot_language as 'ar' | 'en' | 'auto') || 'ar')
+      setResponseLength((ai.response_length as 'concise' | 'normal' | 'detailed') || 'normal')
+      setUseEmoji(ai.use_emoji !== false)
+      setGreetingMessage(ai.greeting_message || '')
+      setCustomInstructions(ai.custom_instructions || '')
       setTokenStatus(tok)
       setNotif(n)
     } catch { /* ignore */ }
@@ -234,6 +250,23 @@ export default function Settings({ storeId }: Props) {
       setCouponMsg('✅ تم حفظ إعدادات الكوبونات'); load()
     } catch (e: unknown) { setCouponMsg(e instanceof Error ? e.message : 'خطأ') }
     finally { setCouponSaving(false) }
+  }
+
+  async function savePersonality() {
+    setPersonalitySaving(true); setPersonalityMsg('')
+    try {
+      await api.setAI(storeId, {
+        bot_tone:            botTone,
+        bot_language:        botLanguage,
+        response_length:     responseLength,
+        use_emoji:           useEmoji,
+        greeting_message:    greetingMessage.trim(),
+        custom_instructions: customInstructions.trim(),
+      })
+      setPersonalityMsg('✅ تم حفظ إعدادات الشخصية')
+      load()
+    } catch (e: unknown) { setPersonalityMsg(e instanceof Error ? e.message : 'خطأ') }
+    finally { setPersonalitySaving(false) }
   }
 
   async function saveWhatsApp() {
@@ -585,6 +618,125 @@ export default function Settings({ storeId }: Props) {
                     </Button>
                   </>
                 )}
+              </section>
+
+              {/* ── Bot personality ── */}
+              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-4 mt-2">
+                <div>
+                  <p className="font-bold text-sm text-foreground">🎭 شخصية البوت وأسلوب الرد</p>
+                  <p className="text-[11px] text-default-400 mt-0.5">
+                    تحكم في كيف يتكلم البوت مع عملائك — الأسلوب واللغة وطول الرد والتحية.
+                  </p>
+                </div>
+
+                {/* Tone */}
+                <div>
+                  <p className="text-xs font-bold text-default-400 mb-1.5">أسلوب الرد</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {([
+                      { key: 'formal',       label: 'رسمي',      sub: 'محترف ومباشر' },
+                      { key: 'friendly',     label: 'ودي',       sub: 'مرن ومرحّب' },
+                      { key: 'very_friendly',label: 'حماسي',     sub: 'دافئ وحميمي' },
+                    ] as const).map(opt => (
+                      <button key={opt.key} onClick={() => setBotTone(opt.key)}
+                        className={`text-right rounded-xl border p-2.5 transition-all ${
+                          botTone === opt.key
+                            ? 'border-primary bg-primary/8 ring-1 ring-primary/25'
+                            : 'border-divider hover:border-primary/40'
+                        }`}>
+                        <p className="font-bold text-xs text-foreground">{opt.label}</p>
+                        <p className="text-[10px] text-default-400 mt-0.5">{opt.sub}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Language */}
+                <div>
+                  <p className="text-xs font-bold text-default-400 mb-1.5">لغة الرد</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {([
+                      { key: 'ar',   label: 'عربي',      sub: 'دائماً بالعربية' },
+                      { key: 'en',   label: 'English',   sub: 'دائماً بالإنجليزية' },
+                      { key: 'auto', label: 'تلقائي',    sub: 'يتبع لغة العميل' },
+                    ] as const).map(opt => (
+                      <button key={opt.key} onClick={() => setBotLanguage(opt.key)}
+                        className={`text-right rounded-xl border p-2.5 transition-all ${
+                          botLanguage === opt.key
+                            ? 'border-primary bg-primary/8 ring-1 ring-primary/25'
+                            : 'border-divider hover:border-primary/40'
+                        }`}>
+                        <p className={`font-bold text-xs text-foreground ${opt.key === 'en' ? 'font-sans' : ''}`}>{opt.label}</p>
+                        <p className="text-[10px] text-default-400 mt-0.5">{opt.sub}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Response length */}
+                <div>
+                  <p className="text-xs font-bold text-default-400 mb-1.5">طول الرد</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {([
+                      { key: 'concise',  label: 'مختصر',   sub: '1-3 جمل' },
+                      { key: 'normal',   label: 'معتدل',   sub: 'افتراضي' },
+                      { key: 'detailed', label: 'مفصّل',   sub: 'شامل وكامل' },
+                    ] as const).map(opt => (
+                      <button key={opt.key} onClick={() => setResponseLength(opt.key)}
+                        className={`text-right rounded-xl border p-2.5 transition-all ${
+                          responseLength === opt.key
+                            ? 'border-primary bg-primary/8 ring-1 ring-primary/25'
+                            : 'border-divider hover:border-primary/40'
+                        }`}>
+                        <p className="font-bold text-xs text-foreground">{opt.label}</p>
+                        <p className="text-[10px] text-default-400 mt-0.5">{opt.sub}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Emoji toggle */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-foreground">الإيموجي في الردود</p>
+                    <p className="text-[10px] text-default-400 mt-0.5">أوقفه لمتاجر تفضل أسلوباً رسمياً بدون رموز</p>
+                  </div>
+                  <Switch isSelected={useEmoji} onValueChange={setUseEmoji} size="sm" />
+                </div>
+
+                {/* Greeting message */}
+                <div>
+                  <p className="text-xs font-bold text-default-400 mb-1.5">رسالة الترحيب</p>
+                  <textarea
+                    value={greetingMessage}
+                    onChange={(e) => setGreetingMessage(e.target.value)}
+                    placeholder="مرحباً! 👋 أنا مساعد المتجر. كيف أقدر أساعدك اليوم؟"
+                    rows={2}
+                    className="w-full text-sm bg-content3 border border-divider rounded-xl px-3 py-2.5 text-foreground placeholder-default-400 resize-none focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    dir="rtl"
+                  />
+                  <p className="text-[10px] text-default-400 mt-1">أول رسالة يراها العميل عند فتح الشات</p>
+                </div>
+
+                {/* Custom instructions */}
+                <div>
+                  <p className="text-xs font-bold text-default-400 mb-1.5">تعليمات خاصة للبوت</p>
+                  <textarea
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    placeholder={"مثال:\n• لا تذكر أسماء المنافسين\n• إذا سأل عن الأسعار قل أن هناك عروض موسمية\n• وقت التوصيل بين 3-5 أيام عمل"}
+                    rows={4}
+                    className="w-full text-sm bg-content3 border border-divider rounded-xl px-3 py-2.5 text-foreground placeholder-default-400 resize-y focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    dir="rtl"
+                  />
+                  <p className="text-[10px] text-default-400 mt-1">قواعد وتعليمات يلتزم بها البوت في كل المحادثات</p>
+                </div>
+
+                <Msg text={personalityMsg} />
+                <Button size="sm" color="primary" variant="flat" isLoading={personalitySaving}
+                  onPress={savePersonality} className="font-bold w-full h-9">
+                  {personalitySaving ? '' : 'حفظ إعدادات الشخصية'}
+                </Button>
               </section>
             </div>
           )

@@ -49,6 +49,23 @@
   var isLoading = false;
   var historyLoaded = false;
 
+  // ── Fetch dynamic config from backend (greeting message, bot name) ───────────
+  // Runs once on load so merchants can change these from the dashboard without
+  // editing Salla theme code. Fails silently — defaults in CONFIG stay in place.
+  (function fetchWidgetConfig() {
+    if (!CONFIG.apiUrl) return;
+    var storeParam = CONFIG.storeId ? "?store_id=" + encodeURIComponent(CONFIG.storeId) : "";
+    fetch(CONFIG.apiUrl + "/chat/widget-config" + storeParam)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        if (data.greeting_message) CONFIG.welcomeMessage = data.greeting_message;
+        if (data.bot_name)         CONFIG.storeName      = data.bot_name;
+        if (data.primary_color)    CONFIG.primaryColor   = data.primary_color;
+      })
+      .catch(function () { /* degrade to defaults */ });
+  })();
+
   // ── Styles ────────────────────────────────────────────────────────────────────
   var styles = `
     #salla-chat-widget * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; }

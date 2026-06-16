@@ -50,6 +50,8 @@ GENERIC_SYSTEM_PROMPT = """أنت مساعد مبيعات ذكي ودود لمت
 • اسم المتجر ووصفه موجودين في "ملف المتجر" أعلى الـ prompt — استخدمهم بطبيعية
 • لو سأل العميل عن واتساب/سوشيال/تطبيق/سجل تجاري → get_store_contact_info
 • لو سأل العميل عن شركات الشحن/التوصيل → get_shipping_options
+• لو سأل عن متى يوصل طلبه / مدة التوصيل / ضمان الموعد → get_delivery_promises
+• لو تردد العميل على منتج أو طلب آراء الناس → get_product_reviews
 • لو سأل عن العروض/الخصومات → get_current_offers
 • لو سأل عن طرق الدفع (تابي/تمارا/مدى/دفع عند الاستلام) → get_payment_methods
 • لو سأل عن الفروع/مواقع الاستلام → get_branches
@@ -180,6 +182,56 @@ SALLABOT_SELF_DEMO_PROMPT = """أنت "حياك" — مساعد المبيعات
 • لو الزائر بان جاد، اعرض موعد عرض حي (sales@7ayak.app)."""
 
 
+def _personality_addon(ai_cfg: dict) -> str:
+    """Build an extra prompt block from per-store personality settings.
+
+    Returns an empty string when all settings are at their defaults so
+    the base prompt stays unchanged for stores that haven't configured
+    personality options.
+    """
+    parts: list[str] = []
+
+    tone = (ai_cfg.get("bot_tone") or "friendly").lower()
+    _tone_text = {
+        "formal":       "استخدم أسلوباً رسمياً ومحترفاً في جميع ردودك.",
+        "friendly":     "استخدم أسلوباً ودياً ومرحاً في ردودك.",
+        "very_friendly": "استخدم أسلوباً حماسياً وودياً جداً، وأبدِ اهتماماً حقيقياً بكل عميل.",
+    }
+    if tone in _tone_text and tone != "friendly":
+        parts.append(f"• الأسلوب: {_tone_text[tone]}")
+
+    lang = (ai_cfg.get("bot_language") or "ar").lower()
+    if lang == "en":
+        parts.append(
+            "• اللغة: تكلم مع العميل بالإنجليزية فقط في جميع ردودك — حتى لو كتب بالعربي."
+        )
+    elif lang == "auto":
+        parts.append(
+            "• اللغة: اكتشف لغة العميل من أول رسالة يرسلها وتابع بنفس اللغة (عربي أو إنجليزي)."
+        )
+
+    length = (ai_cfg.get("response_length") or "normal").lower()
+    if length == "concise":
+        parts.append("• طول الرد: اجعل ردودك مختصرة — 1-3 جمل عند الإمكان، لا تُطيل بدون داعٍ.")
+    elif length == "detailed":
+        parts.append("• طول الرد: أعطِ ردوداً مفصّلة وشاملة، وفّر كل المعلومات المفيدة للعميل.")
+
+    if ai_cfg.get("use_emoji") is False:
+        parts.append("• الإيموجي: لا تستخدم أي إيموجي في ردودك إطلاقاً.")
+
+    instructions = (ai_cfg.get("custom_instructions") or "").strip()
+    if instructions:
+        parts.append(
+            f"\n══ تعليمات خاصة من إدارة المتجر — يجب الالتزام بها ══\n"
+            f"{instructions}\n"
+            f"══ نهاية التعليمات الخاصة ══"
+        )
+
+    if not parts:
+        return ""
+    return "\n\n═══ شخصية البوت وأسلوب الرد ═══\n" + "\n".join(parts)
+
+
 def _base_prompt(printing: bool, store_id: str = "") -> str:
     """Assemble the base system prompt for a store type.
 
@@ -190,9 +242,14 @@ def _base_prompt(printing: bool, store_id: str = "") -> str:
     """
     if store_id == "sallabot":
         return SALLABOT_SELF_DEMO_PROMPT
+    ai_cfg = sm.get_ai_config(store_id) if store_id else {}
+    base   = GENERIC_SYSTEM_PROMPT
     if printing:
-        return GENERIC_SYSTEM_PROMPT + "\n\n" + PRINTING_ADDON
-    return GENERIC_SYSTEM_PROMPT
+        base += "\n\n" + PRINTING_ADDON
+    addon = _personality_addon(ai_cfg)
+    if addon:
+        base += addon
+    return base
 
 
 async def get_system_prompt_async(store_id: str = "default", printing: bool = True) -> str:
@@ -266,6 +323,43 @@ TOOLS = [
             "كم سعر الشحن؟ / فيه شحن سريع؟"
         ),
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_delivery_promises",
+        "description": (
+            "اعرض وعود التسليم والمواعيد المضمونة للمتجر (سريع / نفس اليوم / اليوم التالي / عادي / دولي) "
+            "مع المدن المشمولة والوقت المتوقع بالساعات أو الأيام. "
+            "استخدمها لما يسأل العميل: متى يوصل الطلب؟ / كم مدة التوصيل؟ / "
+            "فيه توصيل سريع؟ / هل تضمنون موعد وصول الطلب؟"
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_product_reviews",
+        "description": (
+            "اجلب تقييمات العملاء (النجوم + التعليقات) لمنتج محدد أو للمتجر عموماً. "
+            "استخدمها عندما يتردد العميل أو يسأل: "
+            "ايش آراء الناس عنه؟ / المنتج منيح؟ / فيه تقييمات؟ / الناس راضين عنه؟ "
+            "عرض التقييمات الإيجابية يبني الثقة ويشجع على الشراء."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "product_id": {
+                    "type": "string",
+                    "description": "معرّف المنتج في سلة (من suggest_products أو سياق المحادثة). اتركه فارغاً لتقييمات المتجر العامة.",
+                },
+                "product_name": {
+                    "type": "string",
+                    "description": "اسم المنتج بديلاً عن product_id إذا لم يُعرف المعرّف.",
+                },
+                "min_stars": {
+                    "type": "integer",
+                    "description": "الحد الأدنى للنجوم — مثلاً 4 لعرض التقييمات الجيدة فقط. اختياري.",
+                    "enum": [1, 2, 3, 4, 5],
+                },
+            },
+        },
     },
     {
         "name": "get_current_offers",
@@ -2630,6 +2724,101 @@ class PrintingAgent:
                         f"• {name_str} | الإجمالي: {amt} {cur} | منذ {age_str}"
                         + (f"\n  رابط إكمال الطلب: {checkout}" if checkout else "")
                     )
+                return "\n".join(lines)
+
+            # ── get_delivery_promises ────────────────────────────────────────
+            elif name == "get_delivery_promises":
+                if not self.salla:
+                    return "⚠️ لم يتم ربط المتجر بعد."
+                try:
+                    data     = await self.salla.get_delivery_promises()
+                    promises = data.get("data", []) or []
+                except Exception as exc:
+                    print(f"[get_delivery_promises] {exc}")
+                    return "تعذّر جلب مواعيد التسليم حالياً، تواصل مع المتجر للاستفسار."
+
+                if not promises:
+                    return "لا توجد وعود تسليم محددة لهذا المتجر حالياً."
+
+                unit_ar = {"hours": "ساعة", "days": "يوم"}
+                lines   = ["📅 **مواعيد التسليم المتاحة:**"]
+                for p in promises[:8]:
+                    p_name   = p.get("name", "")
+                    desc     = p.get("description", "")
+                    dt       = p.get("delivery_time") or {}
+                    dt_from  = dt.get("from")
+                    dt_to    = dt.get("to")
+                    dt_unit  = unit_ar.get(dt.get("type", ""), dt.get("type", ""))
+                    location = p.get("location") or {}
+                    cities   = location.get("cities") or []
+                    city_names = [c.get("name", "") for c in cities
+                                  if c.get("name") and c.get("id") not in (-1, None)]
+                    inactive = "" if p.get("status") else " _(غير مفعّل حالياً)_"
+                    line = f"• **{p_name}**{inactive}"
+                    if dt_from is not None and dt_to is not None:
+                        line += f": {dt_from}–{dt_to} {dt_unit}"
+                    if desc:
+                        line += f" — {desc}"
+                    if city_names:
+                        line += f"\n  المدن: {', '.join(city_names[:5])}"
+                    lines.append(line)
+                return "\n".join(lines)
+
+            # ── get_product_reviews ──────────────────────────────────────────
+            elif name == "get_product_reviews":
+                if not self.salla:
+                    return "⚠️ لم يتم ربط المتجر بعد."
+
+                pid       = str(inputs.get("product_id") or "").strip()
+                min_stars = inputs.get("min_stars")
+
+                # Resolve product_id from product_name if not supplied directly
+                if not pid and inputs.get("product_name"):
+                    pname = (inputs["product_name"] or "").lower()
+                    store = get_store_data(self.store_id) if self.store_id else {}
+                    prod  = next(
+                        (p for p in (store.get("products") or [])
+                         if pname in (p.get("name") or "").lower()),
+                        None,
+                    )
+                    if prod:
+                        pid = str(prod.get("id", ""))
+
+                stars = ([str(s) for s in range(int(min_stars), 6)]
+                         if min_stars else None)
+                try:
+                    data    = await self.salla.get_product_reviews(
+                        product_id=pid or None,
+                        stars=stars,
+                        review_type="rating",
+                        publish=True,
+                        per_page=10,
+                    )
+                    reviews = data.get("data", []) or []
+                except Exception as exc:
+                    print(f"[get_product_reviews] {exc}")
+                    return "تعذّر جلب التقييمات حالياً."
+
+                if not reviews:
+                    return "لا توجد تقييمات منشورة لهذا المنتج بعد. كن أول من يقيّم! ⭐"
+
+                reviews.sort(key=lambda r: -(r.get("rating") or 0))
+                total = len(reviews)
+                avg   = round(sum(r.get("rating", 0) for r in reviews) / total, 1)
+                lines = [f"⭐ **تقييمات العملاء — المعدل: {avg}/5 ({total} تقييم)**"]
+                for r in reviews[:5]:
+                    stars_n  = int(r.get("rating") or 0)
+                    stars_s  = "⭐" * stars_n
+                    content  = (r.get("content") or "").strip()
+                    customer = r.get("customer") or {}
+                    cname    = customer.get("name") or "عميل"
+                    city     = customer.get("city") or ""
+                    line     = f"{stars_s} **{cname}**"
+                    if city:
+                        line += f" ({city})"
+                    if content:
+                        line += f'\n  _"{content[:120]}"_'
+                    lines.append(line)
                 return "\n".join(lines)
 
             # ── generate_discount_coupon ────────────────────────────────────

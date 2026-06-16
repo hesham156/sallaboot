@@ -457,6 +457,21 @@ async def chat_poll(session_id: str):
 
 # ── History ───────────────────────────────────────────────────────────────────
 
+@router.get("/chat/widget-config")
+async def widget_config(store_id: str = "default"):
+    """Public endpoint — no auth. Returns the minimal config the chat widget
+    needs to render itself correctly (greeting message, bot name).
+    Called by widget.js on first load so merchants can customize these values
+    from the dashboard without touching the Salla theme code."""
+    ai_cfg     = sm.get_ai_config(store_id) or {}
+    store_info = sm.get_store_info(store_id) or {}
+    return {
+        "bot_name":        (ai_cfg.get("bot_name") or "").strip() or store_info.get("store_name", "مساعد المتجر"),
+        "greeting_message": (ai_cfg.get("greeting_message") or "").strip(),
+        "primary_color":   (ai_cfg.get("primary_color") or "").strip() or "#1a56db",
+    }
+
+
 @router.get("/chat/history")
 async def chat_history(session_id: str):
     if not session_id or "{{" in session_id:
