@@ -519,7 +519,10 @@ export default function Settings({ storeId }: Props) {
           aiLoading ? (
             <div className="flex justify-center py-16"><Spinner color="primary" /></div>
           ) : (
-            <div className="max-w-xl space-y-5">
+            <div className="grid grid-cols-1 lg:grid-cols-[5fr_6fr] gap-5 items-start">
+
+              {/* ── Right column: core AI settings ── */}
+              <div className="space-y-4">
 
               {/* Provider */}
               <section>
@@ -609,9 +612,13 @@ export default function Settings({ storeId }: Props) {
                 className="w-full font-bold h-11">
                 {aiSaving ? '' : 'حفظ إعدادات AI'}
               </Button>
+              </div>
+
+              {/* ── Left column: feature sections ── */}
+              <div className="space-y-4">
 
               {/* ── AI discount coupons ── */}
-              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-3 mt-2">
+              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center flex-shrink-0">
@@ -650,7 +657,7 @@ export default function Settings({ storeId }: Props) {
               </section>
 
               {/* ── Bot personality ── */}
-              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-4 mt-2">
+              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-4">
                 <div className="flex items-start gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-violet-500/10 text-violet-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                     <Icon d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" size={15} />
@@ -768,7 +775,7 @@ export default function Settings({ storeId }: Props) {
               </section>
 
               {/* ── Data-access permissions ── */}
-              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-1 mt-2">
+              <section className="rounded-xl border border-divider bg-content2 p-4 space-y-1">
                 <div className="flex items-start gap-2.5 mb-3">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 mt-0.5">
                     <Icon d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={14} />
@@ -868,6 +875,7 @@ export default function Settings({ storeId }: Props) {
                   </Button>
                 </div>
               </section>
+              </div>
             </div>
           )
         )}
