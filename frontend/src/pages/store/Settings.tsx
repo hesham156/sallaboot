@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Switch, Chip, Spinner } from '@heroui/react'
 import { api, AIConfig, TokenStatus, NotificationSettings } from '../../api'
-import { TextField } from '../../components/ui'
+import { TextField, TextArea, InlineAlert } from '../../components/ui'
 
 /* ── Icon helper ── */
 function Icon({ d, size = 16, className = '' }: { d: string | string[]; size?: number; className?: string }) {
@@ -32,18 +32,6 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-/* ── Feedback banner ── */
-function Msg({ text }: { text: string }) {
-  if (!text) return null
-  const ok = text.startsWith('✅')
-  return (
-    <div className={`rounded-xl px-4 py-2.5 text-sm border flex items-center gap-2 ${
-      ok ? 'bg-success/8 border-success/20 text-success' : 'bg-danger/8 border-danger/20 text-danger'
-    }`}>
-      <span>{ok ? '✓' : '!'}</span>{text}
-    </div>
-  )
-}
 
 /* ─────── Data ─────── */
 interface Props { storeId: string }
@@ -535,7 +523,7 @@ export default function Settings({ storeId }: Props) {
 
               {/* Provider */}
               <section>
-                <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">المزوّد</label>
+                <label className="text-xs font-bold text-default-500 block mb-2">المزوّد</label>
                 <div className="grid grid-cols-3 gap-2">
                   {PROVIDERS.map(p => {
                     const active = provider === p.key
@@ -557,7 +545,7 @@ export default function Settings({ storeId }: Props) {
 
               {/* API Key */}
               <section>
-                <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">مفتاح API</label>
+                <label className="text-xs font-bold text-default-500 block mb-2">مفتاح API</label>
                 <TextField
                   label="" type="password" value={apiKey} onChange={setApiKey}
                   placeholder={keySaved ? '•••••••• (محفوظ — اتركه فارغاً للإبقاء)' : cur.ph}
@@ -573,7 +561,7 @@ export default function Settings({ storeId }: Props) {
 
               {/* Model */}
               <section>
-                <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">الموديل</label>
+                <label className="text-xs font-bold text-default-500 block mb-2">الموديل</label>
                 <TextField label="" value={model} onChange={setModel}
                   placeholder={models[0]} dir="ltr" />
                 <div className="flex flex-wrap gap-1.5 mt-2">
@@ -592,16 +580,16 @@ export default function Settings({ storeId }: Props) {
 
               {/* Bot name + Store type in a row */}
               <section>
-                <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">اسم البوت</label>
+                <label className="text-xs font-bold text-default-500 block mb-2">اسم البوت</label>
                 <TextField label="" value={botName} onChange={setBotName} placeholder="مساعد المتجر" />
               </section>
 
               <section>
-                <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">نوع المتجر</label>
+                <label className="text-xs font-bold text-default-500 block mb-2">نوع المتجر</label>
                 <div className="grid grid-cols-2 gap-2">
                   {([
-                    { key: 'general',  label: '🛍️ متجر عام',    sub: 'منتجات عامة' },
-                    { key: 'printing', label: '🖨️ متجر طباعة',  sub: 'حاسبات أسعار الطباعة' },
+                    { key: 'general',  label: 'متجر عام',    sub: 'منتجات عامة' },
+                    { key: 'printing', label: 'متجر طباعة',  sub: 'حاسبات أسعار الطباعة' },
                   ] as const).map(opt => (
                     <button key={opt.key} onClick={() => setStoreType(opt.key)}
                       className={`text-right rounded-xl border p-3 transition-all ${
@@ -616,20 +604,25 @@ export default function Settings({ storeId }: Props) {
                 </div>
               </section>
 
-              <Msg text={aiMsg} />
+              <InlineAlert text={aiMsg} />
               <Button color="primary" isLoading={aiSaving} onPress={saveAI}
-                className="w-full font-bold h-10 bg-gradient-to-r from-blue-600 to-indigo-600">
+                className="w-full font-bold h-11">
                 {aiSaving ? '' : 'حفظ إعدادات AI'}
               </Button>
 
               {/* ── AI discount coupons ── */}
               <section className="rounded-xl border border-divider bg-content2 p-4 space-y-3 mt-2">
                 <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-bold text-sm text-foreground">🎁 كوبونات الخصم الذكية</p>
-                    <p className="text-[11px] text-default-400 mt-0.5">
-                      يسمح للبوت بإصدار كوبون خصم شخصي لإقناع العميل بالشراء أو استرجاع سلة متروكة.
-                    </p>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center flex-shrink-0">
+                      <Icon d="M7 7h10v3M7 7V4h10v3M7 7H4v13h16V7h-3M9 12h6M9 16h4" size={14} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-sm text-foreground">كوبونات الخصم الذكية</p>
+                      <p className="text-[11px] text-default-400 mt-0.5">
+                        يسمح للبوت بإصدار كوبون خصم شخصي لإقناع العميل بالشراء أو استرجاع سلة متروكة.
+                      </p>
+                    </div>
                   </div>
                   <Switch isSelected={couponsEnabled} onValueChange={setCouponsEnabled} />
                 </div>
@@ -647,9 +640,9 @@ export default function Settings({ storeId }: Props) {
                     <p className="text-[11px] text-amber-500">
                       ⚠️ يتطلب صلاحية <code>coupons.read_write</code> في تطبيق سلة. كل كوبون لاستخدام واحد وصالح ٢٤ ساعة.
                     </p>
-                    <Msg text={couponMsg} />
-                    <Button size="sm" color="primary" variant="flat" isLoading={couponSaving}
-                      onPress={saveCoupons} className="font-bold">
+                    <InlineAlert text={couponMsg} />
+                    <Button size="sm" color="primary" isLoading={couponSaving}
+                      onPress={saveCoupons} className="font-bold w-full h-9">
                       {couponSaving ? '' : 'حفظ إعدادات الكوبونات'}
                     </Button>
                   </>
@@ -658,11 +651,16 @@ export default function Settings({ storeId }: Props) {
 
               {/* ── Bot personality ── */}
               <section className="rounded-xl border border-divider bg-content2 p-4 space-y-4 mt-2">
-                <div>
-                  <p className="font-bold text-sm text-foreground">🎭 شخصية البوت وأسلوب الرد</p>
-                  <p className="text-[11px] text-default-400 mt-0.5">
-                    تحكم في كيف يتكلم البوت مع عملائك — الأسلوب واللغة وطول الرد والتحية.
-                  </p>
+                <div className="flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-violet-500/10 text-violet-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Icon d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" size={15} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm text-foreground">شخصية البوت وأسلوب الرد</p>
+                    <p className="text-[11px] text-default-400 mt-0.5">
+                      تحكم في كيف يتكلم البوت مع عملائك — الأسلوب واللغة وطول الرد والتحية.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Tone */}
@@ -741,35 +739,29 @@ export default function Settings({ storeId }: Props) {
                 </div>
 
                 {/* Greeting message */}
-                <div>
-                  <p className="text-xs font-bold text-default-400 mb-1.5">رسالة الترحيب</p>
-                  <textarea
-                    value={greetingMessage}
-                    onChange={(e) => setGreetingMessage(e.target.value)}
-                    placeholder="مرحباً! 👋 أنا مساعد المتجر. كيف أقدر أساعدك اليوم؟"
-                    rows={2}
-                    className="w-full text-sm bg-content3 border border-divider rounded-xl px-3 py-2.5 text-foreground placeholder-default-400 resize-none focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                    dir="rtl"
-                  />
-                  <p className="text-[10px] text-default-400 mt-1">أول رسالة يراها العميل عند فتح الشات</p>
-                </div>
+                <TextArea
+                  label="رسالة الترحيب"
+                  hint="أول رسالة يراها العميل عند فتح الشات"
+                  value={greetingMessage}
+                  onChange={setGreetingMessage}
+                  placeholder="مرحباً! أنا مساعد المتجر. كيف أقدر أساعدك اليوم؟"
+                  minRows={2}
+                  maxRows={4}
+                />
 
                 {/* Custom instructions */}
-                <div>
-                  <p className="text-xs font-bold text-default-400 mb-1.5">تعليمات خاصة للبوت</p>
-                  <textarea
-                    value={customInstructions}
-                    onChange={(e) => setCustomInstructions(e.target.value)}
-                    placeholder={"مثال:\n• لا تذكر أسماء المنافسين\n• إذا سأل عن الأسعار قل أن هناك عروض موسمية\n• وقت التوصيل بين 3-5 أيام عمل"}
-                    rows={4}
-                    className="w-full text-sm bg-content3 border border-divider rounded-xl px-3 py-2.5 text-foreground placeholder-default-400 resize-y focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                    dir="rtl"
-                  />
-                  <p className="text-[10px] text-default-400 mt-1">قواعد وتعليمات يلتزم بها البوت في كل المحادثات</p>
-                </div>
+                <TextArea
+                  label="تعليمات خاصة للبوت"
+                  hint="قواعد يلتزم بها البوت في كل المحادثات"
+                  value={customInstructions}
+                  onChange={setCustomInstructions}
+                  placeholder={"مثال:\n• لا تذكر أسماء المنافسين\n• إذا سأل عن الأسعار قل أن هناك عروض موسمية\n• وقت التوصيل بين 3-5 أيام عمل"}
+                  minRows={3}
+                  maxRows={8}
+                />
 
-                <Msg text={personalityMsg} />
-                <Button size="sm" color="primary" variant="flat" isLoading={personalitySaving}
+                <InlineAlert text={personalityMsg} />
+                <Button size="sm" color="primary" isLoading={personalitySaving}
                   onPress={savePersonality} className="font-bold w-full h-9">
                   {personalitySaving ? '' : 'حفظ إعدادات الشخصية'}
                 </Button>
@@ -777,54 +769,66 @@ export default function Settings({ storeId }: Props) {
 
               {/* ── Data-access permissions ── */}
               <section className="rounded-xl border border-divider bg-content2 p-4 space-y-1 mt-2">
-                <div className="mb-3">
-                  <p className="font-bold text-sm text-foreground">🔐 صلاحيات وصول البوت للبيانات</p>
-                  <p className="text-[11px] text-default-400 mt-0.5">
-                    تحكم في أي بيانات يُسمح للبوت بالاطلاع عليها والرد بناءً عليها.
-                    الإيقاف يحذف الأداة كلياً من البوت — العميل لن يتمكن من الحصول على تلك المعلومات.
-                  </p>
+                <div className="flex items-start gap-2.5 mb-3">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Icon d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={14} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm text-foreground">صلاحيات وصول البوت للبيانات</p>
+                    <p className="text-[11px] text-default-400 mt-0.5">
+                      تحكم في أي بيانات يُسمح للبوت بالاطلاع عليها والرد بناءً عليها.
+                      الإيقاف يحذف الأداة كلياً من البوت — العميل لن يتمكن من الحصول على تلك المعلومات.
+                    </p>
+                  </div>
                 </div>
 
                 {([
                   {
                     flag: 'access_orders', val: accessOrders, set: setAccessOrders,
-                    icon: '📦', label: 'الطلبات',
+                    icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
+                    label: 'الطلبات',
                     desc: 'البوت يتتبع الطلبات ويعرض حالاتها للعميل',
                     risk: 'عام',
                   },
                   {
                     flag: 'access_invoices', val: accessInvoices, set: setAccessInvoices,
-                    icon: '🧾', label: 'الفواتير',
+                    icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01',
+                    label: 'الفواتير',
                     desc: 'البوت يستطيع عرض الفاتورة وتفاصيل الدفع',
                     risk: 'حساس',
                   },
                   {
                     flag: 'access_customers', val: accessCustomers, set: setAccessCustomers,
-                    icon: '👤', label: 'بيانات العملاء',
+                    icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+                    label: 'بيانات العملاء',
                     desc: 'البوت يبحث عن الاسم والإيميل والطلبات السابقة',
                     risk: 'حساس',
                   },
                   {
                     flag: 'access_reviews', val: accessReviews, set: setAccessReviews,
-                    icon: '⭐', label: 'التقييمات',
+                    icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z',
+                    label: 'التقييمات',
                     desc: 'البوت يعرض تقييمات العملاء لمنتجاتك',
                     risk: 'عام',
                   },
                   {
                     flag: 'access_abandoned_carts', val: accessAbandonedCarts, set: setAccessAbandonedCarts,
-                    icon: '🛒', label: 'السلات المتروكة',
+                    icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z',
+                    label: 'السلات المتروكة',
                     desc: 'البوت يطلع على الطلبات غير المكتملة',
                     risk: 'حساس',
                   },
                   {
                     flag: 'access_shipments', val: accessShipments, set: setAccessShipments,
-                    icon: '🚚', label: 'تتبع الشحنات',
+                    icon: 'M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0',
+                    label: 'تتبع الشحنات',
                     desc: 'البوت يتتبع الشحنات ويحسب تكلفة التوصيل',
                     risk: 'عام',
                   },
                   {
                     flag: 'access_delivery_promises', val: accessDeliveryPromises, set: setAccessDeliveryPromises,
-                    icon: '📅', label: 'وعود التسليم',
+                    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+                    label: 'وعود التسليم',
                     desc: 'البوت يعرض مواعيد التسليم المضمونة',
                     risk: 'عام',
                   },
@@ -832,7 +836,9 @@ export default function Settings({ storeId }: Props) {
                   <div key={item.flag}
                     className="flex items-center justify-between gap-3 py-2.5 border-b border-divider last:border-0">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-lg flex-shrink-0">{item.icon}</span>
+                      <div className="w-7 h-7 rounded-lg bg-default-100 flex items-center justify-center flex-shrink-0">
+                        <Icon d={item.icon} size={13} className="text-default-500" />
+                      </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-xs font-bold text-foreground">{item.label}</p>
@@ -855,8 +861,8 @@ export default function Settings({ storeId }: Props) {
                 ))}
 
                 <div className="pt-2">
-                  <Msg text={permissionsMsg} />
-                  <Button size="sm" color="primary" variant="flat" isLoading={permissionsSaving}
+                  <InlineAlert text={permissionsMsg} />
+                  <Button size="sm" color="primary" isLoading={permissionsSaving}
                     onPress={savePermissions} className="font-bold w-full h-9 mt-2">
                     {permissionsSaving ? '' : 'حفظ الصلاحيات'}
                   </Button>
@@ -912,7 +918,7 @@ export default function Settings({ storeId }: Props) {
                   <CopyRow label="Verify Token"  value={cfg.whatsapp_verify_token || ''} />
                 </section>
 
-                <Msg text={waMsg} />
+                <InlineAlert text={waMsg} />
 
                 <div className="flex gap-2">
                   <Button variant="flat" color="danger" onPress={disconnectWa} className="flex-1 font-bold h-10">
@@ -944,7 +950,7 @@ export default function Settings({ storeId }: Props) {
                     </div>
                   </button>
                 ))}
-                <Msg text={waMsg} />
+                <InlineAlert text={waMsg} />
                 <Button variant="flat" onPress={() => { setWaStep('idle'); setWaOptions([]) }} className="w-full font-bold h-10">
                   إلغاء
                 </Button>
@@ -1010,15 +1016,15 @@ export default function Settings({ storeId }: Props) {
                     <TextField label="Access Token" type="password" value={waToken} onChange={setWaToken}
                       placeholder={cfg.whatsapp_token ? '•••••••• (محفوظ)' : 'EAAG...'} dir="ltr"
                       hint={cfg.whatsapp_token ? 'محفوظ — اتركه فارغاً للإبقاء' : 'من Meta'} />
-                    <Msg text={waMsg} />
+                    <InlineAlert text={waMsg} />
                     <Button color="success" isLoading={waSaving} onPress={saveWhatsApp}
-                      className="w-full font-bold h-10 bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
+                      className="w-full font-bold h-10">
                       {waSaving ? '' : 'حفظ'}
                     </Button>
                   </div>
                 )}
 
-                {!waManual && <Msg text={waMsg} />}
+                {!waManual && <InlineAlert text={waMsg} />}
 
                 {/* Webhook info */}
                 {cfg.whatsapp_webhook && (
@@ -1037,7 +1043,7 @@ export default function Settings({ storeId }: Props) {
             {/* ── Messenger + Instagram (Facebook Page) ── */}
             <section className="space-y-3 border-t border-divider pt-5">
               <div className="flex items-center gap-2">
-                <span className="text-base">💬</span>
+                <Icon d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" size={14} className="text-primary" />
                 <h3 className="text-sm font-bold text-foreground">ماسنجر + إنستقرام</h3>
               </div>
               <p className="text-xs text-default-500 leading-relaxed">
@@ -1086,11 +1092,11 @@ export default function Settings({ storeId }: Props) {
               ) : (
                 <Button color="primary" isLoading={metaConnecting} isDisabled={!fbLoaded}
                   onPress={startPagesConnect}
-                  className="font-bold h-10 bg-gradient-to-r from-blue-600 to-indigo-600">
+                  className="font-bold h-10">
                   {fbLoaded ? 'ربط ماسنجر + إنستقرام' : 'جارٍ تحميل Facebook…'}
                 </Button>
               )}
-              <Msg text={metaMsg} />
+              <InlineAlert text={metaMsg} />
             </section>
           </div>
         )}
@@ -1117,15 +1123,18 @@ export default function Settings({ storeId }: Props) {
 
             {/* Triggers */}
             <section>
-              <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">أرسل إشعاراً عند:</label>
+              <label className="text-xs font-bold text-default-500 block mb-2">أرسل إشعاراً عند:</label>
               <div className="bg-content2 rounded-xl border border-divider divide-y divide-divider overflow-hidden">
                 {[
-                  { key: 'on_new_conversation' as const, label: 'محادثة جديدة من عميل', emoji: '💬' },
-                  { key: 'on_abandoned_cart'   as const, label: 'سلة متروكة',            emoji: '🛒' },
-                  { key: 'on_low_rating'       as const, label: 'تقييم منخفض (≤ 2 نجوم)', emoji: '⭐' },
+                  { key: 'on_new_conversation' as const, label: 'محادثة جديدة من عميل',    icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z' },
+                  { key: 'on_abandoned_cart'   as const, label: 'سلة متروكة',               icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z' },
+                  { key: 'on_low_rating'       as const, label: 'تقييم منخفض (≤ 2 نجوم)', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z' },
                 ].map(item => (
                   <div key={item.key} className="flex items-center justify-between px-4 py-3">
-                    <span className="text-sm text-foreground">{item.emoji} {item.label}</span>
+                    <div className="flex items-center gap-2.5">
+                      <Icon d={item.icon} size={14} className="text-default-400 flex-shrink-0" />
+                      <span className="text-sm text-foreground">{item.label}</span>
+                    </div>
                     <Switch size="sm" isSelected={notif[item.key]}
                       onValueChange={v => setNotif(n => ({ ...n, [item.key]: v }))} color="success" />
                   </div>
@@ -1135,7 +1144,7 @@ export default function Settings({ storeId }: Props) {
 
             {/* Webhook */}
             <section>
-              <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">Webhook URL (Slack / Zapier)</label>
+              <label className="text-xs font-bold text-default-500 block mb-2">Webhook URL (Slack / Zapier)</label>
               <TextField label="" value={notif.webhook_url}
                 onChange={v => setNotif(n => ({ ...n, webhook_url: v }))}
                 placeholder="https://hooks.slack.com/services/..." hint="اختياري" dir="ltr" />
@@ -1153,14 +1162,14 @@ export default function Settings({ storeId }: Props) {
                 onValueChange={v => setNotif(n => ({ ...n, quiet_hours_enabled: v }))} />
             </div>
 
-            <Msg text={notifMsg} />
+            <InlineAlert text={notifMsg} />
             <div className="flex gap-2">
-              <Button variant="flat" isLoading={notifTesting} onPress={testNotif}
+              <Button variant="bordered" isLoading={notifTesting} onPress={testNotif}
                 className="flex-1 font-semibold h-10">
-                {notifTesting ? '' : '🧪 اختبار'}
+                {notifTesting ? '' : 'اختبار الإشعارات'}
               </Button>
               <Button color="primary" isLoading={notifSaving} onPress={saveNotif}
-                className="flex-1 font-bold h-10 bg-gradient-to-r from-cyan-500 to-teal-600 text-white">
+                className="flex-1 font-bold h-10">
                 {notifSaving ? '' : 'حفظ الإشعارات'}
               </Button>
             </div>
@@ -1174,7 +1183,7 @@ export default function Settings({ storeId }: Props) {
             {/* Token status */}
             {tokenStatus && (
               <section>
-                <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">توكن سلة</label>
+                <label className="text-xs font-bold text-default-500 block mb-2">توكن سلة</label>
                 <div className="bg-content2 rounded-xl border border-divider overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-divider">
                     <span className="text-sm font-bold text-foreground">الحالة</span>
@@ -1205,7 +1214,7 @@ export default function Settings({ storeId }: Props) {
                 {tokenStatus.message && (
                   <p className="text-xs text-default-400 mt-1.5 px-1">{tokenStatus.message}</p>
                 )}
-                <Msg text={tokenMsg} />
+                <InlineAlert text={tokenMsg} />
                 <Button variant="flat" color="primary" isLoading={refreshing}
                   isDisabled={!tokenStatus.has_refresh} onPress={refreshTok}
                   className="w-full font-semibold h-10 mt-2">
@@ -1216,7 +1225,7 @@ export default function Settings({ storeId }: Props) {
 
             {/* Password */}
             <section>
-              <label className="text-xs font-bold text-default-400 uppercase tracking-wider block mb-2">تغيير كلمة المرور</label>
+              <label className="text-xs font-bold text-default-500 block mb-2">تغيير كلمة المرور</label>
               <div className="space-y-3">
                 <TextField label="الحالية" type="password" value={curPass} onChange={setCurPass}
                   placeholder="كلمة المرور الحالية" />
@@ -1227,8 +1236,8 @@ export default function Settings({ storeId }: Props) {
                     placeholder="أعد الإدخال" />
                 </div>
               </div>
-              <Msg text={passMsg} />
-              <Button color="warning" variant="flat" isLoading={passLoading} onPress={changePass}
+              <InlineAlert text={passMsg} />
+              <Button color="warning" isLoading={passLoading} onPress={changePass}
                 isDisabled={!curPass || !newPass || !confirmPass}
                 className="w-full font-semibold h-10 mt-3">
                 {passLoading ? '' : 'تغيير كلمة المرور'}
