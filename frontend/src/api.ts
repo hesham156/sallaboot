@@ -498,6 +498,24 @@ export const api = {
   blogDelete: (id: number) =>
     req<{ status: string; deleted_id: number }>('DELETE', `/admin/blog/posts/${id}`),
 
+  // ── Contacts (CRM) ─────────────────────────────────────────────────────
+  listContacts: (storeId: string, params: { page?: number; per_page?: number; search?: string } = {}) => {
+    const q = new URLSearchParams()
+    if (params.page)     q.set('page',     String(params.page))
+    if (params.per_page) q.set('per_page', String(params.per_page))
+    if (params.search)   q.set('search',   params.search)
+    const qs = q.toString()
+    return get<{ contacts: Contact[]; total: number; page: number; per_page: number; pages: number }>(
+      `/admin/${storeId}/contacts${qs ? '?' + qs : ''}`,
+    )
+  },
+  syncContacts: (storeId: string) =>
+    post<{ message: string; chat_found: number; salla_found: number; total: number }>(
+      `/admin/${storeId}/contacts/sync`,
+    ),
+  exportContactsUrl: (storeId: string, search = '') =>
+    `/admin/${storeId}/contacts/export${search ? `?search=${encodeURIComponent(search)}` : ''}`,
+
   // ── WhatsApp Campaigns ──────────────────────────────────────────────────
   listCampaigns: (storeId: string) =>
     get<{ campaigns: Campaign[]; count: number }>(`/admin/${storeId}/campaigns`),
@@ -1047,6 +1065,22 @@ export interface Campaign {
   total_count: number
   sent_count: number
   failed_count: number
+  created_at: string
+}
+
+// ── Contacts (CRM) ─────────────────────────────────────────────────────
+
+export interface Contact {
+  id: number
+  phone: string
+  name: string
+  email: string
+  company: string
+  city: string
+  country: string
+  source: 'chat' | 'salla'
+  salla_id?: string
+  last_seen?: string
   created_at: string
 }
 

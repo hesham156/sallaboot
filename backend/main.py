@@ -166,6 +166,7 @@ from routers import wa_templates as _wa_templates_router
 from routers import segments     as _segments_router
 from routers import blog         as _blog_router
 from routers import campaigns    as _campaigns_router
+from routers import contacts     as _contacts_router
 
 # Wire lifecycle.sync_task into routers that need it.
 _stores_router.set_sync_task(_lc.sync_task)
@@ -188,6 +189,7 @@ app.include_router(_wa_templates_router.router)
 app.include_router(_segments_router.router)
 app.include_router(_blog_router.router)
 app.include_router(_campaigns_router.router)
+app.include_router(_contacts_router.router)
 
 # Backward-compat aliases for tests that import from main
 _process_salla_event     = _webhooks_router.process_salla_event

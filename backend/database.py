@@ -466,6 +466,30 @@ async def _create_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_camp_recip_campaign
                 ON wa_campaign_recipients (campaign_id, status);
+
+            -- ── Contacts (unified CRM from chat + Salla) ────────────────────
+            CREATE TABLE IF NOT EXISTS contacts (
+                id          BIGSERIAL PRIMARY KEY,
+                store_id    TEXT NOT NULL,
+                phone       TEXT NOT NULL,
+                name        TEXT NOT NULL DEFAULT '',
+                email       TEXT NOT NULL DEFAULT '',
+                company     TEXT NOT NULL DEFAULT '',
+                city        TEXT NOT NULL DEFAULT '',
+                country     TEXT NOT NULL DEFAULT '',
+                source      TEXT NOT NULL DEFAULT 'chat',  -- 'chat' | 'salla'
+                salla_id    TEXT,
+                last_seen   TIMESTAMPTZ,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(store_id, phone)
+            );
+            CREATE INDEX IF NOT EXISTS idx_contacts_store
+                ON contacts (store_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_contacts_search
+                ON contacts USING gin (to_tsvector('simple',
+                    coalesce(name,'') || ' ' || coalesce(phone,'') || ' ' || coalesce(email,'')))
+                WHERE store_id IS NOT NULL;
         """)
 
 
@@ -3551,3 +3575,119 @@ async def campaign_recipient_stats(campaign_id: int) -> dict:
     except Exception as e:
         print(f"[db] campaign_recipient_stats error: {e}")
         return {}
+
+
+# ── Contacts (unified CRM) ─────────────────────────────────────────────────────
+
+async def contacts_count(store_id: str, search: str = "") -> int:
+    if not _pool:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            if search:
+                return await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM contacts
+                    WHERE store_id = $1
+                      AND (name ILIKE $2 OR phone ILIKE $2 OR email ILIKE $2)
+                    """,
+                    store_id, f"%{search}%",
+                ) or 0
+            return await conn.fetchval(
+                "SELECT COUNT(*) FROM contacts WHERE store_id = $1", store_id,
+            ) or 0
+    except Exception as e:
+        print(f"[db] contacts_count error: {e}")
+        return 0
+
+
+async def contacts_list(
+    store_id: str, page: int = 1, per_page: int = 25, search: str = ""
+) -> list[dict]:
+    if not _pool:
+        return []
+    offset = (page - 1) * per_page
+    try:
+        async with _pool.acquire() as conn:
+            if search:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, phone, name, email, company, city, country,
+                           source, salla_id, last_seen, created_at, updated_at
+                    FROM contacts
+                    WHERE store_id = $1
+                      AND (name ILIKE $2 OR phone ILIKE $2 OR email ILIKE $2)
+                    ORDER BY updated_at DESC
+                    LIMIT $3 OFFSET $4
+                    """,
+                    store_id, f"%{search}%", per_page, offset,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, phone, name, email, company, city, country,
+                           source, salla_id, last_seen, created_at, updated_at
+                    FROM contacts
+                    WHERE store_id = $1
+                    ORDER BY updated_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    store_id, per_page, offset,
+                )
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[db] contacts_list error: {e}")
+        return []
+
+
+async def contacts_upsert_batch(store_id: str, records: list[dict]) -> int:
+    """
+    Upsert a batch of contacts. Records should have: phone, name, email,
+    company, city, country, source, salla_id (all optional except phone).
+    Returns number of rows upserted.
+    """
+    if not _pool or not records:
+        return 0
+    try:
+        async with _pool.acquire() as conn:
+            count = 0
+            for r in records:
+                phone = (r.get("phone") or "").strip()
+                if not phone:
+                    continue
+                source = r.get("source", "chat")
+                await conn.execute(
+                    """
+                    INSERT INTO contacts
+                        (store_id, phone, name, email, company, city, country,
+                         source, salla_id, last_seen, updated_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+                    ON CONFLICT (store_id, phone) DO UPDATE SET
+                        name      = CASE WHEN contacts.source='salla' OR excluded.source='salla'
+                                         THEN GREATEST(excluded.name, contacts.name)
+                                         ELSE COALESCE(NULLIF(excluded.name,''), contacts.name) END,
+                        email     = COALESCE(NULLIF(excluded.email,''), contacts.email),
+                        company   = COALESCE(NULLIF(excluded.company,''), contacts.company),
+                        city      = COALESCE(NULLIF(excluded.city,''), contacts.city),
+                        country   = COALESCE(NULLIF(excluded.country,''), contacts.country),
+                        source    = CASE WHEN excluded.source='salla' THEN 'salla' ELSE contacts.source END,
+                        salla_id  = COALESCE(excluded.salla_id, contacts.salla_id),
+                        last_seen = GREATEST(excluded.last_seen, contacts.last_seen),
+                        updated_at = NOW()
+                    """,
+                    store_id,
+                    phone,
+                    (r.get("name") or "").strip(),
+                    (r.get("email") or "").strip(),
+                    (r.get("company") or "").strip(),
+                    (r.get("city") or "").strip(),
+                    (r.get("country") or "").strip(),
+                    source,
+                    r.get("salla_id") or None,
+                    r.get("last_seen") or None,
+                )
+                count += 1
+        return count
+    except Exception as e:
+        print(f"[db] contacts_upsert_batch error: {e}")
+        return 0
