@@ -313,7 +313,30 @@ export default function Settings({ storeId }: Props) {
   async function startPagesConnect() {
     if (!window.FB) { setMetaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة وحاول'); return }
     setMetaConnecting(true); setMetaMsg('')
+
+    // Watchdog: FB.login normally fires its callback even when the user
+    // cancels (with `authResponse: null`). But if the popup is blocked, if
+    // the FB App is in Development mode and the visitor isn't a tester,
+    // or if the popup gets stuck on an error page, the callback never
+    // fires and the spinner spins forever. After 60s assume the flow is
+    // wedged and surface a clear hint pointing at the usual culprits.
+    let settled = false
+    const watchdog = setTimeout(() => {
+      if (settled) return
+      settled = true
+      setMetaConnecting(false)
+      setMetaMsg(
+        '❌ تعذّر إكمال تسجيل دخول Facebook (انتهى الوقت). الأسباب الشائعة: ' +
+        'الـ popup مغلق من المتصفح • تطبيق Facebook لسه في Development Mode • ' +
+        'الـ domain ‎7ayak.app‎ غير مضاف في App Settings • الصلاحيات المطلوبة ' +
+        '(pages_messaging, instagram_basic, إلخ) محتاجة Facebook App Review.'
+      )
+    }, 60_000)
+
     window.FB.login(async (res: { authResponse?: { accessToken: string } }) => {
+      if (settled) return
+      settled = true
+      clearTimeout(watchdog)
       if (!res.authResponse) { setMetaConnecting(false); setMetaMsg('❌ تم إلغاء الربط'); return }
       try {
         const data = await api.metaConnectPages(storeId, { user_token: res.authResponse.accessToken })
