@@ -3748,11 +3748,13 @@ async def get_integrations(store_id: str) -> dict:
                 store_id,
             )
             if not row:
+                print(f"[db] get_integrations: no row for store_id='{store_id}'")
                 return {}
             result = _coerce_jsonb(row["integrations"])
             tokens = _coerce_jsonb(row["tokens"])
             if tokens.get("access_token"):
                 result.setdefault("salla", {"connected": True})
+            print(f"[db] get_integrations({store_id}): keys={list(result.keys())}")
             return result
     except Exception as e:
         print(f"[db] get_integrations error: {e}")
@@ -3765,7 +3767,7 @@ async def save_integration(store_id: str, platform: str, data: dict) -> None:
     if not _pool:
         raise RuntimeError("Database pool not initialised")
     async with _pool.acquire() as conn:
-        await conn.execute(
+        status = await conn.execute(
             """
             UPDATE stores
                SET integrations = integrations || $2::jsonb,
@@ -3775,6 +3777,13 @@ async def save_integration(store_id: str, platform: str, data: dict) -> None:
             store_id,
             _json.dumps({platform: data}),
         )
+        # status is e.g. "UPDATE 1" or "UPDATE 0"
+        rows_affected = int((status or "UPDATE 0").split()[-1])
+        if rows_affected == 0:
+            raise RuntimeError(
+                f"[db] save_integration: no store found with store_id='{store_id}' "
+                f"— UPDATE affected 0 rows"
+            )
 
 
 async def remove_integration(store_id: str, platform: str) -> None:

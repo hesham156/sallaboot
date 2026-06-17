@@ -230,7 +230,7 @@ export default function Integrations({ storeId }: Props) {
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Handle redirect back from Shopify OAuth
+  // Handle redirect back from Shopify OAuth + initial load (single effect to avoid race)
   useEffect(() => {
     const shopifyParam = searchParams.get('shopify')
     if (shopifyParam === 'connected') {
@@ -238,7 +238,6 @@ export default function Integrations({ storeId }: Props) {
       const next = new URLSearchParams(searchParams)
       next.delete('shopify')
       setSearchParams(next, { replace: true })
-      loadIntegrations()
     } else if (shopifyParam === 'error') {
       const reason = searchParams.get('reason')
       const msg = reason === 'shop_already_connected'
@@ -250,9 +249,9 @@ export default function Integrations({ storeId }: Props) {
       next.delete('reason')
       setSearchParams(next, { replace: true })
     }
-  }, [])
-
-  useEffect(() => { loadIntegrations() }, [storeId])
+    loadIntegrations()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId])
 
   async function loadIntegrations() {
     setLoading(true)
