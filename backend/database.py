@@ -3723,16 +3723,26 @@ async def find_store_by_shopify_shop(shop: str) -> str | None:
 
 
 async def get_integrations(store_id: str) -> dict:
-    """Return the integrations JSONB for a store (empty dict if none)."""
+    """
+    Return a merged integrations dict for the store.
+    Includes the explicit integrations JSONB column PLUS a synthetic
+    'salla' key when the store has live Salla OAuth tokens — so the
+    frontend can enforce ecommerce-platform exclusivity without a
+    separate API call.
+    """
     try:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT integrations FROM stores WHERE store_id = $1",
+                "SELECT integrations, tokens FROM stores WHERE store_id = $1",
                 store_id,
             )
             if not row:
                 return {}
-            return _coerce_jsonb(row["integrations"])
+            result = _coerce_jsonb(row["integrations"])
+            tokens = _coerce_jsonb(row["tokens"])
+            if tokens.get("access_token"):
+                result.setdefault("salla", {"connected": True})
+            return result
     except Exception as e:
         print(f"[db] get_integrations error: {e}")
         return {}

@@ -86,6 +86,16 @@ async def shopify_install(store_id: str, shop: str, request: Request):
     if not SHOPIFY_CLIENT_ID:
         raise HTTPException(503, "لم يتم تهيئة تكامل Shopify على هذا الخادم")
 
+    # Enforce ecommerce exclusivity: one platform per store
+    existing = await db.get_integrations(store_id)
+    _ECOMMERCE_NAMES = {"salla": "سلّة", "zid": "زد", "woocommerce": "ووكومرس"}
+    for platform, label in _ECOMMERCE_NAMES.items():
+        if existing.get(platform):
+            raise HTTPException(
+                409,
+                f"الحساب مربوط بـ {label} بالفعل — لا يمكن ربط منصتَي تجارة إلكترونية في آنٍ واحد",
+            )
+
     shop = _normalize_shop(shop)
     state = secrets.token_urlsafe(32)
     _oauth_states[state] = {"store_id": store_id, "shop": shop}

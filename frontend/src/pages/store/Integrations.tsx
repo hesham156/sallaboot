@@ -249,9 +249,7 @@ export default function Integrations({ storeId }: Props) {
       const res = await api.listIntegrations(storeId)
       const apiData = res.integrations || {}
       setIntegrations(INTEGRATIONS_DEF.map(def => {
-        // salla is always connected (it's the main platform)
-        if (def.id === 'salla') return { ...def, status: 'connected' as Status }
-        if (def.comingSoon)     return { ...def, status: 'coming_soon' as Status }
+        if (def.comingSoon) return { ...def, status: 'coming_soon' as Status }
         const d = apiData[def.id]
         return {
           ...def,
@@ -260,15 +258,26 @@ export default function Integrations({ storeId }: Props) {
         }
       }))
     } catch {
-      // On error still show the static list
       setIntegrations(INTEGRATIONS_DEF.map(d => ({
         ...d,
-        status: (d.id === 'salla' ? 'connected' : d.comingSoon ? 'coming_soon' : 'disconnected') as Status,
+        status: (d.comingSoon ? 'coming_soon' : 'disconnected') as Status,
       })))
     } finally { setLoading(false) }
   }
 
+  const ECOMMERCE_IDS = ['salla', 'shopify', 'zid', 'woocommerce']
+
   function handleConnect(id: string) {
+    // Enforce one ecommerce platform per account
+    if (ECOMMERCE_IDS.includes(id)) {
+      const conflict = integrations.find(
+        i => ECOMMERCE_IDS.includes(i.id) && i.id !== id && i.status === 'connected'
+      )
+      if (conflict) {
+        showToast(`أنت مربوط بـ ${conflict.name} بالفعل — لا يمكن ربط منصتَي تجارة إلكترونية في آنٍ واحد`, 'error')
+        return
+      }
+    }
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
