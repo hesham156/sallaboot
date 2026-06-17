@@ -3707,12 +3707,25 @@ async def contacts_upsert_batch(store_id: str, records: list[dict]) -> int:
 # ── Integrations ──────────────────────────────────────────────────────────────
 
 async def clear_salla_tokens(store_id: str) -> None:
-    """Remove Salla OAuth tokens from the store, effectively disconnecting it."""
+    """Remove only Salla OAuth fields from tokens, preserving admin_password_hash, store_name, etc."""
     if not _pool:
         raise RuntimeError("Database pool not initialised")
     async with _pool.acquire() as conn:
+        # Use the - operator to surgically remove Salla-only keys.
+        # Do NOT use tokens = '{}'::jsonb — that nukes admin_password_hash and store metadata.
         await conn.execute(
-            "UPDATE stores SET tokens = '{}'::jsonb, updated_at = NOW() WHERE store_id = $1",
+            """
+            UPDATE stores
+               SET tokens = tokens
+                   - 'access_token'
+                   - 'refresh_token'
+                   - 'token_type'
+                   - 'expires_in'
+                   - 'expires_at'
+                   - 'scope',
+                   updated_at = NOW()
+             WHERE store_id = $1
+            """,
             store_id,
         )
 
