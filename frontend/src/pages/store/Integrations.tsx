@@ -270,7 +270,10 @@ export default function Integrations({ storeId }: Props) {
   }
 
   async function startShopifyInstall() {
-    const shop = shopDomain.trim()
+    // Strip protocol prefix if user pasted a full URL
+    let shop = shopDomain.trim().toLowerCase()
+    shop = shop.replace(/^https?:\/\//, '').replace(/^https?\/\//, '')
+    shop = shop.split('/')[0].split('?')[0]
     if (!shop) return
     setInstalling(true); setInstallError('')
     try {

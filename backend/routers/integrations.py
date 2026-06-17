@@ -33,6 +33,13 @@ def _shopify_api(shop: str) -> str:
 
 def _normalize_shop(shop: str) -> str:
     shop = shop.strip().lower().rstrip("/")
+    # Strip any protocol prefix the user may have pasted
+    for prefix in ("https://", "http://", "https//", "http//"):
+        if shop.startswith(prefix):
+            shop = shop[len(prefix):]
+            break
+    # Strip trailing path/query if user pasted a full URL
+    shop = shop.split("/")[0].split("?")[0]
     if not shop.endswith(".myshopify.com"):
         shop = shop + ".myshopify.com"
     return shop
