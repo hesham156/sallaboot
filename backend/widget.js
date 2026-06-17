@@ -111,331 +111,365 @@
   // ── Styles ────────────────────────────────────────────────────────────────────
   var _side = CONFIG.position === "right" ? "right" : "left";
   var styles = `
-    #salla-chat-widget * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; }
+    /* ── Isolation: prevent Shopify/3rd-party theme CSS from leaking in ── */
+    #salla-chat-widget, #salla-chat-widget * {
+      box-sizing: border-box !important;
+      font-family: 'Segoe UI', Tahoma, Arial, sans-serif !important;
+    }
+    /* ─────────────────────────────────────────────────────────── */
     #salla-chat-btn {
-      position: fixed; bottom: 24px; ${_side}: 24px; z-index: 9999;
-      width: 60px; height: 60px; border-radius: 50%;
-      background: ${CONFIG.primaryColor}; border: none; cursor: pointer;
-      box-shadow: 0 4px 20px rgba(26,86,219,0.4);
-      display: flex; align-items: center; justify-content: center;
-      transition: transform 0.2s, box-shadow 0.2s;
+      position: fixed !important; bottom: 24px !important; ${_side}: 24px !important; z-index: 9999 !important;
+      width: 60px !important; height: 60px !important; border-radius: 50% !important;
+      background: ${CONFIG.primaryColor} !important; border: none !important; cursor: pointer !important;
+      box-shadow: 0 4px 20px rgba(26,86,219,0.4) !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      transition: transform 0.2s, box-shadow 0.2s !important;
+      padding: 0 !important; margin: 0 !important; text-decoration: none !important;
     }
-    #salla-chat-btn:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(26,86,219,0.5); }
-    #salla-chat-btn svg { width: 28px; height: 28px; fill: white; }
+    #salla-chat-btn:hover { transform: scale(1.1) !important; box-shadow: 0 6px 28px rgba(26,86,219,0.5) !important; }
+    #salla-chat-btn svg { width: 28px !important; height: 28px !important; fill: white !important; display: block !important; }
     #salla-chat-badge {
-      position: absolute; top: -4px; right: -4px;
-      background: #ef4444; color: white; border-radius: 50%;
-      width: 20px; height: 20px; font-size: 11px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center;
-      display: none;
+      position: absolute !important; top: -4px !important; right: -4px !important;
+      background: #ef4444 !important; color: white !important; border-radius: 50% !important;
+      width: 20px !important; height: 20px !important; font-size: 11px !important; font-weight: 700 !important;
+      display: none !important; align-items: center !important; justify-content: center !important;
+      line-height: 1 !important; padding: 0 !important; margin: 0 !important;
     }
+    #salla-chat-badge.show { display: flex !important; }
     #salla-chat-panel {
-      position: fixed; bottom: 96px; ${_side}: 24px; z-index: 9998;
-      width: 370px; height: 560px; border-radius: 16px;
-      background: #fff; box-shadow: 0 10px 50px rgba(0,0,0,0.18);
-      display: flex; flex-direction: column; overflow: hidden;
-      transform: scale(0.9) translateY(20px); opacity: 0;
-      transition: transform 0.25s, opacity 0.25s; pointer-events: none;
-      direction: rtl;
+      position: fixed !important; bottom: 96px !important; ${_side}: 24px !important; z-index: 9998 !important;
+      width: 370px !important; height: 560px !important; border-radius: 16px !important;
+      background: #fff !important; box-shadow: 0 10px 50px rgba(0,0,0,0.18) !important;
+      display: flex !important; flex-direction: column !important; overflow: hidden !important;
+      transform: scale(0.9) translateY(20px) !important; opacity: 0 !important;
+      transition: transform 0.25s, opacity 0.25s !important; pointer-events: none !important;
+      direction: rtl !important; margin: 0 !important; padding: 0 !important;
     }
     #salla-chat-panel.open {
-      transform: scale(1) translateY(0); opacity: 1; pointer-events: all;
+      transform: scale(1) translateY(0) !important; opacity: 1 !important; pointer-events: all !important;
     }
     #salla-chat-header {
-      background: ${CONFIG.primaryColor}; color: white; padding: 14px 16px;
-      display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+      background: ${CONFIG.primaryColor} !important; color: white !important; padding: 14px 16px !important;
+      display: flex !important; align-items: center !important; gap: 10px !important; flex-shrink: 0 !important;
     }
     #salla-chat-header .avatar {
-      width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.25);
-      display: flex; align-items: center; justify-content: center; font-size: 18px;
+      width: 38px !important; height: 38px !important; border-radius: 50% !important;
+      background: rgba(255,255,255,0.25) !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      font-size: 18px !important; flex-shrink: 0 !important;
     }
-    #salla-chat-header .info { flex: 1; }
-    #salla-chat-header .info .name { font-weight: 700; font-size: 15px; }
+    #salla-chat-header .info { flex: 1 !important; overflow: hidden !important; }
+    #salla-chat-header .info .name { font-weight: 700 !important; font-size: 15px !important; display: block !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
     #salla-chat-header .info .status {
-      font-size: 12px; opacity: 0.85; display: flex; align-items: center; gap: 4px;
+      font-size: 12px !important; opacity: 0.85 !important; display: flex !important; align-items: center !important; gap: 4px !important;
     }
     #salla-chat-header .info .status::before {
-      content: ''; width: 7px; height: 7px; border-radius: 50%; display: inline-block;
-      background: #4ade80;
+      content: '' !important; width: 7px !important; height: 7px !important; border-radius: 50% !important; display: inline-block !important;
+      background: #4ade80 !important; flex-shrink: 0 !important;
     }
-    #salla-chat-header .info .status.human::before { background: #fb923c; }
-    #salla-chat-close { background: none; border: none; color: white; cursor: pointer; opacity: 0.8; font-size: 22px; line-height: 1; padding: 2px; }
-    #salla-chat-close:hover { opacity: 1; }
+    #salla-chat-header .info .status.human::before { background: #fb923c !important; }
+    #salla-chat-close {
+      background: none !important; border: none !important; color: white !important;
+      cursor: pointer !important; opacity: 0.8 !important; font-size: 22px !important;
+      line-height: 1 !important; padding: 2px !important; flex-shrink: 0 !important;
+    }
+    #salla-chat-close:hover { opacity: 1 !important; }
     #salla-chat-messages {
-      flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px;
-      background: #f8fafc;
+      flex: 1 !important; overflow-y: auto !important; padding: 16px !important;
+      display: flex !important; flex-direction: column !important; gap: 10px !important;
+      background: #f8fafc !important; margin: 0 !important;
     }
-    #salla-chat-messages::-webkit-scrollbar { width: 4px; }
-    #salla-chat-messages::-webkit-scrollbar-track { background: transparent; }
-    #salla-chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    .chat-msg { display: flex; gap: 8px; max-width: 88%; }
-    .chat-msg.user { align-self: flex-start; flex-direction: row-reverse; }
-    .chat-msg.bot  { align-self: flex-end; }
-    .chat-msg.admin { align-self: flex-end; }
-    .chat-msg .bubble {
-      padding: 10px 13px; border-radius: 14px; font-size: 14px; line-height: 1.55;
-      white-space: pre-wrap; word-break: break-word;
+    #salla-chat-messages::-webkit-scrollbar { width: 4px !important; }
+    #salla-chat-messages::-webkit-scrollbar-track { background: transparent !important; }
+    #salla-chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1 !important; border-radius: 4px !important; }
+    /* ── Message bubbles — scoped to prevent theme interference ── */
+    #salla-chat-messages .chat-msg {
+      display: flex !important; gap: 8px !important; max-width: 88% !important;
+      margin: 0 !important; padding: 0 !important; list-style: none !important;
     }
-    .chat-msg.user  .bubble { background: ${CONFIG.primaryColor}; color: white; border-bottom-right-radius: 4px; }
-    .chat-msg.bot   .bubble { background: white; color: #1e293b; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-    .chat-msg.admin .bubble { background: #fff7ed; color: #92400e; border: 1px solid #fed7aa; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
-    .chat-msg.admin .bubble::before { content: '👨‍💼 '; }
-    .chat-msg.system-note { align-self: center; }
-    .chat-msg.system-note .bubble {
-      background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;
-      border-radius: 20px; font-size: 12px; padding: 6px 14px; text-align: center;
+    #salla-chat-messages .chat-msg.user { align-self: flex-start !important; flex-direction: row-reverse !important; }
+    #salla-chat-messages .chat-msg.bot  { align-self: flex-end !important; }
+    #salla-chat-messages .chat-msg.admin { align-self: flex-end !important; flex-direction: column !important; align-items: flex-end !important; }
+    #salla-chat-messages .chat-msg.system-note { align-self: center !important; }
+    #salla-chat-messages .chat-msg .bubble {
+      display: block !important;
+      padding: 10px 13px !important; border-radius: 14px !important;
+      font-size: 14px !important; line-height: 1.55 !important;
+      white-space: pre-wrap !important; word-break: break-word !important;
+      overflow-wrap: break-word !important; margin: 0 !important;
     }
-    .chat-typing { display: flex; gap: 4px; padding: 10px 14px; background: white; border-radius: 14px; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); align-self: flex-end; }
-    .chat-typing span { width: 7px; height: 7px; background: #94a3b8; border-radius: 50%; animation: bounce 1.2s infinite; }
-    .chat-typing span:nth-child(2) { animation-delay: 0.2s; }
-    .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
-    /* Human support banner */
+    #salla-chat-messages .chat-msg.user  .bubble {
+      background: ${CONFIG.primaryColor} !important; color: white !important; border-bottom-right-radius: 4px !important;
+    }
+    #salla-chat-messages .chat-msg.bot   .bubble {
+      background: white !important; color: #1e293b !important; border-bottom-left-radius: 4px !important;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+    }
+    #salla-chat-messages .chat-msg.admin .bubble {
+      background: #fff7ed !important; color: #92400e !important; border: 1px solid #fed7aa !important;
+      border-bottom-left-radius: 4px !important; box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
+    }
+    #salla-chat-messages .chat-msg.admin .agent-caption {
+      font-size: 10.5px !important; font-weight: 700 !important; color: #92400e !important;
+      margin: 0 4px 2px !important; opacity: 0.85 !important; text-align: right !important; display: block !important;
+    }
+    #salla-chat-messages .chat-msg.system-note .bubble {
+      background: #f0fdf4 !important; color: #166534 !important; border: 1px solid #bbf7d0 !important;
+      border-radius: 20px !important; font-size: 12px !important; padding: 6px 14px !important; text-align: center !important;
+    }
+    #salla-chat-messages .chat-typing {
+      display: flex !important; gap: 4px !important; padding: 10px 14px !important;
+      background: white !important; border-radius: 14px !important; border-bottom-left-radius: 4px !important;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important; align-self: flex-end !important;
+    }
+    #salla-chat-messages .chat-typing span {
+      width: 7px !important; height: 7px !important; background: #94a3b8 !important;
+      border-radius: 50% !important; display: inline-block !important;
+      animation: salla-bounce 1.2s infinite !important;
+    }
+    #salla-chat-messages .chat-typing span:nth-child(2) { animation-delay: 0.2s !important; }
+    #salla-chat-messages .chat-typing span:nth-child(3) { animation-delay: 0.4s !important; }
+    @keyframes salla-bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+    /* ── Human support banner ────────────────────────────────── */
     #salla-human-banner {
-      background: #fff7ed; border-top: 2px solid #fb923c;
-      padding: 8px 14px; font-size: 12px; color: #92400e;
-      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-      display: none;
+      background: #fff7ed !important; border-top: 2px solid #fb923c !important;
+      padding: 8px 14px !important; font-size: 12px !important; color: #92400e !important;
+      display: none !important; align-items: center !important; gap: 6px !important; flex-shrink: 0 !important;
     }
-    #salla-human-banner.visible { display: flex; }
-    #salla-human-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: #fb923c; flex-shrink: 0; animation: pulse-dot 1.5s infinite; }
-    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    #salla-human-banner.visible { display: flex !important; }
+    #salla-human-banner .dot {
+      width: 8px !important; height: 8px !important; border-radius: 50% !important;
+      background: #fb923c !important; flex-shrink: 0 !important; display: inline-block !important;
+      animation: salla-pulse-dot 1.5s infinite !important;
+    }
+    @keyframes salla-pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    /* ── Footer ──────────────────────────────────────────────── */
     #salla-chat-footer {
-      padding: 10px 12px; border-top: 1px solid #e2e8f0; background: white; flex-shrink: 0;
+      padding: 10px 12px !important; border-top: 1px solid #e2e8f0 !important;
+      background: white !important; flex-shrink: 0 !important;
     }
     #salla-chat-upload-bar {
-      display: flex; gap: 6px; margin-bottom: 8px; display: none;
+      display: none !important; gap: 6px !important; margin-bottom: 8px !important;
     }
-    #salla-chat-upload-bar.visible { display: flex; }
-    .upload-btn {
-      flex: 1; padding: 7px 10px; border: 1.5px dashed #cbd5e1; border-radius: 8px;
-      background: #f8fafc; color: #64748b; font-size: 13px; cursor: pointer;
-      text-align: center; transition: border-color 0.15s, color 0.15s;
-      display: flex; align-items: center; justify-content: center; gap: 6px;
+    #salla-chat-upload-bar.visible { display: flex !important; }
+    #salla-chat-widget .upload-btn {
+      flex: 1 !important; padding: 7px 10px !important; border: 1.5px dashed #cbd5e1 !important;
+      border-radius: 8px !important; background: #f8fafc !important; color: #64748b !important;
+      font-size: 13px !important; cursor: pointer !important; text-align: center !important;
+      display: flex !important; align-items: center !important; justify-content: center !important; gap: 6px !important;
     }
-    .upload-btn:hover { border-color: ${CONFIG.primaryColor}; color: ${CONFIG.primaryColor}; }
-    #salla-file-input { display: none; }
-    #salla-chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+    #salla-chat-widget .upload-btn:hover { border-color: ${CONFIG.primaryColor} !important; color: ${CONFIG.primaryColor} !important; }
+    #salla-file-input { display: none !important; }
+    #salla-chat-input-row {
+      display: flex !important; gap: 8px !important; align-items: flex-end !important;
+    }
     #salla-chat-input {
-      flex: 1; resize: none; border: 1.5px solid #e2e8f0; border-radius: 10px;
-      padding: 9px 13px; font-size: 14px; color: #1e293b; outline: none;
-      font-family: inherit; line-height: 1.4; max-height: 100px; overflow-y: auto;
-      direction: rtl;
-      transition: border-color 0.15s;
+      flex: 1 !important; resize: none !important; border: 1.5px solid #e2e8f0 !important;
+      border-radius: 10px !important; padding: 9px 13px !important; font-size: 14px !important;
+      color: #1e293b !important; outline: none !important; line-height: 1.4 !important;
+      max-height: 100px !important; overflow-y: auto !important; direction: rtl !important;
+      background: white !important;
     }
-    #salla-chat-input:focus { border-color: ${CONFIG.primaryColor}; }
-    #salla-chat-input::placeholder { color: #94a3b8; }
+    #salla-chat-input:focus { border-color: ${CONFIG.primaryColor} !important; }
+    #salla-chat-input::placeholder { color: #94a3b8 !important; }
     #salla-chat-send {
-      width: 40px; height: 40px; border-radius: 10px; background: ${CONFIG.primaryColor};
-      border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; transition: opacity 0.15s;
+      width: 40px !important; height: 40px !important; border-radius: 10px !important;
+      background: ${CONFIG.primaryColor} !important; border: none !important; cursor: pointer !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      flex-shrink: 0 !important; padding: 0 !important;
     }
-    #salla-chat-send:hover { opacity: 0.9; }
-    #salla-chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
-    #salla-chat-send svg { width: 18px; height: 18px; fill: white; transform: rotate(180deg); }
-    .chat-attach-btn {
-      width: 40px; height: 40px; border-radius: 10px; background: #f1f5f9;
-      border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; transition: background 0.15s;
+    #salla-chat-send:hover { opacity: 0.9 !important; }
+    #salla-chat-send:disabled { opacity: 0.5 !important; cursor: not-allowed !important; }
+    #salla-chat-send svg { width: 18px !important; height: 18px !important; fill: white !important; transform: rotate(180deg) !important; display: block !important; }
+    #salla-chat-widget .chat-attach-btn {
+      width: 40px !important; height: 40px !important; border-radius: 10px !important;
+      background: #f1f5f9 !important; border: none !important; cursor: pointer !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      flex-shrink: 0 !important; padding: 0 !important;
     }
-    .chat-attach-btn:hover { background: #e2e8f0; }
-    .chat-attach-btn svg { width: 20px; height: 20px; fill: #64748b; }
-    .file-preview {
-      background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
-      padding: 8px 12px; display: flex; align-items: center; gap: 8px;
-      font-size: 13px; color: #0369a1; margin-bottom: 8px;
+    #salla-chat-widget .chat-attach-btn:hover { background: #e2e8f0 !important; }
+    #salla-chat-widget .chat-attach-btn svg { width: 20px !important; height: 20px !important; fill: #64748b !important; display: block !important; }
+    #salla-chat-widget .file-preview {
+      background: #f0f9ff !important; border: 1px solid #bae6fd !important; border-radius: 8px !important;
+      padding: 8px 12px !important; display: flex !important; align-items: center !important;
+      gap: 8px !important; font-size: 13px !important; color: #0369a1 !important; margin-bottom: 8px !important;
     }
-    .file-preview .remove { margin-right: auto; cursor: pointer; color: #94a3b8; font-size: 16px; }
-    .file-preview .remove:hover { color: #ef4444; }
+    #salla-chat-widget .file-preview .remove {
+      margin-right: auto !important; cursor: pointer !important; color: #94a3b8 !important; font-size: 16px !important;
+    }
+    #salla-chat-widget .file-preview .remove:hover { color: #ef4444 !important; }
     @media (max-width: 420px) {
-      #salla-chat-panel { width: calc(100vw - 16px); ${_side}: 8px; bottom: 80px; height: 70vh; }
+      #salla-chat-panel { width: calc(100vw - 16px) !important; ${_side}: 8px !important; bottom: 80px !important; height: 70vh !important; }
     }
     /* ── Quick action buttons ────────────────────────────────── */
-    .quick-actions-row { align-self: stretch; max-width: 100%; }
-    .quick-actions-title {
-      font-size: 11px; color: #94a3b8; text-align: center; margin: 4px 0 6px;
-      font-weight: 600;
+    #salla-chat-messages .quick-actions-row { align-self: stretch !important; max-width: 100% !important; }
+    #salla-chat-messages .quick-actions-title {
+      font-size: 11px !important; color: #94a3b8 !important; text-align: center !important;
+      margin: 4px 0 6px !important; font-weight: 600 !important; display: block !important;
     }
-    .quick-actions-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    #salla-chat-messages .quick-actions-grid {
+      display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important;
     }
-    .qa-btn {
-      display: flex; flex-direction: column; align-items: center; gap: 4px; justify-content: center;
-      padding: 12px 6px; border-radius: 12px; cursor: pointer;
-      font-size: 12px; font-weight: 700; font-family: inherit;
-      border: 1.5px solid; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-      text-align: center; line-height: 1.2;
+    #salla-chat-messages .qa-btn {
+      display: flex !important; flex-direction: column !important; align-items: center !important;
+      gap: 4px !important; justify-content: center !important; padding: 12px 6px !important;
+      border-radius: 12px !important; cursor: pointer !important; font-size: 12px !important;
+      font-weight: 700 !important; border: 1.5px solid !important;
+      text-align: center !important; line-height: 1.2 !important;
     }
-    .qa-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.10); }
-    .qa-btn:active { transform: translateY(0); }
-    .qa-btn .qa-icon { font-size: 20px; line-height: 1; }
-    .qa-blue   { color: #1e40af; border-color: #bfdbfe; background: #eff6ff; }
-    .qa-blue:hover   { border-color: #3b82f6; background: #dbeafe; }
-    .qa-green  { color: #166534; border-color: #bbf7d0; background: #f0fdf4; }
-    .qa-green:hover  { border-color: #22c55e; background: #dcfce7; }
-    .qa-purple { color: #6b21a8; border-color: #e9d5ff; background: #faf5ff; }
-    .qa-purple:hover { border-color: #a855f7; background: #f3e8ff; }
-    .qa-amber  { color: #92400e; border-color: #fde68a; background: #fffbeb; }
-    .qa-amber:hover  { border-color: #f59e0b; background: #fef3c7; }
+    #salla-chat-messages .qa-btn:hover { transform: translateY(-2px) !important; box-shadow: 0 4px 14px rgba(0,0,0,0.10) !important; }
+    #salla-chat-messages .qa-btn:active { transform: translateY(0) !important; }
+    #salla-chat-messages .qa-btn .qa-icon { font-size: 20px !important; line-height: 1 !important; }
+    #salla-chat-messages .qa-blue   { color: #1e40af !important; border-color: #bfdbfe !important; background: #eff6ff !important; }
+    #salla-chat-messages .qa-blue:hover   { border-color: #3b82f6 !important; background: #dbeafe !important; }
+    #salla-chat-messages .qa-green  { color: #166534 !important; border-color: #bbf7d0 !important; background: #f0fdf4 !important; }
+    #salla-chat-messages .qa-green:hover  { border-color: #22c55e !important; background: #dcfce7 !important; }
+    #salla-chat-messages .qa-purple { color: #6b21a8 !important; border-color: #e9d5ff !important; background: #faf5ff !important; }
+    #salla-chat-messages .qa-purple:hover { border-color: #a855f7 !important; background: #f3e8ff !important; }
+    #salla-chat-messages .qa-amber  { color: #92400e !important; border-color: #fde68a !important; background: #fffbeb !important; }
+    #salla-chat-messages .qa-amber:hover  { border-color: #f59e0b !important; background: #fef3c7 !important; }
     /* ── Cart badge on header ─────────────────────────────────── */
     #salla-cart-badge {
-      background: #ef4444; color: white; border-radius: 20px;
-      font-size: 11px; font-weight: 700; padding: 1px 7px; margin-right: auto;
-      display: none;
+      background: #ef4444 !important; color: white !important; border-radius: 20px !important;
+      font-size: 11px !important; font-weight: 700 !important; padding: 1px 7px !important;
+      margin-right: auto !important; display: none !important;
     }
-    #salla-cart-badge.visible { display: inline-block; }
+    #salla-cart-badge.visible { display: inline-block !important; }
     /* ── Product cards component ──────────────────────────────── */
-    .chat-component { width: 100%; margin-top: 4px; }
-    .product-cards-wrap {
-      display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+    #salla-chat-messages .chat-component { width: 100% !important; margin-top: 4px !important; }
+    #salla-chat-messages .product-cards-wrap {
+      display: flex !important; gap: 8px !important; overflow-x: auto !important; padding-bottom: 4px !important;
       scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent;
     }
-    .product-cards-wrap::-webkit-scrollbar { height: 4px; }
-    .product-cards-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    .product-card {
-      flex: 0 0 140px; background: white; border-radius: 12px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;
-      display: flex; flex-direction: column; transition: box-shadow 0.2s;
+    #salla-chat-messages .product-cards-wrap::-webkit-scrollbar { height: 4px !important; }
+    #salla-chat-messages .product-cards-wrap::-webkit-scrollbar-thumb { background: #cbd5e1 !important; border-radius: 4px !important; }
+    #salla-chat-messages .product-card {
+      flex: 0 0 140px !important; background: white !important; border-radius: 12px !important;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1) !important; overflow: hidden !important;
+      display: flex !important; flex-direction: column !important;
     }
-    .product-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.15); }
-    .product-card img {
-      width: 100%; height: 100px; object-fit: cover; background: #f1f5f9;
+    #salla-chat-messages .product-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.15) !important; }
+    #salla-chat-messages .product-card img {
+      width: 100% !important; height: 100px !important; object-fit: cover !important; background: #f1f5f9 !important; display: block !important;
     }
-    .product-card .card-body { padding: 8px 10px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
-    .product-card .card-name { font-size: 12px; font-weight: 600; color: #1e293b; line-height: 1.3; }
-    .product-card .card-price { font-size: 12px; color: ${CONFIG.primaryColor}; font-weight: 700; }
-    .product-card .card-price del { color: #94a3b8; font-weight: 400; margin-left: 4px; font-size: 11px; }
-    .product-card .card-unavail { font-size: 11px; color: #ef4444; }
-    .product-card .card-add {
-      margin-top: auto; width: 100%; padding: 6px 0; background: ${CONFIG.primaryColor};
-      color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600;
-      cursor: pointer; transition: opacity 0.15s;
+    #salla-chat-messages .product-card .card-body {
+      padding: 8px 10px !important; flex: 1 !important; display: flex !important; flex-direction: column !important; gap: 4px !important;
     }
-    .product-card .card-add:hover { opacity: 0.88; }
-    .product-card .card-add:disabled { background: #cbd5e1; cursor: not-allowed; }
+    #salla-chat-messages .product-card .card-name { font-size: 12px !important; font-weight: 600 !important; color: #1e293b !important; line-height: 1.3 !important; }
+    #salla-chat-messages .product-card .card-price { font-size: 12px !important; color: ${CONFIG.primaryColor} !important; font-weight: 700 !important; }
+    #salla-chat-messages .product-card .card-price del { color: #94a3b8 !important; font-weight: 400 !important; margin-left: 4px !important; font-size: 11px !important; }
+    #salla-chat-messages .product-card .card-unavail { font-size: 11px !important; color: #ef4444 !important; }
+    #salla-chat-messages .product-card .card-add {
+      margin-top: auto !important; width: 100% !important; padding: 6px 0 !important;
+      background: ${CONFIG.primaryColor} !important; color: white !important; border: none !important;
+      border-radius: 8px !important; font-size: 12px !important; font-weight: 600 !important; cursor: pointer !important;
+    }
+    #salla-chat-messages .product-card .card-add:hover { opacity: 0.88 !important; }
+    #salla-chat-messages .product-card .card-add:disabled { background: #cbd5e1 !important; cursor: not-allowed !important; }
     /* ── Cart component ───────────────────────────────────────── */
-    .cart-component {
-      background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.09);
-      padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; width: 100%;
+    #salla-chat-messages .cart-component {
+      background: white !important; border-radius: 12px !important;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.09) !important;
+      padding: 12px 14px !important; display: flex !important; flex-direction: column !important;
+      gap: 8px !important; width: 100% !important;
     }
-    .cart-component .cart-title { font-size: 13px; font-weight: 700; color: #1e293b; }
-    .cart-item {
-      display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475569;
+    #salla-chat-messages .cart-component .cart-title { font-size: 13px !important; font-weight: 700 !important; color: #1e293b !important; }
+    #salla-chat-messages .cart-item {
+      display: flex !important; align-items: center !important; gap: 8px !important; font-size: 12px !important; color: #475569 !important;
     }
-    .cart-item img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: #f1f5f9; flex-shrink: 0; }
-    .cart-item .ci-name { flex: 1; font-weight: 500; color: #1e293b; }
-    .cart-item .ci-qty { color: #64748b; }
-    .cart-item .ci-sub { font-weight: 600; color: ${CONFIG.primaryColor}; }
-    .cart-total {
-      display: flex; justify-content: space-between; border-top: 1px solid #e2e8f0;
-      padding-top: 8px; font-size: 13px; font-weight: 700; color: #1e293b;
+    #salla-chat-messages .cart-item img { width: 36px !important; height: 36px !important; border-radius: 6px !important; object-fit: cover !important; flex-shrink: 0 !important; }
+    #salla-chat-messages .cart-item .ci-name { flex: 1 !important; font-weight: 500 !important; color: #1e293b !important; }
+    #salla-chat-messages .cart-item .ci-qty { color: #64748b !important; }
+    #salla-chat-messages .cart-item .ci-sub { font-weight: 600 !important; color: ${CONFIG.primaryColor} !important; }
+    #salla-chat-messages .cart-total {
+      display: flex !important; justify-content: space-between !important; border-top: 1px solid #e2e8f0 !important;
+      padding-top: 8px !important; font-size: 13px !important; font-weight: 700 !important; color: #1e293b !important;
     }
-    .cart-checkout-btn {
-      width: 100%; padding: 9px 0; background: #16a34a; color: white;
-      border: none; border-radius: 10px; font-size: 13px; font-weight: 700;
-      cursor: pointer; transition: opacity 0.15s;
+    #salla-chat-messages .cart-checkout-btn {
+      width: 100% !important; padding: 9px 0 !important; background: #16a34a !important; color: white !important;
+      border: none !important; border-radius: 10px !important; font-size: 13px !important; font-weight: 700 !important; cursor: pointer !important;
     }
-    .cart-checkout-btn:hover { opacity: 0.88; }
+    #salla-chat-messages .cart-checkout-btn:hover { opacity: 0.88 !important; }
     /* ── Checkout component ───────────────────────────────────── */
-    .checkout-component {
-      background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 1px solid #86efac;
-      border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column;
-      gap: 8px; width: 100%;
+    #salla-chat-messages .checkout-component {
+      background: linear-gradient(135deg, #f0fdf4, #dcfce7) !important; border: 1px solid #86efac !important;
+      border-radius: 12px !important; padding: 14px 16px !important; display: flex !important;
+      flex-direction: column !important; gap: 8px !important; width: 100% !important;
     }
-    .checkout-component .co-title { font-size: 13px; font-weight: 700; color: #166534; }
-    .checkout-component .co-ref { font-size: 12px; color: #166534; }
-    .checkout-component .co-total { font-size: 14px; font-weight: 700; color: #15803d; }
-    .checkout-pay-btn {
-      width: 100%; padding: 10px 0; background: #16a34a; color: white;
-      border: none; border-radius: 10px; font-size: 14px; font-weight: 700;
-      cursor: pointer; transition: opacity 0.15s; text-decoration: none;
-      display: block; text-align: center;
+    #salla-chat-messages .checkout-component .co-title { font-size: 13px !important; font-weight: 700 !important; color: #166534 !important; }
+    #salla-chat-messages .checkout-component .co-ref { font-size: 12px !important; color: #166534 !important; }
+    #salla-chat-messages .checkout-component .co-total { font-size: 14px !important; font-weight: 700 !important; color: #15803d !important; }
+    #salla-chat-messages .checkout-pay-btn {
+      width: 100% !important; padding: 10px 0 !important; background: #16a34a !important; color: white !important;
+      border: none !important; border-radius: 10px !important; font-size: 14px !important; font-weight: 700 !important;
+      cursor: pointer !important; text-decoration: none !important; display: block !important; text-align: center !important;
     }
-    .checkout-pay-btn:hover { opacity: 0.88; }
-    /* ── Checkout fallback component ─────────────────────────── */
-    .checkout-fallback {
-      background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px;
-      padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; width: 100%;
+    #salla-chat-messages .checkout-pay-btn:hover { opacity: 0.88 !important; }
+    /* ── Checkout fallback ────────────────────────────────────── */
+    #salla-chat-messages .checkout-fallback {
+      background: #fff7ed !important; border: 1px solid #fed7aa !important; border-radius: 12px !important;
+      padding: 12px 14px !important; display: flex !important; flex-direction: column !important; gap: 6px !important; width: 100% !important;
     }
-    .checkout-fallback .cf-title { font-size: 13px; font-weight: 700; color: #92400e; }
-    .checkout-fallback a { color: ${CONFIG.primaryColor}; font-size: 12px; }
-    /* ── Agent name caption (above admin bubble) ─────────────── */
-    .chat-msg.admin { flex-direction: column; align-items: flex-end; }
-    .chat-msg.admin .agent-caption {
-      font-size: 10.5px; font-weight: 700; color: #92400e;
-      margin: 0 4px 2px; opacity: 0.85; text-align: right;
-    }
+    #salla-chat-messages .checkout-fallback .cf-title { font-size: 13px !important; font-weight: 700 !important; color: #92400e !important; }
+    #salla-chat-messages .checkout-fallback a { color: ${CONFIG.primaryColor} !important; font-size: 12px !important; }
     /* ── CSAT survey card ────────────────────────────────────── */
-    .csat-card {
-      background: white; border: 1px solid #99f6e4; border-radius: 14px;
-      padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
-      width: 100%; box-shadow: 0 2px 10px rgba(13, 148, 136, 0.08);
+    #salla-chat-messages .csat-card {
+      background: white !important; border: 1px solid #99f6e4 !important; border-radius: 14px !important;
+      padding: 12px 14px !important; display: flex !important; flex-direction: column !important;
+      gap: 10px !important; width: 100% !important; box-shadow: 0 2px 10px rgba(13,148,136,0.08) !important;
     }
-    .csat-card .csat-title {
-      font-size: 12px; font-weight: 700; color: #0f766e; text-align: center;
+    #salla-chat-messages .csat-card .csat-title { font-size: 12px !important; font-weight: 700 !important; color: #0f766e !important; text-align: center !important; }
+    #salla-chat-messages .csat-options { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 6px !important; }
+    #salla-chat-messages .csat-options.cols-3 { grid-template-columns: 1fr 1fr 1fr !important; }
+    #salla-chat-messages .csat-btn {
+      padding: 8px 6px !important; border-radius: 10px !important; cursor: pointer !important;
+      font-size: 12px !important; font-weight: 700 !important;
+      border: 1.5px solid #99f6e4 !important; background: #f0fdfa !important; color: #0f766e !important;
     }
-    .csat-options {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
-    }
-    .csat-options.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
-    .csat-btn {
-      padding: 8px 6px; border-radius: 10px; cursor: pointer;
-      font-size: 12px; font-weight: 700; font-family: inherit;
-      border: 1.5px solid #99f6e4; background: #f0fdfa; color: #0f766e;
-      transition: transform 0.12s, background 0.12s, border-color 0.12s;
-    }
-    .csat-btn:hover { background: #ccfbf1; border-color: #2dd4bf; transform: translateY(-1px); }
-    .csat-btn.picked { background: #14b8a6; color: white; border-color: #14b8a6; }
-    .csat-thanks {
-      font-size: 12px; font-weight: 700; color: #0f766e; text-align: center;
-      padding: 6px 0;
-    }
+    #salla-chat-messages .csat-btn:hover { background: #ccfbf1 !important; border-color: #2dd4bf !important; transform: translateY(-1px) !important; }
+    #salla-chat-messages .csat-btn.picked { background: #14b8a6 !important; color: white !important; border-color: #14b8a6 !important; }
+    #salla-chat-messages .csat-thanks { font-size: 12px !important; font-weight: 700 !important; color: #0f766e !important; text-align: center !important; padding: 6px 0 !important; }
     /* ── Rating bar ──────────────────────────────────────────── */
     #salla-rating-bar {
-      padding: 10px 16px 8px; text-align: center; border-top: 1px solid #e8efff;
-      background: #f5f8ff; flex-shrink: 0;
-      animation: ratingSlide .3s ease;
+      padding: 10px 16px 8px !important; text-align: center !important;
+      border-top: 1px solid #e8efff !important; background: #f5f8ff !important; flex-shrink: 0 !important;
+      animation: salla-ratingSlide .3s ease !important;
     }
-    @keyframes ratingSlide { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
-    #salla-rating-bar .r-label { font-size: 12px; color: #64748b; margin-bottom: 6px; }
-    #salla-rating-bar .r-stars { display: flex; gap: 4px; justify-content: center; }
+    @keyframes salla-ratingSlide { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+    #salla-rating-bar .r-label { font-size: 12px !important; color: #64748b !important; margin-bottom: 6px !important; display: block !important; }
+    #salla-rating-bar .r-stars { display: flex !important; gap: 4px !important; justify-content: center !important; }
     #salla-rating-bar .r-stars button {
-      background: none; border: none; font-size: 24px; cursor: pointer; padding: 2px 3px;
-      opacity: .25; transition: opacity .12s, transform .1s; line-height: 1;
+      background: none !important; border: none !important; font-size: 24px !important;
+      cursor: pointer !important; padding: 2px 3px !important; opacity: .25 !important;
+      line-height: 1 !important;
     }
-    #salla-rating-bar .r-stars button:hover ~ button { opacity: .25; }
-    #salla-rating-bar .r-stars:hover button { opacity: .25; }
     #salla-rating-bar .r-stars button:hover,
-    #salla-rating-bar .r-stars button.lit { opacity: 1; transform: scale(1.18); }
-    #salla-rating-bar .r-stars:hover button:hover,
-    #salla-rating-bar .r-stars:hover button:hover ~ button + button { opacity: .25; }
-    /* light up all stars up to hovered one */
-    #salla-rating-bar .r-stars button:not(:hover) { transition: opacity .08s; }
+    #salla-rating-bar .r-stars button.lit { opacity: 1 !important; transform: scale(1.18) !important; }
     #salla-rating-bar .r-thanks {
-      font-size: 13px; color: #16a34a; font-weight: 600; padding: 4px 0 2px;
-      animation: ratingSlide .3s ease;
+      font-size: 13px !important; color: #16a34a !important; font-weight: 600 !important;
+      padding: 4px 0 2px !important; animation: salla-ratingSlide .3s ease !important;
     }
     /* ── Order status component ───────────────────────────────── */
-    .order-status-card {
-      background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.09);
-      padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; width: 100%;
+    #salla-chat-messages .order-status-card {
+      background: white !important; border-radius: 12px !important;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.09) !important;
+      padding: 12px 14px !important; display: flex !important; flex-direction: column !important;
+      gap: 8px !important; width: 100% !important;
     }
-    .order-status-card .os-header {
-      display: flex; justify-content: space-between; align-items: center;
+    #salla-chat-messages .order-status-card .os-header { display: flex !important; justify-content: space-between !important; align-items: center !important; }
+    #salla-chat-messages .order-status-card .os-ref { font-weight: 700 !important; font-size: 13px !important; color: #1e293b !important; }
+    #salla-chat-messages .order-status-card .os-badge {
+      background: #eff6ff !important; color: #1d4ed8 !important; border-radius: 20px !important;
+      font-size: 11px !important; font-weight: 700 !important; padding: 3px 9px !important;
     }
-    .order-status-card .os-ref { font-weight: 700; font-size: 13px; color: #1e293b; }
-    .order-status-card .os-badge {
-      background: #eff6ff; color: #1d4ed8; border-radius: 20px;
-      font-size: 11px; font-weight: 700; padding: 3px 9px;
+    #salla-chat-messages .order-status-card .os-row { font-size: 12px !important; color: #64748b !important; display: flex !important; gap: 6px !important; }
+    #salla-chat-messages .order-status-card .os-row strong { color: #1e293b !important; }
+    #salla-chat-messages .order-status-card .os-track {
+      display: block !important; text-align: center !important; padding: 7px 0 !important;
+      background: ${CONFIG.primaryColor} !important; color: white !important; border-radius: 8px !important;
+      font-size: 12px !important; font-weight: 700 !important; text-decoration: none !important; margin-top: 4px !important;
     }
-    .order-status-card .os-row { font-size: 12px; color: #64748b; display: flex; gap: 6px; }
-    .order-status-card .os-row strong { color: #1e293b; }
-    .order-status-card .os-track {
-      display: block; text-align: center; padding: 7px 0;
-      background: ${CONFIG.primaryColor}; color: white; border-radius: 8px;
-      font-size: 12px; font-weight: 700; text-decoration: none; margin-top: 4px;
-    }
-    .order-status-card .os-track:hover { opacity: .88; }
+    #salla-chat-messages .order-status-card .os-track:hover { opacity: .88 !important; }
   `;
 
   // ── DOM Builder ───────────────────────────────────────────────────────────────
@@ -1054,7 +1088,7 @@
     });
     if (!isOpen) {
       var badge = document.getElementById("salla-chat-badge");
-      if (badge) badge.style.display = "flex";
+      if (badge) badge.classList.add("show");
     }
   }
 
@@ -1134,7 +1168,7 @@
         // Flash badge on chat button if panel is closed
         if (!isOpen) {
           var badge = document.getElementById("salla-chat-badge");
-          if (badge) badge.style.display = "flex";
+          if (badge) badge.classList.add("show");
         }
       }
 
@@ -1294,13 +1328,13 @@
     var cartBadge = document.getElementById("salla-cart-badge");
 
     // Show badge on load
-    badge.style.display = "flex";
+    badge.classList.add("show");
 
     // Toggle panel
     btn.addEventListener("click", async function () {
       isOpen = !isOpen;
       panel.classList.toggle("open", isOpen);
-      badge.style.display = "none";
+      badge.classList.remove("show");
       if (isOpen) {
         var msgsEl = document.getElementById("salla-chat-messages");
         // Resume a returning visitor's previous conversation first.
