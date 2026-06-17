@@ -126,10 +126,12 @@ function IntegrationCard({
   integration,
   onConnect,
   onDisconnect,
+  onSync,
 }: {
   integration: IntegrationDef
-  onConnect:   (id: string) => void
+  onConnect:    (id: string) => void
   onDisconnect: (id: string) => void
+  onSync?:      (id: string) => void
 }) {
   const connected  = integration.status === 'connected'
   const comingSoon = integration.comingSoon || integration.status === 'coming_soon'
@@ -167,10 +169,18 @@ function IntegrationCard({
             قريباً
           </button>
         ) : connected ? (
-          <button onClick={() => onDisconnect(integration.id)}
-            className="flex-1 py-2 text-xs font-semibold rounded-xl border border-red-200 text-red-500 hover:bg-red-50 transition-colors">
-            قطع الاتصال
-          </button>
+          <div className="flex gap-1.5 w-full">
+            {onSync && (
+              <button onClick={() => onSync(integration.id)}
+                className="flex-1 py-2 text-xs font-semibold rounded-xl border border-emerald-200 text-emerald-600 hover:bg-emerald-50 transition-colors">
+                مزامنة
+              </button>
+            )}
+            <button onClick={() => onDisconnect(integration.id)}
+              className="flex-1 py-2 text-xs font-semibold rounded-xl border border-red-200 text-red-500 hover:bg-red-50 transition-colors">
+              قطع الاتصال
+            </button>
+          </div>
         ) : (
           <button onClick={() => onConnect(integration.id)}
             className="flex-1 py-2 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 transition-opacity">
@@ -209,6 +219,7 @@ export default function Integrations({ storeId }: Props) {
   const [shopDomain, setShopDomain]     = useState('')
   const [installing, setInstalling]     = useState(false)
   const [installError, setInstallError] = useState('')
+  const [syncing, setSyncing]           = useState<string | null>(null)
 
   // Disconnect confirmation modal
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null)
@@ -299,6 +310,20 @@ export default function Integrations({ storeId }: Props) {
     }
   }
 
+  const SYNCABLE_IDS = ['shopify']
+
+  async function handleSync(id: string) {
+    setSyncing(id)
+    try {
+      if (id === 'shopify') {
+        const res = await api.shopifySync(storeId)
+        showToast(`تمت المزامنة — ${res.products} منتج`, 'success')
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'فشلت المزامنة', 'error')
+    } finally { setSyncing(null) }
+  }
+
   function handleDisconnect(id: string) {
     setDisconnectTarget(id)
   }
@@ -371,6 +396,7 @@ export default function Integrations({ storeId }: Props) {
                         integration={integration}
                         onConnect={handleConnect}
                         onDisconnect={handleDisconnect}
+                        onSync={SYNCABLE_IDS.includes(integration.id) ? handleSync : undefined}
                       />
                     ))}
                   </div>

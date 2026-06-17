@@ -151,12 +151,48 @@ async def sync_contacts(store_id: str):
         except Exception as exc:
             print(f"[contacts] salla sync error: {exc}")
 
+    # ── 3. From Shopify API ──────────────────────────────────────────────────
+    shopify_count = 0
+    try:
+        integrations_data = await db.get_integrations(store_id)
+        shopify_data      = integrations_data.get("shopify", {})
+        sp_shop  = shopify_data.get("shop", "")
+        sp_token = shopify_data.get("access_token", "")
+        if sp_shop and sp_token:
+            from shopify_client import ShopifyClient
+            sp_client = ShopifyClient(sp_shop, sp_token, store_id=store_id)
+            sp_customers = await sp_client.get_all_customers()
+            shopify_records: list[dict] = []
+            for c in sp_customers:
+                phones = [
+                    p.strip()
+                    for p in [c.get("phone") or "", (c.get("default_address") or {}).get("phone", "")]
+                    if p and p.strip()
+                ]
+                phone = phones[0] if phones else ""
+                if not phone and not c.get("email"):
+                    continue
+                shopify_records.append({
+                    "phone":   phone or c.get("email", ""),  # use email as key if no phone
+                    "name":    f"{c.get('first_name', '')} {c.get('last_name', '')}".strip(),
+                    "email":   c.get("email", ""),
+                    "city":    (c.get("default_address") or {}).get("city", ""),
+                    "country": (c.get("default_address") or {}).get("country_code", ""),
+                    "source":  "shopify",
+                })
+            if shopify_records:
+                upserted += await db.contacts_upsert_batch(store_id, shopify_records)
+            shopify_count = len(shopify_records)
+    except Exception as exc:
+        print(f"[contacts] shopify sync error: {exc}")
+
     total = await db.contacts_count(store_id)
     return {
-        "message":     f"تمت المزامنة ✅ — {upserted} جهة اتصال جديدة/محدّثة",
-        "chat_found":  chat_count,
-        "salla_found": salla_count,
-        "total":       total,
+        "message":        f"تمت المزامنة ✅ — {upserted} جهة اتصال جديدة/محدّثة",
+        "chat_found":     chat_count,
+        "salla_found":    salla_count,
+        "shopify_found":  shopify_count,
+        "total":          total,
     }
 
 

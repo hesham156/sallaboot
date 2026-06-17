@@ -542,6 +542,9 @@ export const api = {
   shopifyDisconnect: (storeId: string) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/shopify`),
 
+  shopifySync: (storeId: string) =>
+    req<{ message: string; products: number; errors: string[] }>('POST', `/admin/${storeId}/integrations/shopify/sync`),
+
   sallaDisconnect: (storeId: string) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/salla`),
 }

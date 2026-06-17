@@ -193,7 +193,15 @@ async def shopify_callback(
             status_code=302,
         )
 
-    # 4. Inject chat widget into Shopify storefront via ScriptTag
+    # 4. Fire background sync (products + store info → cache for bot)
+    import shopify_sync as _ss
+    import database as _db_fire
+    _db_fire.fire(_ss.sync_shopify_store(store_id, shop, access_token))
+
+    # 5. Register Shopify webhooks (fire-and-forget)
+    _db_fire.fire(_ss.register_shopify_webhooks(shop, access_token, store_id, BASE_URL))
+
+    # 6. Inject chat widget into Shopify storefront via ScriptTag
     widget_src = f"{BASE_URL}/widget-shopify/{store_id}.js"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -225,6 +233,22 @@ async def shopify_callback(
         f"{BASE_URL}/store/{store_id}/integrations?shopify=connected",
         status_code=302,
     )
+
+
+# ── Shopify: manual re-sync ───────────────────────────────────────────────────
+
+@router.post("/admin/{store_id}/integrations/shopify/sync")
+async def shopify_sync_now(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    integrations_data = await db.get_integrations(store_id)
+    shopify_data      = integrations_data.get("shopify", {})
+    shop              = shopify_data.get("shop", "")
+    access_token      = shopify_data.get("access_token", "")
+    if not shop or not access_token:
+        raise HTTPException(400, "لا يوجد ربط نشط مع Shopify")
+    import shopify_sync as _ss
+    result = await _ss.sync_shopify_store(store_id, shop, access_token)
+    return {"message": "تمت المزامنة", **result}
 
 
 # ── Salla: disconnect ────────────────────────────────────────────────────────
