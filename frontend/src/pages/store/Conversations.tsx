@@ -87,8 +87,7 @@ function renderMessageBody(content: string): React.ReactNode {
           <img src={url} alt={text}
             className="max-w-[240px] max-h-[200px] rounded-lg border border-white/20 object-cover group-hover:border-white/40 transition-colors"
             onError={(e) => {
-              const img = e.currentTarget
-              img.style.display = 'none'
+              const img = e.currentTarget; img.style.display = 'none'
               const fb = img.nextElementSibling as HTMLElement | null
               if (fb) fb.style.display = 'inline-flex'
             }}
@@ -113,8 +112,9 @@ function renderMessageBody(content: string): React.ReactNode {
   return parts.length > 0 ? parts : content
 }
 
-type ViewMode = 'all' | 'mentions' | 'unattended' | 'chatbot'
-type ActiveTab = 'mine' | 'unassigned' | 'all'
+type ViewMode   = 'all' | 'mentions' | 'unattended' | 'chatbot'
+type ActiveTab  = 'mine' | 'unassigned' | 'all'
+type SortOrder  = 'last_activity' | 'newest' | 'oldest'
 
 export default function Conversations({ storeId }: Props) {
   const [convs, setConvs]           = useState<ConvSummary[]>([])
@@ -131,12 +131,20 @@ export default function Conversations({ storeId }: Props) {
   const listRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Sidebar / filter state ──
-  const [viewMode, setViewMode]     = useState<ViewMode>('all')
-  const [activeTab, setActiveTab]   = useState<ActiveTab>('all')
-  const [teamsOpen, setTeamsOpen]   = useState(true)
-  const [chOpen, setChOpen]         = useState(true)
-  const [employees, setEmployees]   = useState<Employee[]>([])
-  const [aiConfig, setAiConfig]     = useState<AIConfig | null>(null)
+  const [viewMode, setViewMode]         = useState<ViewMode>('all')
+  const [activeTab, setActiveTab]       = useState<ActiveTab>('all')
+  const [sortOrder, setSortOrder]       = useState<SortOrder>('last_activity')
+  const [channelFilter, setChannelFilter] = useState<string | null>(null)
+  const [empFilter, setEmpFilter]       = useState<number | null>(null)
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const [assigningId, setAssigningId]   = useState<string | null>(null)
+  const [teamsOpen, setTeamsOpen]       = useState(true)
+  const [chOpen, setChOpen]             = useState(true)
+  const [employees, setEmployees]       = useState<Employee[]>([])
+  const [aiConfig, setAiConfig]         = useState<AIConfig | null>(null)
+
+  const sortMenuRef  = useRef<HTMLDivElement>(null)
+  const assignRef    = useRef<HTMLDivElement>(null)
 
   function scheduleListRefresh(delay = 500) {
     if (listRefreshTimer.current) return
@@ -198,6 +206,20 @@ export default function Conversations({ storeId }: Props) {
     }
   }, [selected?.messages])
 
+  // Close dropdowns on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setShowSortMenu(false)
+      }
+      if (assignRef.current && !assignRef.current.contains(e.target as Node)) {
+        setAssigningId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
   useEffect(() => {
     if (!storeId) return
     const close = openAdminStream(storeId, {
@@ -247,22 +269,20 @@ export default function Conversations({ storeId }: Props) {
 
   async function openConversation(c: ConvSummary) {
     setActionError('')
+    setAssigningId(null)
     setSelectedId(c.session_id)
     setDetailLoading(true)
     try {
       const detail = await fetchConv(c.session_id)
       setSelected(detail)
     } catch (e) {
-      console.error(e)
-      setSelectedId(null)
-      setSelected(null)
+      console.error(e); setSelectedId(null); setSelected(null)
     } finally { setDetailLoading(false) }
   }
 
   async function sendReply() {
     if (!selected || !replyText.trim()) return
-    setSending(true)
-    setActionError('')
+    setSending(true); setActionError('')
     try {
       await api.adminReply(storeId, selected.session_id, replyText.trim())
       setReplyText('')
@@ -274,47 +294,41 @@ export default function Conversations({ storeId }: Props) {
   }
 
   async function handleTakeover() {
-    if (!selected) return
-    setActionError('')
+    if (!selected) return; setActionError('')
     try {
       await api.takeover(storeId, selected.session_id)
       const updated = await fetchConv(selected.session_id)
-      setSelected(updated)
-      loadConversations()
+      setSelected(updated); loadConversations()
     } catch (e) { setActionError(e instanceof Error ? e.message : 'تعذر تولّي المحادثة') }
   }
 
   async function handleHandback() {
-    if (!selected) return
-    setActionError('')
+    if (!selected) return; setActionError('')
     try {
       await api.handback(storeId, selected.session_id)
       const updated = await fetchConv(selected.session_id)
-      setSelected(updated)
-      loadConversations()
+      setSelected(updated); loadConversations()
     } catch (e) { setActionError(e instanceof Error ? e.message : 'تعذر إرجاع المحادثة للبوت') }
   }
 
   function openEndModal() { setFarewell(DEFAULT_FAREWELL); setSkipCsat(false); setEndOpen(true) }
 
   async function confirmEndChat() {
-    if (!selected) return
-    setEndingChat(true)
+    if (!selected) return; setEndingChat(true)
     try {
       await api.endConversation(storeId, selected.session_id, { farewell: farewell.trim() || undefined, skip_csat: skipCsat })
       const updated = await fetchConv(selected.session_id)
-      setSelected(updated)
-      loadConversations()
-      setEndOpen(false)
+      setSelected(updated); loadConversations(); setEndOpen(false)
     } catch (e) { alert(e instanceof Error ? e.message : 'تعذر إنهاء المحادثة') }
     finally { setEndingChat(false) }
   }
 
-  // ── Filtering ──
+  // ── Filtering + sorting pipeline ──
   const mineCount       = convs.filter(c => !c.bot_enabled).length
   const unassignedCount = convs.filter(c => c.bot_enabled).length
   const unreadCount     = convs.filter(c => c.unread).length
 
+  // 1. View-mode filter
   const viewFiltered: ConvSummary[] = (() => {
     if (viewMode === 'unattended') return convs.filter(c => c.unread)
     if (viewMode === 'chatbot')    return convs.filter(c => c.bot_enabled)
@@ -322,19 +336,38 @@ export default function Conversations({ storeId }: Props) {
     return convs
   })()
 
+  // 2. Tab filter (only when viewMode === 'all')
   const tabFiltered: ConvSummary[] = viewMode !== 'all' ? viewFiltered : (
     activeTab === 'mine'       ? convs.filter(c => !c.bot_enabled) :
-    activeTab === 'unassigned' ? convs.filter(c => c.bot_enabled) :
+    activeTab === 'unassigned' ? convs.filter(c => c.bot_enabled)  :
     convs
   )
 
-  const filtered = search
-    ? tabFiltered.filter(c =>
+  // 3. Channel filter (sidebar channel click)
+  const chFiltered = channelFilter
+    ? tabFiltered.filter(c => (c.channel || 'widget') === channelFilter)
+    : tabFiltered
+
+  // 4. Employee filter (sidebar employee click — filters by last admin message name)
+  const empFiltered = (empFilter !== null)
+    ? chFiltered.filter(c => !c.bot_enabled)   // simplified: show human-handled convs for that agent
+    : chFiltered
+
+  // 5. Search
+  const searchFiltered = search
+    ? empFiltered.filter(c =>
         c.session_id.includes(search) ||
         customerDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
         c.last_message?.content?.toLowerCase().includes(search.toLowerCase())
       )
-    : tabFiltered
+    : empFiltered
+
+  // 6. Sort
+  const filtered = [...searchFiltered].sort((a, b) => {
+    if (sortOrder === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    if (sortOrder === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    return new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime()
+  })
 
   function channelLabel(ch: string): string {
     if (ch === 'whatsapp')  return aiConfig?.whatsapp_phone_id ? `+${aiConfig.whatsapp_phone_id}` : 'واتساب'
@@ -342,16 +375,32 @@ export default function Conversations({ storeId }: Props) {
     return 'ويدجت'
   }
 
+  const sortLabels: Record<SortOrder, string> = {
+    last_activity: 'آخر نشاط',
+    newest:        'الأحدث',
+    oldest:        'الأقدم',
+  }
+
   const navItems: { id: ViewMode; label: string; icon: string; count?: number }[] = [
-    { id: 'all',        label: 'كل المحادثات', count: total,
+    { id: 'all',        label: 'كل المحادثات',  count: total,
       icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
     { id: 'mentions',   label: 'المذكورات',
       icon: 'M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207' },
-    { id: 'unattended', label: 'غير المتابعة', count: unreadCount,
+    { id: 'unattended', label: 'غير المتابعة',  count: unreadCount,
       icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { id: 'chatbot',    label: 'البوت', count: convs.filter(c => c.bot_enabled).length,
+    { id: 'chatbot',    label: 'البوت',          count: convs.filter(c => c.bot_enabled).length,
       icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2h-2' },
   ]
+
+  function toggleChannelFilter(ch: string) {
+    setChannelFilter(prev => prev === ch ? null : ch)
+    setViewMode('all')
+  }
+
+  function toggleEmpFilter(id: number) {
+    setEmpFilter(prev => prev === id ? null : id)
+    setViewMode('all')
+  }
 
   return (
     <div className="flex h-screen overflow-hidden" dir="rtl">
@@ -364,9 +413,9 @@ export default function Conversations({ storeId }: Props) {
           {navItems.map(item => (
             <button
               key={item.id}
-              onClick={() => setViewMode(item.id)}
+              onClick={() => { setViewMode(item.id); setChannelFilter(null); setEmpFilter(null) }}
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs transition-colors ${
-                viewMode === item.id
+                viewMode === item.id && !channelFilter && empFilter === null
                   ? 'bg-indigo-600/20 text-indigo-300 font-semibold'
                   : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
               }`}
@@ -375,7 +424,9 @@ export default function Conversations({ storeId }: Props) {
               <span className="flex-1 text-right">{item.label}</span>
               {!!item.count && (
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                  viewMode === item.id ? 'bg-indigo-500 text-white' : 'bg-white/10 text-slate-400'
+                  viewMode === item.id && !channelFilter && empFilter === null
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-white/10 text-slate-400'
                 }`}>
                   {item.count}
                 </span>
@@ -399,19 +450,26 @@ export default function Conversations({ storeId }: Props) {
             <>
               {employees.map(emp => (
                 <button key={emp.id}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors">
-                  <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                  onClick={() => toggleEmpFilter(emp.id)}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    empFilter === emp.id
+                      ? 'bg-indigo-600/20 text-indigo-300'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}>
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                    empFilter === emp.id ? 'bg-indigo-500 text-white' : 'bg-indigo-500/20 text-indigo-400'
+                  }`}>
                     {emp.name.charAt(0)}
                   </div>
                   <span className="truncate">{emp.name}</span>
+                  {empFilter === emp.id && (
+                    <span className="text-[10px] text-indigo-400 ml-auto">{filtered.length}</span>
+                  )}
                 </button>
               ))}
               {employees.length === 0 && (
                 <p className="px-3 py-1.5 text-[10px] text-slate-600 text-right">لا يوجد موظفون</p>
               )}
-              <button className="flex items-center gap-1 px-3 py-1.5 text-[10px] text-slate-600 hover:text-slate-400 transition-colors">
-                + إضافة موظف
-              </button>
             </>
           )}
         </div>
@@ -430,24 +488,48 @@ export default function Conversations({ storeId }: Props) {
           {chOpen && (
             <>
               {aiConfig?.whatsapp_enabled && (
-                <button className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors">
+                <button
+                  onClick={() => toggleChannelFilter('whatsapp')}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    channelFilter === 'whatsapp'
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}>
                   <WaIcon size={13} />
                   <span className="truncate">{aiConfig.whatsapp_phone_id || 'واتساب'}</span>
                 </button>
               )}
               {aiConfig?.instagram_enabled && (
-                <button className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors">
+                <button
+                  onClick={() => toggleChannelFilter('instagram')}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    channelFilter === 'instagram'
+                      ? 'bg-pink-500/10 text-pink-400'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}>
                   <IgIcon size={13} />
                   <span className="truncate">{aiConfig.ig_username || 'إنستقرام'}</span>
                 </button>
               )}
-              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors">
-                <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={13} className="text-indigo-400 flex-shrink-0" />
+              <button
+                onClick={() => toggleChannelFilter('widget')}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                  channelFilter === 'widget'
+                    ? 'bg-indigo-500/10 text-indigo-400'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                }`}>
+                <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
+                      size={13} className={channelFilter === 'widget' ? 'text-indigo-400' : 'text-indigo-400/50'} />
                 <span>ويدجت</span>
               </button>
-              <button className="flex items-center gap-1 px-3 py-1.5 text-[10px] text-slate-600 hover:text-slate-400 transition-colors">
-                + قناة جديدة
-              </button>
+              {channelFilter && (
+                <button
+                  onClick={() => setChannelFilter(null)}
+                  className="flex items-center gap-1 px-3 py-1 text-[10px] text-slate-600 hover:text-red-400 transition-colors">
+                  <Icon paths={['M18 6L6 18', 'M6 6l12 12']} size={9} />
+                  <span>إلغاء الفلتر</span>
+                </button>
+              )}
             </>
           )}
         </div>
@@ -502,14 +584,42 @@ export default function Conversations({ storeId }: Props) {
 
           {/* Status + Sort dropdowns */}
           <div className="flex gap-2 mb-3">
-            <button className="flex-1 text-xs border border-divider rounded-lg px-2.5 py-1.5 flex items-center justify-between text-slate-300 hover:border-slate-500 bg-content2 transition-colors">
+            {/* Status — static for now */}
+            <button className="flex-1 text-xs border border-divider rounded-lg px-2.5 py-1.5 flex items-center justify-between text-slate-300 bg-content2 cursor-default">
               <span>مفتوحة</span>
               <Icon paths="M19 9l-7 7-7-7" size={10} className="text-slate-500" />
             </button>
-            <button className="flex-1 text-xs border border-divider rounded-lg px-2.5 py-1.5 flex items-center justify-between text-slate-300 hover:border-slate-500 bg-content2 transition-colors">
-              <span>آخر نشاط</span>
-              <Icon paths="M19 9l-7 7-7-7" size={10} className="text-slate-500" />
-            </button>
+
+            {/* Sort — functional dropdown */}
+            <div className="flex-1 relative" ref={sortMenuRef}>
+              <button
+                onClick={() => setShowSortMenu(o => !o)}
+                className={`w-full text-xs border rounded-lg px-2.5 py-1.5 flex items-center justify-between transition-colors ${
+                  showSortMenu
+                    ? 'border-indigo-500 text-indigo-300 bg-content2'
+                    : 'border-divider text-slate-300 bg-content2 hover:border-slate-500'
+                }`}>
+                <span>{sortLabels[sortOrder]}</span>
+                <Icon paths={showSortMenu ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} size={10} className="text-slate-500" />
+              </button>
+              {showSortMenu && (
+                <div className="absolute top-full right-0 mt-1 bg-content1 border border-divider rounded-xl shadow-xl z-50 min-w-[130px] overflow-hidden">
+                  {(Object.entries(sortLabels) as [SortOrder, string][]).map(([val, label]) => (
+                    <button key={val}
+                      onClick={() => { setSortOrder(val); setShowSortMenu(false) }}
+                      className={`w-full text-right px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
+                        sortOrder === val
+                          ? 'bg-indigo-500/10 text-indigo-400'
+                          : 'text-slate-400 hover:bg-content2 hover:text-slate-200'
+                      }`}>
+                      {sortOrder === val && <Icon paths="M5 13l4 4L19 7" size={11} className="text-indigo-400 flex-shrink-0" />}
+                      {sortOrder !== val && <span className="w-[11px] flex-shrink-0" />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Tabs: Mine | Unassigned | All */}
@@ -519,11 +629,11 @@ export default function Conversations({ storeId }: Props) {
               { id: 'unassigned' as ActiveTab, label: 'غير مُعيَّن', count: unassignedCount },
               { id: 'all'        as ActiveTab, label: 'الكل',        count: total },
             ]).map(tab => {
-              const isActive = activeTab === tab.id && viewMode === 'all'
+              const isActive = activeTab === tab.id && viewMode === 'all' && !channelFilter && empFilter === null
               return (
                 <button
                   key={tab.id}
-                  onClick={() => { setActiveTab(tab.id); setViewMode('all') }}
+                  onClick={() => { setActiveTab(tab.id); setViewMode('all'); setChannelFilter(null); setEmpFilter(null) }}
                   className={`flex-1 py-2 text-[11px] font-medium relative flex items-center justify-center gap-1.5 transition-colors ${
                     isActive ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'
                   }`}
@@ -536,20 +646,47 @@ export default function Conversations({ storeId }: Props) {
                       {tab.count}
                     </span>
                   )}
-                  {isActive && (
-                    <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-indigo-500 rounded-full" />
-                  )}
+                  {isActive && <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-indigo-500 rounded-full" />}
                 </button>
               )
             })}
           </div>
         </div>
 
+        {/* Active filter chips */}
+        {(channelFilter || empFilter !== null) && (
+          <div className="px-4 py-1.5 flex gap-1.5 flex-wrap border-b border-divider/40">
+            {channelFilter && (
+              <span className="flex items-center gap-1 text-[10px] bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded-full">
+                {channelFilter === 'whatsapp' ? <WaIcon size={9} /> : channelFilter === 'instagram' ? <IgIcon size={9} /> :
+                  <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={9} className="text-indigo-400" />}
+                {channelLabel(channelFilter)}
+                <button onClick={() => setChannelFilter(null)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+            {empFilter !== null && (
+              <span className="flex items-center gap-1 text-[10px] bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded-full">
+                {employees.find(e => e.id === empFilter)?.name || 'موظف'}
+                <button onClick={() => setEmpFilter(null)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Conversation list items */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" ref={assignRef}>
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Spinner size="sm" color="primary" />
+            </div>
+          ) : viewMode === 'mentions' ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-content2 flex items-center justify-center mb-3">
+                <Icon paths="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"
+                      size={22} className="text-slate-600" />
+              </div>
+              <p className="text-sm text-slate-400 font-semibold">المذكورات قريباً</p>
+              <p className="text-xs text-slate-600 mt-1">سيتم إضافة هذه الميزة في تحديث قادم</p>
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
@@ -558,9 +695,7 @@ export default function Conversations({ storeId }: Props) {
                       size={22} className="text-slate-600" />
               </div>
               <p className="text-sm text-slate-400 font-semibold">لا توجد محادثات</p>
-              <p className="text-xs text-slate-600 mt-1">
-                {viewMode !== 'all' ? 'جرّب تغيير الفلتر' : 'المحادثات الجديدة ستظهر هنا'}
-              </p>
+              <p className="text-xs text-slate-600 mt-1">جرّب تغيير الفلتر</p>
             </div>
           ) : (
             <div>
@@ -568,61 +703,87 @@ export default function Conversations({ storeId }: Props) {
                 const isActive = selectedId === c.session_id
                 const ch = (c.channel || 'widget') as string
                 const lastMsg = c.last_message
+                const isAssigning = assigningId === c.session_id
                 return (
-                  <button
-                    key={c.session_id}
-                    onClick={() => openConversation(c)}
-                    className={`w-full text-right px-4 py-3 border-b border-divider/40 transition-colors group
-                      ${isActive
-                        ? 'bg-indigo-500/10 border-r-2 border-r-indigo-500'
-                        : c.unread
-                        ? 'bg-blue-500/5 hover:bg-content2'
-                        : 'hover:bg-content2'
-                      }
-                    `}
-                  >
-                    {/* Line 1: channel icon + label */}
-                    <div className="flex items-center gap-1.5 mb-1">
-                      {ch === 'whatsapp'  ? <WaIcon size={11} /> :
-                       ch === 'instagram' ? <IgIcon size={11} /> : (
-                        <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
-                              size={11} className="text-indigo-400 flex-shrink-0" />
-                      )}
-                      <span className="text-[10px] text-slate-500">{channelLabel(ch)}</span>
-                    </div>
+                  <div key={c.session_id} className="relative">
+                    <button
+                      onClick={() => openConversation(c)}
+                      className={`w-full text-right px-4 py-3 border-b border-divider/40 transition-colors group
+                        ${isActive
+                          ? 'bg-indigo-500/10 border-r-2 border-r-indigo-500'
+                          : c.unread
+                          ? 'bg-blue-500/5 hover:bg-content2'
+                          : 'hover:bg-content2'
+                        }
+                      `}
+                    >
+                      {/* Line 1: channel icon + label */}
+                      <div className="flex items-center gap-1.5 mb-1">
+                        {ch === 'whatsapp'  ? <WaIcon size={11} /> :
+                         ch === 'instagram' ? <IgIcon size={11} /> : (
+                          <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
+                                size={11} className="text-indigo-400 flex-shrink-0" />
+                        )}
+                        <span className="text-[10px] text-slate-500">{channelLabel(ch)}</span>
+                      </div>
 
-                    {/* Line 2: name + unread badge + time + assign btn */}
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-xs font-bold text-foreground truncate flex-1">
-                        {customerDisplayName(c)}
-                      </span>
-                      {c.unread && (
-                        <span className="w-[18px] h-[18px] bg-blue-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold flex-shrink-0">
-                          {(c.user_messages_count && c.user_messages_count > 0) ? c.user_messages_count : '●'}
+                      {/* Line 2: name + unread badge + time + assign btn */}
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-xs font-bold text-foreground truncate flex-1">
+                          {customerDisplayName(c)}
                         </span>
-                      )}
-                      <span className="text-[10px] text-slate-500 flex-shrink-0">{relTime(c.last_activity)}</span>
-                      <button
-                        onClick={e => e.stopPropagation()}
-                        className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-300 flex-shrink-0 transition-opacity"
-                        title="تعيين موظف"
-                      >
-                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
-                          <circle cx="9" cy="7" r="4" />
-                          <line x1="19" y1="8" x2="19" y2="14" />
-                          <line x1="22" y1="11" x2="16" y2="11" />
-                        </svg>
-                      </button>
-                    </div>
+                        {c.unread && (
+                          <span className="w-[18px] h-[18px] bg-blue-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold flex-shrink-0">
+                            {(c.user_messages_count && c.user_messages_count > 0) ? c.user_messages_count : '●'}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-500 flex-shrink-0">{relTime(c.last_activity)}</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); setAssigningId(isAssigning ? null : c.session_id) }}
+                          className={`flex-shrink-0 transition-all ${
+                            isAssigning
+                              ? 'text-indigo-400'
+                              : 'opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-300'
+                          }`}
+                          title="تعيين موظف"
+                        >
+                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <line x1="19" y1="8" x2="19" y2="14" />
+                            <line x1="22" y1="11" x2="16" y2="11" />
+                          </svg>
+                        </button>
+                      </div>
 
-                    {/* Line 3: last message preview */}
-                    <p className="text-[11px] text-slate-500 truncate leading-relaxed">
-                      {lastMsg?.content
-                        ? lastMsg.content.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-                        : 'لا توجد رسائل'}
-                    </p>
-                  </button>
+                      {/* Line 3: last message preview */}
+                      <p className="text-[11px] text-slate-500 truncate leading-relaxed">
+                        {lastMsg?.content
+                          ? lastMsg.content.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                          : 'لا توجد رسائل'}
+                      </p>
+                    </button>
+
+                    {/* Assign employee dropdown */}
+                    {isAssigning && (
+                      <div className="absolute left-0 top-full mt-0 bg-content1 border border-divider rounded-xl shadow-2xl z-50 min-w-[160px] overflow-hidden"
+                           onClick={e => e.stopPropagation()}>
+                        <p className="px-3 py-1.5 text-[10px] text-slate-500 border-b border-divider font-semibold">تعيين إلى</p>
+                        {employees.length === 0 ? (
+                          <p className="px-3 py-2 text-[11px] text-slate-600">لا يوجد موظفون</p>
+                        ) : employees.map(emp => (
+                          <button key={emp.id}
+                            onClick={() => { setAssigningId(null) }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-400 hover:bg-content2 hover:text-slate-200 transition-colors">
+                            <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                              {emp.name.charAt(0)}
+                            </div>
+                            <span>{emp.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -659,9 +820,7 @@ export default function Conversations({ storeId }: Props) {
                       : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white'}
                   />
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-foreground truncate">
-                      {customerDisplayName(selected)}
-                    </p>
+                    <p className="text-sm font-bold text-foreground truncate">{customerDisplayName(selected)}</p>
                     <div className="flex items-center gap-2 text-xs">
                       <span className={`flex items-center gap-1 ${selected.bot_enabled ? 'text-blue-400' : 'text-amber-400'}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${selected.bot_enabled ? 'bg-blue-400' : 'bg-amber-400'}`} />
@@ -673,7 +832,6 @@ export default function Conversations({ storeId }: Props) {
                     </div>
                   </div>
                 </div>
-
                 <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
                   {selected.bot_enabled ? (
                     <Button size="sm" color="warning" variant="flat" onPress={handleTakeover}
@@ -697,14 +855,14 @@ export default function Conversations({ storeId }: Props) {
               </div>
             </header>
 
-            {/* Action error banner */}
+            {/* Action error */}
             {actionError && (
               <div className="px-5 py-2.5 bg-danger/10 border-b border-danger/20 text-danger text-xs font-bold flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2">
                   <Icon paths="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" size={14} />
                   {actionError}
                 </span>
-                <button onClick={() => setActionError('')} className="text-danger/70 hover:text-danger" aria-label="إغلاق">
+                <button onClick={() => setActionError('')} className="text-danger/70 hover:text-danger">
                   <Icon paths={['M18 6L6 18', 'M6 6l12 12']} size={14} />
                 </button>
               </div>
@@ -716,62 +874,51 @@ export default function Conversations({ storeId }: Props) {
                 <div className="flex items-center justify-center py-12">
                   <p className="text-sm text-slate-500">لا توجد رسائل بعد</p>
                 </div>
-              ) : (
-                selected.messages?.map((msg: Message, i: number) => {
-                  const isUser  = msg.role === 'user'
-                  const isAdmin = msg.role === 'admin'
-                  const isCsat  = msg.meta?.kind === 'csat'
-                  const empName = msg.employee_name
-                  return (
-                    <div key={i} className={`flex gap-2 ${isUser ? 'justify-start' : 'justify-end'}`}>
-                      {!isUser && (
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                          isAdmin ? 'bg-amber-500/20 text-amber-400'
-                          : isCsat ? 'bg-teal-500/20 text-teal-400'
-                          : 'bg-blue-500/20 text-blue-400'
-                        }`}>
-                          {isAdmin ? (empName ? empName.trim().charAt(0) : '👨‍💼') : isCsat ? '⭐' : '🤖'}
-                        </div>
-                      )}
-                      <div className={`
-                        max-w-[70%] min-w-[80px] rounded-2xl px-4 py-2.5 text-sm leading-relaxed
-                        ${isUser  ? 'bg-gradient-to-br from-teal-600 to-cyan-700 text-white rounded-tr-sm'
-                        : isAdmin ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-tl-sm'
-                        : isCsat  ? 'bg-teal-500/10 text-teal-900 border border-teal-500/30 rounded-tl-sm'
-                        : 'bg-content1 text-foreground border border-divider rounded-tl-sm'}
-                      `}>
-                        {isAdmin && (
-                          <p className="text-[10px] text-amber-600 mb-1 font-bold">
-                            {empName ? `${empName} · موظف` : 'الإدارة'}
-                          </p>
-                        )}
-                        {isCsat && <p className="text-[10px] text-teal-600 mb-1 font-bold">استطلاع رضا</p>}
-                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          {renderMessageBody(msg.content)}
-                        </div>
-                        {isCsat && msg.meta?.options && (
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {msg.meta.options.map(opt => (
-                              <span key={opt.value}
-                                className="text-[11px] px-2 py-1 rounded-full bg-white/70 border border-teal-500/30 text-teal-700">
-                                {opt.label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <p className={`text-[10px] mt-1 ${isUser ? 'text-white/70' : 'text-slate-500'}`}>
-                          {fmtTime(msg.ts)}
-                        </p>
+              ) : selected.messages?.map((msg: Message, i: number) => {
+                const isUser  = msg.role === 'user'
+                const isAdmin = msg.role === 'admin'
+                const isCsat  = msg.meta?.kind === 'csat'
+                const empName = msg.employee_name
+                return (
+                  <div key={i} className={`flex gap-2 ${isUser ? 'justify-start' : 'justify-end'}`}>
+                    {!isUser && (
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        isAdmin ? 'bg-amber-500/20 text-amber-400'
+                        : isCsat ? 'bg-teal-500/20 text-teal-400'
+                        : 'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {isAdmin ? (empName ? empName.trim().charAt(0) : '👨‍💼') : isCsat ? '⭐' : '🤖'}
                       </div>
-                      {isUser && (
-                        <div className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                          👤
+                    )}
+                    <div className={`
+                      max-w-[70%] min-w-[80px] rounded-2xl px-4 py-2.5 text-sm leading-relaxed
+                      ${isUser  ? 'bg-gradient-to-br from-teal-600 to-cyan-700 text-white rounded-tr-sm'
+                      : isAdmin ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-tl-sm'
+                      : isCsat  ? 'bg-teal-500/10 text-teal-900 border border-teal-500/30 rounded-tl-sm'
+                      : 'bg-content1 text-foreground border border-divider rounded-tl-sm'}
+                    `}>
+                      {isAdmin && <p className="text-[10px] text-amber-600 mb-1 font-bold">{empName ? `${empName} · موظف` : 'الإدارة'}</p>}
+                      {isCsat  && <p className="text-[10px] text-teal-600 mb-1 font-bold">استطلاع رضا</p>}
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{renderMessageBody(msg.content)}</div>
+                      {isCsat && msg.meta?.options && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {msg.meta.options.map(opt => (
+                            <span key={opt.value} className="text-[11px] px-2 py-1 rounded-full bg-white/70 border border-teal-500/30 text-teal-700">
+                              {opt.label}
+                            </span>
+                          ))}
                         </div>
                       )}
+                      <p className={`text-[10px] mt-1 ${isUser ? 'text-white/70' : 'text-slate-500'}`}>{fmtTime(msg.ts)}</p>
                     </div>
-                  )
-                })
-              )}
+                    {isUser && (
+                      <div className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        👤
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
 
             {/* Reply input */}
@@ -780,25 +927,18 @@ export default function Conversations({ storeId }: Props) {
                 <div className="flex gap-2">
                   <Textarea
                     placeholder="اكتب ردك كأدمن..."
-                    value={replyText}
-                    onValueChange={setReplyText}
-                    variant="bordered"
-                    minRows={1}
-                    maxRows={4}
+                    value={replyText} onValueChange={setReplyText}
+                    variant="bordered" minRows={1} maxRows={4}
                     classNames={{ inputWrapper: 'border-divider bg-content2', input: 'text-sm' }}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
                   />
-                  <Button
-                    color="primary" isLoading={sending} isIconOnly onPress={sendReply}
+                  <Button color="primary" isLoading={sending} isIconOnly onPress={sendReply}
                     isDisabled={!replyText.trim()}
-                    className="self-end h-10 w-10 min-w-10 bg-gradient-to-br from-teal-600 to-cyan-700"
-                  >
+                    className="self-end h-10 w-10 min-w-10 bg-gradient-to-br from-teal-600 to-cyan-700">
                     <Icon paths={['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7z']} size={15} />
                   </Button>
                 </div>
-                <p className="text-[10px] text-slate-600 mt-1.5 px-1">
-                  Enter للإرسال · Shift+Enter لسطر جديد
-                </p>
+                <p className="text-[10px] text-slate-600 mt-1.5 px-1">Enter للإرسال · Shift+Enter لسطر جديد</p>
               </footer>
             )}
 
@@ -858,10 +998,7 @@ export default function Conversations({ storeId }: Props) {
         isOpen={reasonModalOpen}
         onOpenChange={(open) => {
           setReasonModalOpen(open)
-          if (!open && reasonResolverRef.current) {
-            reasonResolverRef.current(null)
-            reasonResolverRef.current = null
-          }
+          if (!open && reasonResolverRef.current) { reasonResolverRef.current(null); reasonResolverRef.current = null }
         }}
         placement="center" backdrop="blur" size="md" isDismissable={false}
       >
@@ -882,18 +1019,14 @@ export default function Conversations({ storeId }: Props) {
               </ModalBody>
               <ModalFooter>
                 <Button variant="light" onPress={() => {
-                  reasonResolverRef.current?.(null)
-                  reasonResolverRef.current = null
-                  setReasonModalOpen(false)
-                  close()
+                  reasonResolverRef.current?.(null); reasonResolverRef.current = null
+                  setReasonModalOpen(false); close()
                 }}>إلغاء</Button>
                 <Button color="primary" isDisabled={reasonDraft.trim().length < 5}
                   onPress={() => {
                     const r = reasonDraft.trim()
-                    reasonResolverRef.current?.(r)
-                    reasonResolverRef.current = null
-                    setReasonModalOpen(false)
-                    close()
+                    reasonResolverRef.current?.(r); reasonResolverRef.current = null
+                    setReasonModalOpen(false); close()
                   }}>
                   تأكيد وفتح
                 </Button>
