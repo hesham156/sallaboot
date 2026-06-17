@@ -196,6 +196,8 @@ async def shopify_callback(
                 headers={"X-Shopify-Access-Token": access_token},
                 json={"script_tag": {"event": "onload", "src": widget_src}},
             )
+            if not r.is_success:
+                print(f"[integrations] ScriptTag POST failed {r.status_code}: {r.text[:400]}")
             r.raise_for_status()
             print(f"[integrations] ✅ ScriptTag injected for {shop}")
     except Exception as e:

@@ -3716,7 +3716,7 @@ async def get_integrations(store_id: str) -> dict:
             )
             if not row:
                 return {}
-            return dict(row["integrations"] or {})
+            return _coerce_jsonb(row["integrations"])
     except Exception as e:
         print(f"[db] get_integrations error: {e}")
         return {}
