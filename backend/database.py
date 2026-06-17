@@ -3706,6 +3706,22 @@ async def contacts_upsert_batch(store_id: str, records: list[dict]) -> int:
 
 # ── Integrations ──────────────────────────────────────────────────────────────
 
+async def find_store_by_shopify_shop(shop: str) -> str | None:
+    """Return the store_id that already owns this Shopify shop, or None."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT store_id FROM stores WHERE integrations->'shopify'->>'shop' = $1 LIMIT 1",
+                shop,
+            )
+            return row["store_id"] if row else None
+    except Exception as e:
+        print(f"[db] find_store_by_shopify_shop error: {e}")
+        return None
+
+
 async def get_integrations(store_id: str) -> dict:
     """Return the integrations JSONB for a store (empty dict if none)."""
     try:

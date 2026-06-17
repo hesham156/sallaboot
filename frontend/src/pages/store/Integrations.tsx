@@ -229,7 +229,11 @@ export default function Integrations({ storeId }: Props) {
       setSearchParams(next, { replace: true })
       loadIntegrations()
     } else if (shopifyParam === 'error') {
-      showToast('فشل الربط مع Shopify — حاول مرة أخرى', 'error')
+      const reason = searchParams.get('reason')
+      const msg = reason === 'shop_already_connected'
+        ? 'هذا المتجر مربوط بحساب حياك آخر بالفعل'
+        : 'فشل الربط مع Shopify — حاول مرة أخرى'
+      showToast(msg, 'error')
       const next = new URLSearchParams(searchParams)
       next.delete('shopify')
       next.delete('reason')

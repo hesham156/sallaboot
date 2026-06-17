@@ -157,7 +157,15 @@ async def shopify_callback(
     except Exception as e:
         print(f"[integrations] shopify shop info fetch failed (non-fatal): {e}")
 
-    # 3. Save to DB
+    # 3a. Enforce one-store-per-shop rule
+    existing_store = await db.find_store_by_shopify_shop(shop)
+    if existing_store and existing_store != store_id:
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?shopify=error&reason=shop_already_connected",
+            status_code=302,
+        )
+
+    # 3b. Save to DB
     try:
         await db.save_integration(store_id, "shopify", {
             "shop":         shop,
