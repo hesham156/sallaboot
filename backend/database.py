@@ -3787,7 +3787,7 @@ async def save_integration(store_id: str, platform: str, data: dict) -> None:
         status = await conn.execute(
             """
             UPDATE stores
-               SET integrations = integrations || $2::jsonb,
+               SET integrations = COALESCE(integrations, '{}'::jsonb) || $2::jsonb,
                    updated_at   = NOW()
              WHERE store_id = $1
             """,
