@@ -547,6 +547,15 @@ export const api = {
 
   sallaDisconnect: (storeId: string) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/salla`),
+
+  zidInstall: (storeId: string) =>
+    get<{ install_url: string }>(`/admin/${storeId}/integrations/zid/install`),
+
+  zidDisconnect: (storeId: string) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/zid`),
+
+  zidSync: (storeId: string) =>
+    req<{ message: string; products: number; errors: string[] }>('POST', `/admin/${storeId}/integrations/zid/sync`),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────

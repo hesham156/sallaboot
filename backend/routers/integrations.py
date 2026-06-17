@@ -28,6 +28,10 @@ SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_SCOPES        = "read_orders,read_products,read_customers,read_inventory,write_script_tags"
 BASE_URL              = os.getenv("BASE_URL", "http://localhost:8000")
 
+ZID_CLIENT_ID     = os.getenv("ZID_CLIENT_ID", "")
+ZID_CLIENT_SECRET = os.getenv("ZID_CLIENT_SECRET", "")
+ZID_OAUTH_BASE    = "https://oauth.zid.sa"
+
 # In-memory CSRF state store — single-process only.
 # In multi-worker deployments (gunicorn/uvicorn --workers N) use Redis instead.
 _oauth_states: dict[str, dict] = {}
@@ -326,3 +330,152 @@ async def shopify_disconnect(store_id: str, request: Request):
 
     await db.remove_integration(store_id, "shopify")
     return {"message": "تم قطع الاتصال مع Shopify وإزالة الويدجت من المتجر"}
+
+
+# ── Zid: initiate install ─────────────────────────────────────────────────────
+
+@router.get("/admin/{store_id}/integrations/zid/install")
+async def zid_install(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+
+    if not ZID_CLIENT_ID:
+        raise HTTPException(503, "لم يتم تهيئة تكامل Zid على هذا الخادم")
+
+    existing = await db.get_integrations(store_id)
+    _ECOMMERCE_NAMES = {"salla": "سلّة", "shopify": "شوبيفاي", "woocommerce": "ووكومرس"}
+    for platform, label in _ECOMMERCE_NAMES.items():
+        if existing.get(platform):
+            raise HTTPException(
+                409,
+                f"الحساب مربوط بـ {label} بالفعل — لا يمكن ربط منصتَي تجارة إلكترونية في آنٍ واحد",
+            )
+
+    state = secrets.token_urlsafe(32)
+    _prune_oauth_states()
+    _oauth_states[state] = {"store_id": store_id, "platform": "zid", "ts": time.time()}
+
+    redirect_uri = f"{BASE_URL}/integrations/zid/callback"
+    params = urlencode({
+        "client_id":     ZID_CLIENT_ID,
+        "redirect_uri":  redirect_uri,
+        "response_type": "code",
+        "state":         state,
+    })
+    return {"install_url": f"{ZID_OAUTH_BASE}/oauth/authorize?{params}"}
+
+
+# ── Zid: OAuth callback ───────────────────────────────────────────────────────
+
+@router.get("/integrations/zid/callback")
+async def zid_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+):
+    if error:
+        store_id = (_oauth_states.pop(state, None) or {}).get("store_id", "unknown")
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?zid=error&reason={error}",
+            status_code=302,
+        )
+
+    state_data = _oauth_states.pop(state, None)
+    if not state_data or state_data.get("platform") != "zid":
+        raise HTTPException(400, "Invalid or expired OAuth state — please retry the connection")
+
+    store_id = state_data["store_id"]
+
+    # 1. Exchange code → tokens
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{ZID_OAUTH_BASE}/oauth/token",
+                data={
+                    "grant_type":    "authorization_code",
+                    "client_id":     ZID_CLIENT_ID,
+                    "client_secret": ZID_CLIENT_SECRET,
+                    "redirect_uri":  f"{BASE_URL}/integrations/zid/callback",
+                    "code":          code,
+                },
+            )
+            r.raise_for_status()
+            token_data = r.json()
+    except Exception as exc:
+        raise HTTPException(502, f"فشل استبدال الكود مع Zid: {exc}") from exc
+
+    access_token  = token_data.get("access_token", "")
+    auth_jwt      = token_data.get("Authorization", "")   # Zid returns key named "Authorization"
+    refresh_token = token_data.get("refresh_token", "")
+    if not access_token or not auth_jwt:
+        raise HTTPException(400, "لم يُرجع Zid tokens صحيحة")
+
+    # 2. Fetch store info
+    store_info:   dict = {}
+    zid_store_id: str  = ""
+    try:
+        from zid_client import ZidClient
+        zid = ZidClient(access_token, auth_jwt, store_id=store_id)
+        raw = await zid.get_store()
+        zid_store_id = str(raw.get("id", ""))
+        store_info = raw
+    except Exception as e:
+        print(f"[integrations] Zid store info failed (non-fatal): {e}")
+
+    # 3. Save to DB
+    try:
+        await db.save_integration(store_id, "zid", {
+            "access_token":      access_token,
+            "authorization_jwt": auth_jwt,
+            "refresh_token":     refresh_token,
+            "zid_store_id":      zid_store_id,
+            "store_name":        store_info.get("title", ""),
+            "store_email":       store_info.get("email", ""),
+            "store_url":         store_info.get("url", ""),
+        })
+        print(f"[integrations] ✅ Zid connected: store={store_id} zid_store_id={zid_store_id}")
+    except Exception as e:
+        print(f"[integrations] ❌ save_integration (zid) failed: {e}")
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?zid=error&reason=db_save_failed",
+            status_code=302,
+        )
+
+    # 4. Background sync
+    import zid_sync as _zs
+    import database as _db_fire
+    _db_fire.fire(_zs.sync_zid_store(store_id, access_token, auth_jwt, zid_store_id))
+
+    # 5. Register webhooks (fire-and-forget)
+    _db_fire.fire(_zs.register_zid_webhooks(access_token, auth_jwt, zid_store_id, store_id, BASE_URL))
+
+    return RedirectResponse(
+        f"{BASE_URL}/store/{store_id}/integrations?zid=connected",
+        status_code=302,
+    )
+
+
+# ── Zid: manual re-sync ───────────────────────────────────────────────────────
+
+@router.post("/admin/{store_id}/integrations/zid/sync")
+async def zid_sync_now(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    data         = await db.get_integrations(store_id)
+    zid_data     = data.get("zid", {})
+    access_token = zid_data.get("access_token", "")
+    auth_jwt     = zid_data.get("authorization_jwt", "")
+    zid_store_id = zid_data.get("zid_store_id", "")
+    if not access_token or not auth_jwt:
+        raise HTTPException(400, "لا يوجد ربط نشط مع Zid")
+    import zid_sync as _zs
+    result = await _zs.sync_zid_store(store_id, access_token, auth_jwt, zid_store_id)
+    return {"message": "تمت المزامنة", **result}
+
+
+# ── Zid: disconnect ───────────────────────────────────────────────────────────
+
+@router.delete("/admin/{store_id}/integrations/zid")
+async def zid_disconnect(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    await db.remove_integration(store_id, "zid")
+    return {"message": "تم قطع الاتصال مع Zid"}

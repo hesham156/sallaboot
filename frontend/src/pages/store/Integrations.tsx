@@ -113,7 +113,7 @@ interface IntegrationDef {
 const INTEGRATIONS_DEF: Omit<IntegrationDef, 'status' | 'data'>[] = [
   { id: 'salla',       name: 'سلّة',            nameEn: 'Salla',        category: 'ecommerce', logo: <SallaLogo />,        description: 'متجرك على سلّة — الطلبات والمنتجات والعملاء تظهر مباشرةً في المحادثات.' },
   { id: 'shopify',     name: 'شوبيفاي',          nameEn: 'Shopify',      category: 'ecommerce', logo: <ShopifyLogo />,      description: 'اربط متجر شوبيفاي لإدارة الطلبات والمنتجات من لوحة تحكم واحدة.' },
-  { id: 'zid',         name: 'زد',               nameEn: 'Zid',          category: 'ecommerce', logo: <ZidLogo />,          description: 'تكامل مع منصة زد للتجارة الإلكترونية.', comingSoon: true },
+  { id: 'zid',         name: 'زد',               nameEn: 'Zid',          category: 'ecommerce', logo: <ZidLogo />,          description: 'اربط متجرك على منصة زد — الطلبات والمنتجات والعملاء تظهر في المحادثات.' },
   { id: 'woocommerce', name: 'ووكومرس',           nameEn: 'WooCommerce',  category: 'ecommerce', logo: <WooLogo />,          description: 'ربط موقع ووردبريس/ووكومرس لمتابعة الطلبات.', comingSoon: true },
   { id: 'myfatoorah',  name: 'ماي فاتوره',       nameEn: 'MyFatoorah',   category: 'payment',   logo: <MyFatoorahLogo />,   description: 'إرسال روابط دفع مباشرة للعميل داخل المحادثة.', comingSoon: true },
   { id: 'tabby',       name: 'تابي',              nameEn: 'Tabby',        category: 'payment',   logo: <TabbyLogo />,        description: 'عرض خيار الدفع بالتقسيط عبر تابي.', comingSoon: true },
@@ -127,11 +127,13 @@ function IntegrationCard({
   onConnect,
   onDisconnect,
   onSync,
+  connecting,
 }: {
   integration: IntegrationDef
   onConnect:    (id: string) => void
   onDisconnect: (id: string) => void
   onSync?:      (id: string) => void
+  connecting?:  boolean
 }) {
   const connected  = integration.status === 'connected'
   const comingSoon = integration.comingSoon || integration.status === 'coming_soon'
@@ -183,8 +185,9 @@ function IntegrationCard({
           </div>
         ) : (
           <button onClick={() => onConnect(integration.id)}
-            className="flex-1 py-2 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 transition-opacity">
-            ربط الآن
+            disabled={connecting}
+            className="flex-1 py-2 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center justify-center gap-2">
+            {connecting ? <><Spinner size="sm" color="white" /> جاري التحويل...</> : 'ربط الآن'}
           </button>
         )}
       </div>
@@ -220,6 +223,7 @@ export default function Integrations({ storeId }: Props) {
   const [installing, setInstalling]     = useState(false)
   const [installError, setInstallError] = useState('')
   const [syncing, setSyncing]           = useState<string | null>(null)
+  const [connectingZid, setConnectingZid] = useState(false)
 
   // Disconnect confirmation modal
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null)
@@ -246,6 +250,20 @@ export default function Integrations({ storeId }: Props) {
       showToast(msg, 'error')
       const next = new URLSearchParams(searchParams)
       next.delete('shopify')
+      next.delete('reason')
+      setSearchParams(next, { replace: true })
+    }
+
+    const zidParam = searchParams.get('zid')
+    if (zidParam === 'connected') {
+      showToast('تم الربط مع زد بنجاح! 🎉', 'success')
+      const next = new URLSearchParams(searchParams)
+      next.delete('zid')
+      setSearchParams(next, { replace: true })
+    } else if (zidParam === 'error') {
+      showToast('فشل الربط مع زد — حاول مرة أخرى', 'error')
+      const next = new URLSearchParams(searchParams)
+      next.delete('zid')
       next.delete('reason')
       setSearchParams(next, { replace: true })
     }
@@ -290,6 +308,7 @@ export default function Integrations({ storeId }: Props) {
     }
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
     else if (id === 'salla') { window.location.href = '/auth/salla' }
+    else if (id === 'zid') { handleZidConnect() }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
 
@@ -310,13 +329,27 @@ export default function Integrations({ storeId }: Props) {
     }
   }
 
-  const SYNCABLE_IDS = ['shopify']
+  async function handleZidConnect() {
+    setConnectingZid(true)
+    try {
+      const { install_url } = await api.zidInstall(storeId)
+      window.location.href = install_url
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'تعذّر بدء عملية الربط مع زد', 'error')
+      setConnectingZid(false)
+    }
+  }
+
+  const SYNCABLE_IDS = ['shopify', 'zid']
 
   async function handleSync(id: string) {
     setSyncing(id)
     try {
       if (id === 'shopify') {
         const res = await api.shopifySync(storeId)
+        showToast(`تمت المزامنة — ${res.products} منتج`, 'success')
+      } else if (id === 'zid') {
+        const res = await api.zidSync(storeId)
         showToast(`تمت المزامنة — ${res.products} منتج`, 'success')
       }
     } catch (e) {
@@ -334,6 +367,7 @@ export default function Integrations({ storeId }: Props) {
     try {
       if (disconnectTarget === 'shopify') await api.shopifyDisconnect(storeId)
       else if (disconnectTarget === 'salla') await api.sallaDisconnect(storeId)
+      else if (disconnectTarget === 'zid') await api.zidDisconnect(storeId)
       await loadIntegrations()
       showToast('تم قطع الاتصال بنجاح', 'success')
     } catch (e) {
@@ -397,6 +431,7 @@ export default function Integrations({ storeId }: Props) {
                         onConnect={handleConnect}
                         onDisconnect={handleDisconnect}
                         onSync={SYNCABLE_IDS.includes(integration.id) ? handleSync : undefined}
+                        connecting={integration.id === 'zid' && connectingZid}
                       />
                     ))}
                   </div>
