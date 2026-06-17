@@ -3780,27 +3780,29 @@ async def get_integrations(store_id: str) -> dict:
 
 async def save_integration(store_id: str, platform: str, data: dict) -> None:
     """Upsert a single platform entry inside stores.integrations."""
-    import json as _json
     if not _pool:
         raise RuntimeError("Database pool not initialised")
     async with _pool.acquire() as conn:
+        # Pass {platform: data} as a Python dict — the registered JSONB codec
+        # handles serialisation. Do NOT use json.dumps() + ::jsonb cast here;
+        # that double-encodes the value through the codec and the data is lost.
         status = await conn.execute(
             """
             UPDATE stores
-               SET integrations = COALESCE(integrations, '{}'::jsonb) || $2::jsonb,
+               SET integrations = COALESCE(integrations, '{}'::jsonb) || $2,
                    updated_at   = NOW()
              WHERE store_id = $1
             """,
             store_id,
-            _json.dumps({platform: data}),
+            {platform: data},
         )
-        # status is e.g. "UPDATE 1" or "UPDATE 0"
         rows_affected = int((status or "UPDATE 0").split()[-1])
         if rows_affected == 0:
             raise RuntimeError(
                 f"[db] save_integration: no store found with store_id='{store_id}' "
                 f"— UPDATE affected 0 rows"
             )
+        print(f"[db] save_integration: saved '{platform}' for store_id='{store_id}'")
 
 
 async def remove_integration(store_id: str, platform: str) -> None:
