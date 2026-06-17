@@ -57,6 +57,7 @@ async def shopify_widget_script(store_id: str):
     script = f"""(function(){{
   window.SallaChatConfig = window.SallaChatConfig || {{}};
   window.SallaChatConfig.storeId  = "{store_id}";
+  window.SallaChatConfig.apiUrl   = "{BASE_URL}";
   window.SallaChatConfig.platform = "shopify";
   var s = document.createElement('script');
   s.src = '{widget_url}';
