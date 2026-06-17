@@ -479,3 +479,53 @@ async def zid_disconnect(store_id: str, request: Request):
     require_store_owner(request, store_id)
     await db.remove_integration(store_id, "zid")
     return {"message": "تم قطع الاتصال مع Zid"}
+
+
+# ── Zid App Market webhooks (partner-level) ───────────────────────────────────
+# Zid sends these when merchants install/uninstall the app or their
+# subscription status changes. Target URL in the Zid partner dashboard:
+#   {BASE_URL}/webhooks/zid/market
+
+@router.post("/webhooks/zid/market", include_in_schema=False)
+async def zid_market_webhook(request: Request):
+    """
+    Receives App Market lifecycle events from Zid:
+      app.market.application.install     → merchant installed the app
+      app.market.application.uninstall   → merchant uninstalled → remove integration
+      app.market.application.authorized  → OAuth authorized (token already saved via callback)
+      app.market.subscription.*          → subscription lifecycle changes
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    event    = payload.get("event", "")
+    store_id = str(payload.get("store_id") or payload.get("merchant_id") or "")
+    data     = payload.get("data") or {}
+
+    print(f"[zid_market] event={event!r} store_id={store_id!r}")
+
+    if event == "app.market.application.uninstall":
+        if store_id:
+            try:
+                await db.remove_integration(store_id, "zid")
+                print(f"[zid_market] ✅ Zid uninstalled: removed integration for store={store_id}")
+            except Exception as e:
+                print(f"[zid_market] ❌ remove_integration failed for store={store_id}: {e}")
+
+    elif event == "app.market.subscription.suspended":
+        print(f"[zid_market] ⚠️ Subscription suspended for store={store_id}")
+
+    elif event == "app.market.subscription.expired":
+        print(f"[zid_market] ⚠️ Subscription expired for store={store_id}")
+        # Optionally disable the integration without full disconnect
+
+    elif event == "app.market.subscription.active":
+        print(f"[zid_market] ✅ Subscription active for store={store_id}")
+
+    elif event == "app.market.application.install":
+        print(f"[zid_market] 🎉 New Zid install for store={store_id}")
+
+    # Always return 200 so Zid doesn't retry
+    return {"received": True, "event": event}
