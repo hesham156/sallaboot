@@ -529,6 +529,18 @@ export const api = {
     get<{ count: number; sample: { phone: string; name: string }[] }>(`/admin/${storeId}/campaigns/${id}/preview`),
   deleteCampaign: (storeId: string, id: number) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/campaigns/${id}`),
+
+  // ── Integrations ──────────────────────────────────────────────────────────
+  listIntegrations: (storeId: string) =>
+    get<{ integrations: Record<string, IntegrationData> }>(`/admin/${storeId}/integrations`),
+
+  shopifyInstall: (storeId: string, shop: string) =>
+    get<{ install_url: string; shop: string }>(
+      `/admin/${storeId}/integrations/shopify/install?shop=${encodeURIComponent(shop)}`
+    ),
+
+  shopifyDisconnect: (storeId: string) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/shopify`),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -1085,6 +1097,15 @@ export interface Contact {
 }
 
 // ── Support-access grants ──────────────────────────────────────────────
+
+export interface IntegrationData {
+  shop?:         string
+  shop_name?:    string
+  shop_email?:   string
+  plan_name?:    string
+  currency?:     string
+  access_token?: string
+}
 
 export interface SupportAccessGrant {
   id:          number

@@ -107,6 +107,7 @@ async def _create_tables():
             );
             -- Idempotent for older deployments that already had the table.
             ALTER TABLE stores ADD COLUMN IF NOT EXISTS owner_email TEXT;
+            ALTER TABLE stores ADD COLUMN IF NOT EXISTS integrations JSONB NOT NULL DEFAULT '{}'::jsonb;
             CREATE INDEX IF NOT EXISTS idx_stores_owner_email
                 ON stores (lower(owner_email))
                 WHERE owner_email IS NOT NULL;
@@ -3691,3 +3692,59 @@ async def contacts_upsert_batch(store_id: str, records: list[dict]) -> int:
     except Exception as e:
         print(f"[db] contacts_upsert_batch error: {e}")
         return 0
+
+
+# ── Integrations ──────────────────────────────────────────────────────────────
+
+async def get_integrations(store_id: str) -> dict:
+    """Return the integrations JSONB for a store (empty dict if none)."""
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT integrations FROM stores WHERE store_id = $1",
+                store_id,
+            )
+            if not row:
+                return {}
+            return dict(row["integrations"] or {})
+    except Exception as e:
+        print(f"[db] get_integrations error: {e}")
+        return {}
+
+
+async def save_integration(store_id: str, platform: str, data: dict) -> None:
+    """Upsert a single platform entry inside stores.integrations."""
+    import json as _json
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO stores (store_id, integrations, updated_at)
+                VALUES ($1, $2::jsonb, NOW())
+                ON CONFLICT (store_id) DO UPDATE
+                  SET integrations = stores.integrations || $2::jsonb,
+                      updated_at   = NOW()
+                """,
+                store_id,
+                _json.dumps({platform: data}),
+            )
+    except Exception as e:
+        print(f"[db] save_integration error: {e}")
+
+
+async def remove_integration(store_id: str, platform: str) -> None:
+    """Remove a single platform key from stores.integrations."""
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE stores
+                   SET integrations = integrations - $2,
+                       updated_at   = NOW()
+                 WHERE store_id = $1
+                """,
+                store_id,
+                platform,
+            )
+    except Exception as e:
+        print(f"[db] remove_integration error: {e}")
