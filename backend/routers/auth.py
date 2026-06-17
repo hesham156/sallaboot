@@ -38,11 +38,11 @@ async def super_login(req: LoginRequest, request: Request):
     on both fields to avoid timing side-channels.
     """
     ip          = request.client.host if request.client else "unknown"
-    super_email = os.getenv("SUPER_ADMIN_EMAIL", "h456ad@gmail.com").strip().lower()
-    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "")
 
-    if super_pass == "admin":
-        print("⚠️  [auth] SUPER_ADMIN_PASSWORD is still the default 'admin' — please change it!")
+    if not super_email or not super_pass:
+        raise HTTPException(503, "Super-admin credentials are not configured on this server")
 
     if await _is_rate_limited(f"super:{ip}"):
         raise HTTPException(429, "محاولات تسجيل دخول كثيرة جداً. انتظر 5 دقائق وحاول مجدداً.")
@@ -170,9 +170,10 @@ async def unified_login(req: LoginRequest, request: Request):
 
     The legacy endpoints are kept for back-compat with old clients.
     """
-    ip       = request.client.host if request.client else "unknown"
-    email_in = (req.email or "").strip().lower()
-    pwd_in   = req.password or ""
+    ip        = request.client.host if request.client else "unknown"
+    email_raw = (req.email or "").strip()
+    email_in  = email_raw.lower()
+    pwd_in    = req.password or ""
 
     if not email_in or not pwd_in:
         raise HTTPException(400, "البريد الإلكتروني وكلمة المرور مطلوبان")
@@ -187,10 +188,8 @@ async def unified_login(req: LoginRequest, request: Request):
     generic_401 = HTTPException(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة")
 
     # ── 1. Super admin ──────────────────────────────────────────────────
-    super_email = os.getenv("SUPER_ADMIN_EMAIL", "h456ad@gmail.com").strip().lower()
-    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
-    if super_pass == "admin":
-        print("⚠️  [auth] SUPER_ADMIN_PASSWORD is still the default 'admin' — please change it!")
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "")
     if hmac.compare_digest(email_in, super_email):
         if not hmac.compare_digest(pwd_in, super_pass):
             print(f"[auth] ❌ Super login bad password from {ip}")
@@ -259,7 +258,8 @@ async def unified_login(req: LoginRequest, request: Request):
 
     # ── 4. Store ID direct lookup ───────────────────────────────────────
     # Allows owners who don't remember their email to log in with store_id + password.
-    store_id_candidate = email_in.strip()
+    # Use raw (pre-lowercase) input so mixed-case store IDs are found correctly.
+    store_id_candidate = email_raw
     if sm.is_registered(store_id_candidate):
         stored_hash = sm.get_admin_password_hash(store_id_candidate)
         if not stored_hash or not _auth.check_password(pwd_in, stored_hash):

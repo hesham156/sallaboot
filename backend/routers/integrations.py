@@ -6,8 +6,11 @@ Currently supported:
   • Shopify — full OAuth 2.0 install + ScriptTag widget injection + disconnect
 """
 
+import hashlib
+import hmac as _hmac
 import os
 import secrets
+import time
 from urllib.parse import urlencode
 
 import httpx
@@ -25,8 +28,32 @@ SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_SCOPES        = "read_orders,read_products,read_customers,read_inventory,write_script_tags"
 BASE_URL              = os.getenv("BASE_URL", "http://localhost:8000")
 
-# In-memory CSRF state store (ephemeral)
+# In-memory CSRF state store — single-process only.
+# In multi-worker deployments (gunicorn/uvicorn --workers N) use Redis instead.
 _oauth_states: dict[str, dict] = {}
+_OAUTH_STATE_TTL = 600  # seconds
+
+
+def _prune_oauth_states() -> None:
+    """Remove states older than TTL to prevent memory growth."""
+    cutoff = time.time() - _OAUTH_STATE_TTL
+    expired = [k for k, v in _oauth_states.items() if v.get("ts", 0) < cutoff]
+    for k in expired:
+        _oauth_states.pop(k, None)
+
+
+def _verify_shopify_hmac(query_params: dict, secret: str) -> bool:
+    """Verify Shopify's HMAC-SHA256 signature on OAuth callbacks."""
+    received = query_params.get("hmac", "")
+    if not received or not secret:
+        return False
+    message = "&".join(
+        f"{k}={v}" for k, v in sorted(query_params.items()) if k != "hmac"
+    )
+    expected = _hmac.new(
+        secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return _hmac.compare_digest(expected, received)
 
 
 def _shopify_api(shop: str) -> str:
@@ -99,7 +126,8 @@ async def shopify_install(store_id: str, shop: str, request: Request):
 
     shop = _normalize_shop(shop)
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = {"store_id": store_id, "shop": shop}
+    _prune_oauth_states()
+    _oauth_states[state] = {"store_id": store_id, "shop": shop, "ts": time.time()}
 
     redirect_uri = f"{BASE_URL}/integrations/shopify/callback"
     params = {
@@ -122,6 +150,10 @@ async def shopify_callback(
     state: str = "",
     error: str = "",
 ):
+    # Verify Shopify's HMAC signature first — before touching any state.
+    if not error and not _verify_shopify_hmac(dict(request.query_params), SHOPIFY_CLIENT_SECRET):
+        raise HTTPException(400, "Invalid Shopify HMAC — request may have been tampered with")
+
     if error:
         store_id = (_oauth_states.pop(state, None) or {}).get("store_id", "unknown")
         return RedirectResponse(
@@ -204,6 +236,7 @@ async def shopify_callback(
 
     # 6. Inject chat widget into Shopify storefront via ScriptTag
     widget_src = f"{BASE_URL}/widget-shopify/{store_id}.js"
+    _scripttag_ok = False
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Remove any existing script tags we created first (idempotent)
@@ -211,8 +244,8 @@ async def shopify_callback(
                 f"{_shopify_api(shop)}/script_tags.json?src={widget_src}",
                 headers={"X-Shopify-Access-Token": access_token},
             )
-            existing = r.json().get("script_tags", []) if r.is_success else []
-            for tag in existing:
+            existing_tags = r.json().get("script_tags", []) if r.is_success else []
+            for tag in existing_tags:
                 await client.delete(
                     f"{_shopify_api(shop)}/script_tags/{tag['id']}.json",
                     headers={"X-Shopify-Access-Token": access_token},
@@ -223,15 +256,15 @@ async def shopify_callback(
                 headers={"X-Shopify-Access-Token": access_token},
                 json={"script_tag": {"event": "onload", "src": widget_src}},
             )
-            if not r.is_success:
-                print(f"[integrations] ScriptTag POST failed {r.status_code}: {r.text[:400]}")
             r.raise_for_status()
+            _scripttag_ok = True
             print(f"[integrations] ✅ ScriptTag injected for {shop}")
     except Exception as e:
-        print(f"[integrations] ScriptTag injection failed (non-fatal): {e}")
+        print(f"[integrations] ⚠️ ScriptTag injection failed: {e}")
 
+    redirect_qs = "shopify=connected" if _scripttag_ok else "shopify=connected&widget_warning=1"
     return RedirectResponse(
-        f"{BASE_URL}/store/{store_id}/integrations?shopify=connected",
+        f"{BASE_URL}/store/{store_id}/integrations?{redirect_qs}",
         status_code=302,
     )
 

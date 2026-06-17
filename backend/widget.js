@@ -492,7 +492,7 @@
         <div id="salla-chat-header">
           <div class="avatar">🖨️</div>
           <div class="info">
-            <div class="name">${CONFIG.storeName}</div>
+            <div class="name" id="salla-store-name"></div>
             <div class="status" id="salla-status-text">متاح الآن</div>
           </div>
           <span id="salla-cart-badge" title="السلة">🛒 <span id="salla-cart-count">0</span></span>
@@ -522,6 +522,7 @@
     `;
 
     document.body.appendChild(wrapper);
+    document.getElementById("salla-store-name").textContent = CONFIG.storeName || "";
   }
 
   // ── Message Rendering ─────────────────────────────────────────────────────────
@@ -1401,11 +1402,15 @@
     fileInput.addEventListener("change", function () {
       var file = fileInput.files[0];
       if (!file) return;
-      // Show preview bar
+      // Show preview bar — use textContent to avoid XSS via crafted file names.
       filePreview.style.display = "flex";
-      filePreview.innerHTML =
-        `<span>📎</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${file.name}</span>` +
-        `<span class="remove" id="remove-file">✕</span>`;
+      filePreview.textContent = "";
+      var _icon = document.createElement("span"); _icon.textContent = "📎";
+      var _fname = document.createElement("span");
+      _fname.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+      _fname.textContent = file.name;
+      var _rm = document.createElement("span"); _rm.className = "remove"; _rm.id = "remove-file"; _rm.textContent = "✕";
+      filePreview.appendChild(_icon); filePreview.appendChild(_fname); filePreview.appendChild(_rm);
       document.getElementById("remove-file").addEventListener("click", function () {
         filePreview.style.display = "none";
         fileInput.value = "";

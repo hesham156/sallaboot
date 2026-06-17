@@ -170,10 +170,10 @@ async def sync_contacts(store_id: str):
                     if p and p.strip()
                 ]
                 phone = phones[0] if phones else ""
-                if not phone and not c.get("email"):
+                if not phone:
                     continue
                 shopify_records.append({
-                    "phone":   phone or c.get("email", ""),  # use email as key if no phone
+                    "phone":   phone,
                     "name":    f"{c.get('first_name', '')} {c.get('last_name', '')}".strip(),
                     "email":   c.get("email", ""),
                     "city":    (c.get("default_address") or {}).get("city", ""),
