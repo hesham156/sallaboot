@@ -364,6 +364,203 @@ async def zid_install(store_id: str, request: Request):
     return {"install_url": f"{ZID_OAUTH_BASE}/oauth/authorize?{params}"}
 
 
+# ── Zid: marketplace landing-page helpers ────────────────────────────────────
+
+def _zid_no_code_page() -> str:
+    """HTML shown when the callback receives neither code nor valid state."""
+    return """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>7ayak — خطأ في الربط</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}
+  .card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:40px 36px;max-width:440px;width:100%;text-align:center}
+  .icon{font-size:48px;margin-bottom:20px}
+  h1{font-size:20px;font-weight:700;color:#111827;margin-bottom:10px}
+  p{font-size:14px;color:#6b7280;line-height:1.7;margin-bottom:24px}
+  .btn{display:inline-block;padding:12px 28px;background:#111827;color:#fff;border-radius:10px;text-decoration:none;font-size:14px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⚠️</div>
+  <h1>رابط الربط غير صالح</h1>
+  <p>لم يتم إرسال رمز التفويض من زد. الرجاء إعادة المحاولة من لوحة تحكم 7ayak ضمن قسم التكاملات.</p>
+  <a class="btn" href="javascript:window.close()">إغلاق</a>
+</div>
+</body>
+</html>"""
+
+
+def _zid_landing_page(code: str) -> str:
+    """
+    HTML landing page for marketplace-initiated installs (Zid sends code but no state).
+    The merchant enters their 7ayak store email so we can identify which store to connect.
+    """
+    import html as _html
+    safe_code = _html.escape(code, quote=True)
+    return f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>7ayak — ربط متجر زد</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}}
+  .card{{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:40px 36px;max-width:460px;width:100%}}
+  .logo{{text-align:center;font-size:26px;font-weight:800;color:#111827;margin-bottom:6px;letter-spacing:-.5px}}
+  .sub{{text-align:center;font-size:13px;color:#6b7280;margin-bottom:28px}}
+  h2{{font-size:17px;font-weight:700;color:#111827;margin-bottom:8px}}
+  p{{font-size:13px;color:#6b7280;line-height:1.6;margin-bottom:24px}}
+  label{{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}}
+  input{{width:100%;padding:12px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;transition:.15s}}
+  input:focus{{border-color:#111827}}
+  .hint{{font-size:12px;color:#9ca3af;margin-top:5px}}
+  button{{width:100%;margin-top:20px;padding:13px;background:#111827;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:.15s}}
+  button:hover{{background:#1f2937}}
+  button:disabled{{opacity:.55;cursor:not-allowed}}
+  .err{{margin-top:12px;padding:10px 14px;background:#fef2f2;border-radius:8px;color:#b91c1c;font-size:13px;display:none}}
+  .zid-badge{{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:22px}}
+  .zid-badge span{{font-size:13px;color:#6b7280}}
+  .arrow{{color:#d1d5db}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">7ayak</div>
+  <div class="sub">مساعد التجارة الذكي</div>
+  <div class="zid-badge">
+    <span>ربط متجر زد</span>
+    <span class="arrow">←</span>
+    <span>اكتمال التثبيت</span>
+  </div>
+  <h2>أدخل بريدك الإلكتروني في 7ayak</h2>
+  <p>تم اكتشاف تثبيتك من سوق زد. لاكتمال الربط، أدخل البريد الإلكتروني المرتبط بحساب 7ayak الخاص بك.</p>
+  <form id="frm" method="POST" action="/integrations/zid/complete">
+    <input type="hidden" name="code" value="{safe_code}">
+    <label for="email">البريد الإلكتروني لحساب 7ayak</label>
+    <input type="email" id="email" name="email" placeholder="example@email.com" required autocomplete="email">
+    <div class="hint">البريد الذي تستخدمه لتسجيل الدخول في 7ayak</div>
+    <div class="err" id="err"></div>
+    <button type="submit" id="btn">ربط المتجر</button>
+  </form>
+</div>
+<script>
+document.getElementById('frm').addEventListener('submit',function(e){{
+  var btn=document.getElementById('btn');
+  btn.disabled=true;
+  btn.textContent='جارٍ الربط…';
+}});
+</script>
+</body>
+</html>"""
+
+
+# ── Zid: complete marketplace install (form POST from _zid_landing_page) ──────
+
+@router.post("/integrations/zid/complete", include_in_schema=False)
+async def zid_complete(request: Request):
+    """
+    Handles form submission from the marketplace landing page.
+    Looks up the store by the email entered, then completes the Zid OAuth flow.
+    """
+    form = await request.form()
+    code  = str(form.get("code", "")).strip()
+    email = str(form.get("email", "")).strip().lower()
+
+    if not code or not email:
+        return Response(content=_zid_no_code_page(), media_type="text/html; charset=utf-8")
+
+    # Find the store by owner email
+    store_id = await db.find_store_by_owner_email(email)
+    if not store_id:
+        err_html = _zid_landing_page(code).replace(
+            'class="err" id="err"',
+            'class="err" id="err" style="display:block"',
+        ).replace(
+            '</div>\n  <form',
+            'لم نجد حساباً بهذا البريد الإلكتروني. تأكد من صحة البريد ثم أعد المحاولة.</div>\n  <form',
+        )
+        return Response(content=err_html, media_type="text/html; charset=utf-8")
+
+    # Exchange code → tokens
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{ZID_OAUTH_BASE}/oauth/token",
+                data={
+                    "grant_type":    "authorization_code",
+                    "client_id":     ZID_CLIENT_ID,
+                    "client_secret": ZID_CLIENT_SECRET,
+                    "redirect_uri":  f"{BASE_URL}/integrations/zid/callback",
+                    "code":          code,
+                },
+            )
+            r.raise_for_status()
+            token_data = r.json()
+    except Exception as exc:
+        print(f"[zid_complete] token exchange failed: {exc}")
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?zid=error&reason=token_exchange_failed",
+            status_code=302,
+        )
+
+    access_token  = token_data.get("access_token", "")
+    auth_jwt      = token_data.get("Authorization", "")
+    refresh_token = token_data.get("refresh_token", "")
+    if not access_token or not auth_jwt:
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?zid=error&reason=missing_tokens",
+            status_code=302,
+        )
+
+    # Fetch Zid store info
+    store_info:   dict = {}
+    zid_store_id: str  = ""
+    try:
+        from zid_client import ZidClient
+        zid = ZidClient(access_token, auth_jwt, store_id=store_id)
+        raw = await zid.get_store()
+        zid_store_id = str(raw.get("id", ""))
+        store_info = raw
+    except Exception as e:
+        print(f"[zid_complete] store info fetch failed (non-fatal): {e}")
+
+    # Save integration
+    try:
+        await db.save_integration(store_id, "zid", {
+            "access_token":      access_token,
+            "authorization_jwt": auth_jwt,
+            "refresh_token":     refresh_token,
+            "zid_store_id":      zid_store_id,
+            "store_name":        store_info.get("title", ""),
+            "store_email":       store_info.get("email", ""),
+            "store_url":         store_info.get("url", ""),
+        })
+        print(f"[zid_complete] ✅ Zid connected via marketplace: store={store_id}")
+    except Exception as e:
+        print(f"[zid_complete] ❌ save_integration failed: {e}")
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?zid=error&reason=db_save_failed",
+            status_code=302,
+        )
+
+    # Background sync + webhooks
+    import zid_sync as _zs
+    import database as _db_fire
+    _db_fire.fire(_zs.sync_zid_store(store_id, access_token, auth_jwt, zid_store_id))
+    _db_fire.fire(_zs.register_zid_webhooks(access_token, auth_jwt, zid_store_id, store_id, BASE_URL))
+
+    return RedirectResponse(
+        f"{BASE_URL}/store/{store_id}/integrations?zid=connected",
+        status_code=302,
+    )
+
+
 # ── Zid: OAuth callback ───────────────────────────────────────────────────────
 
 @router.get("/integrations/zid/callback")
@@ -381,8 +578,20 @@ async def zid_callback(
         )
 
     state_data = _oauth_states.pop(state, None)
+
+    # Marketplace-initiated install: Zid redirects without a state nonce
+    # (merchant clicked "Install" from Zid App Market directly).
+    # Show a landing page so the merchant can identify their 7ayak store.
     if not state_data or state_data.get("platform") != "zid":
-        raise HTTPException(400, "Invalid or expired OAuth state — please retry the connection")
+        if not code:
+            return Response(
+                content=_zid_no_code_page(),
+                media_type="text/html; charset=utf-8",
+            )
+        return Response(
+            content=_zid_landing_page(code),
+            media_type="text/html; charset=utf-8",
+        )
 
     store_id = state_data["store_id"]
 
