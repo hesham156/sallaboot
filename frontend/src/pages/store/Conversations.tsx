@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   Button, Input, Spinner, Textarea, Avatar,
   Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
@@ -112,11 +112,13 @@ function renderMessageBody(content: string): React.ReactNode {
   return parts.length > 0 ? parts : content
 }
 
-type ViewMode   = 'all' | 'mentions' | 'unattended' | 'chatbot'
-type ActiveTab  = 'mine' | 'unassigned' | 'all'
-type SortOrder  = 'last_activity' | 'newest' | 'oldest'
+type ViewMode      = 'all' | 'mentions' | 'unattended' | 'chatbot'
+type ActiveTab     = 'mine' | 'unassigned' | 'all'
+type SortOrder     = 'last_activity' | 'newest' | 'oldest'
+type StatusFilter  = 'open' | 'unread' | 'bot' | 'human'
 
 export default function Conversations({ storeId }: Props) {
+  const navigate = useNavigate()
   const [convs, setConvs]           = useState<ConvSummary[]>([])
   const [total, setTotal]           = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -131,20 +133,24 @@ export default function Conversations({ storeId }: Props) {
   const listRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Sidebar / filter state ──
+  const [navCollapsed, setNavCollapsed] = useState(false)
   const [viewMode, setViewMode]         = useState<ViewMode>('all')
   const [activeTab, setActiveTab]       = useState<ActiveTab>('all')
   const [sortOrder, setSortOrder]       = useState<SortOrder>('last_activity')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('open')
   const [channelFilter, setChannelFilter] = useState<string | null>(null)
   const [empFilter, setEmpFilter]       = useState<number | null>(null)
-  const [showSortMenu, setShowSortMenu] = useState(false)
+  const [showSortMenu, setShowSortMenu]   = useState(false)
+  const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [assigningId, setAssigningId]   = useState<string | null>(null)
   const [teamsOpen, setTeamsOpen]       = useState(true)
   const [chOpen, setChOpen]             = useState(true)
   const [employees, setEmployees]       = useState<Employee[]>([])
   const [aiConfig, setAiConfig]         = useState<AIConfig | null>(null)
 
-  const sortMenuRef  = useRef<HTMLDivElement>(null)
-  const assignRef    = useRef<HTMLDivElement>(null)
+  const sortMenuRef   = useRef<HTMLDivElement>(null)
+  const statusMenuRef = useRef<HTMLDivElement>(null)
+  const assignRef     = useRef<HTMLDivElement>(null)
 
   function scheduleListRefresh(delay = 500) {
     if (listRefreshTimer.current) return
@@ -211,6 +217,9 @@ export default function Conversations({ storeId }: Props) {
     function handler(e: MouseEvent) {
       if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
         setShowSortMenu(false)
+      }
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) {
+        setShowStatusMenu(false)
       }
       if (assignRef.current && !assignRef.current.contains(e.target as Node)) {
         setAssigningId(null)
@@ -353,16 +362,24 @@ export default function Conversations({ storeId }: Props) {
     ? chFiltered.filter(c => !c.bot_enabled)   // simplified: show human-handled convs for that agent
     : chFiltered
 
-  // 5. Search
+  // 5. Status filter
+  const statusFiltered = (() => {
+    if (statusFilter === 'unread') return empFiltered.filter(c => c.unread)
+    if (statusFilter === 'bot')    return empFiltered.filter(c => c.bot_enabled)
+    if (statusFilter === 'human')  return empFiltered.filter(c => !c.bot_enabled)
+    return empFiltered
+  })()
+
+  // 6. Search
   const searchFiltered = search
-    ? empFiltered.filter(c =>
+    ? statusFiltered.filter(c =>
         c.session_id.includes(search) ||
         customerDisplayName(c).toLowerCase().includes(search.toLowerCase()) ||
         c.last_message?.content?.toLowerCase().includes(search.toLowerCase())
       )
-    : empFiltered
+    : statusFiltered
 
-  // 6. Sort
+  // 7. Sort
   const filtered = [...searchFiltered].sort((a, b) => {
     if (sortOrder === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     if (sortOrder === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -373,6 +390,13 @@ export default function Conversations({ storeId }: Props) {
     if (ch === 'whatsapp')  return aiConfig?.whatsapp_phone_id ? `+${aiConfig.whatsapp_phone_id}` : 'واتساب'
     if (ch === 'instagram') return aiConfig?.ig_username || 'إنستقرام'
     return 'ويدجت'
+  }
+
+  const statusLabels: Record<StatusFilter, string> = {
+    open:   'مفتوحة',
+    unread: 'غير مقروءة',
+    bot:    'مع البوت',
+    human:  'مع إنسان',
   }
 
   const sortLabels: Record<SortOrder, string> = {
@@ -406,7 +430,7 @@ export default function Conversations({ storeId }: Props) {
     <div className="flex h-screen overflow-hidden" dir="rtl">
 
       {/* ══════════════════════ NAV SIDEBAR ══════════════════════ */}
-      <nav className="w-52 shrink-0 bg-[#0f1729] flex flex-col border-l border-white/5 overflow-y-auto">
+      <nav className={`shrink-0 bg-[#0f1729] flex flex-col border-l border-white/5 overflow-y-auto transition-all duration-200 ${navCollapsed ? 'w-0 overflow-hidden' : 'w-52'}`}>
 
         {/* Main nav */}
         <div className="py-2">
@@ -541,7 +565,11 @@ export default function Conversations({ storeId }: Props) {
 
         {/* Top bar: search */}
         <div className="px-3 py-2 border-b border-divider flex items-center gap-2 flex-shrink-0">
-          <button className="text-slate-500 hover:text-slate-300 p-0.5 flex-shrink-0">
+          <button
+            onClick={() => setNavCollapsed(o => !o)}
+            className={`p-0.5 flex-shrink-0 transition-colors ${navCollapsed ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+            title={navCollapsed ? 'إظهار الشريط الجانبي' : 'إخفاء الشريط الجانبي'}
+          >
             <Icon paths={['M4 6h16', 'M4 12h16', 'M4 18h16']} size={15} />
           </button>
           <div className="flex-1 min-w-0">
@@ -561,7 +589,11 @@ export default function Conversations({ storeId }: Props) {
               }
             />
           </div>
-          <button className="text-slate-500 hover:text-slate-300 p-0.5 flex-shrink-0">
+          <button
+            onClick={() => navigate(`/store/${storeId}/contacts`)}
+            className="text-slate-500 hover:text-slate-300 p-0.5 flex-shrink-0 transition-colors"
+            title="جهات الاتصال"
+          >
             <Icon paths="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" size={15} />
           </button>
         </div>
@@ -584,11 +616,38 @@ export default function Conversations({ storeId }: Props) {
 
           {/* Status + Sort dropdowns */}
           <div className="flex gap-2 mb-3">
-            {/* Status — static for now */}
-            <button className="flex-1 text-xs border border-divider rounded-lg px-2.5 py-1.5 flex items-center justify-between text-slate-300 bg-content2 cursor-default">
-              <span>مفتوحة</span>
-              <Icon paths="M19 9l-7 7-7-7" size={10} className="text-slate-500" />
-            </button>
+            {/* Status — functional dropdown */}
+            <div className="flex-1 relative" ref={statusMenuRef}>
+              <button
+                onClick={() => setShowStatusMenu(o => !o)}
+                className={`w-full text-xs border rounded-lg px-2.5 py-1.5 flex items-center justify-between transition-colors ${
+                  showStatusMenu
+                    ? 'border-indigo-500 text-indigo-300 bg-content2'
+                    : statusFilter !== 'open'
+                    ? 'border-indigo-500/50 text-indigo-300 bg-content2'
+                    : 'border-divider text-slate-300 bg-content2 hover:border-slate-500'
+                }`}>
+                <span>{statusLabels[statusFilter]}</span>
+                <Icon paths={showStatusMenu ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} size={10} className="text-slate-500" />
+              </button>
+              {showStatusMenu && (
+                <div className="absolute top-full right-0 mt-1 bg-content1 border border-divider rounded-xl shadow-xl z-50 min-w-[130px] overflow-hidden">
+                  {(Object.entries(statusLabels) as [StatusFilter, string][]).map(([val, label]) => (
+                    <button key={val}
+                      onClick={() => { setStatusFilter(val); setShowStatusMenu(false) }}
+                      className={`w-full text-right px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
+                        statusFilter === val
+                          ? 'bg-indigo-500/10 text-indigo-400'
+                          : 'text-slate-400 hover:bg-content2 hover:text-slate-200'
+                      }`}>
+                      {statusFilter === val && <Icon paths="M5 13l4 4L19 7" size={11} className="text-indigo-400 flex-shrink-0" />}
+                      {statusFilter !== val && <span className="w-[11px] flex-shrink-0" />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Sort — functional dropdown */}
             <div className="flex-1 relative" ref={sortMenuRef}>
