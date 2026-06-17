@@ -371,12 +371,25 @@ async def zid_install(store_id: str, request: Request):
 # look up their store, then redirect to Zid OAuth — which comes back with
 # a proper code+state to the Redirection URL (callback).
 
-def _zid_start_page(error: str = "") -> str:
-    err_block = (
-        f'<div class="err" style="display:block">{error}</div>'
-        if error else
-        '<div class="err" id="err"></div>'
-    )
+def _zid_start_page(
+    login_error: str = "",
+    register_error: str = "",
+    active_tab: str = "login",
+    prefill_name: str = "",
+    prefill_email_reg: str = "",
+) -> str:
+    import html as _h
+    def _err(msg: str) -> str:
+        return f'<div class="err" style="display:block">{_h.escape(msg)}</div>' if msg else '<div class="err"></div>'
+
+    login_tab_cls    = "tab active" if active_tab == "login"    else "tab"
+    register_tab_cls = "tab active" if active_tab == "register" else "tab"
+    login_panel_cls    = "panel active" if active_tab == "login"    else "panel"
+    register_panel_cls = "panel active" if active_tab == "register" else "panel"
+
+    safe_name  = _h.escape(prefill_name,      quote=True)
+    safe_email = _h.escape(prefill_email_reg, quote=True)
+
     return f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -386,48 +399,78 @@ def _zid_start_page(error: str = "") -> str:
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}}
-  .card{{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:40px 36px;max-width:460px;width:100%}}
-  .logo{{text-align:center;font-size:26px;font-weight:800;color:#111827;margin-bottom:6px;letter-spacing:-.5px}}
-  .sub{{text-align:center;font-size:13px;color:#6b7280;margin-bottom:28px}}
-  h2{{font-size:17px;font-weight:700;color:#111827;margin-bottom:8px}}
-  p{{font-size:13px;color:#6b7280;line-height:1.6;margin-bottom:24px}}
-  label{{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}}
-  input{{width:100%;padding:12px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;transition:.15s}}
+  .card{{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:36px 32px;max-width:460px;width:100%}}
+  .logo{{text-align:center;font-size:26px;font-weight:800;color:#111827;margin-bottom:4px;letter-spacing:-.5px}}
+  .sub{{text-align:center;font-size:13px;color:#6b7280;margin-bottom:24px}}
+  .badge{{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:20px;font-size:13px;color:#6b7280}}
+  .badge .arr{{color:#d1d5db}}
+  .tabs{{display:flex;background:#f1f5f9;border-radius:10px;padding:4px;margin-bottom:24px;gap:4px}}
+  .tab{{flex:1;padding:9px;text-align:center;border:none;background:transparent;border-radius:8px;font-size:14px;font-weight:600;color:#6b7280;cursor:pointer;transition:.15s}}
+  .tab.active{{background:#fff;color:#111827;box-shadow:0 1px 4px rgba(0,0,0,.1)}}
+  .panel{{display:none}}.panel.active{{display:block}}
+  label{{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;margin-top:14px}}
+  label:first-of-type{{margin-top:0}}
+  input{{width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;transition:.15s}}
   input:focus{{border-color:#111827}}
-  .hint{{font-size:12px;color:#9ca3af;margin-top:5px}}
-  button{{width:100%;margin-top:20px;padding:13px;background:#111827;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}}
-  button:hover{{background:#1f2937}}
-  button:disabled{{opacity:.55;cursor:not-allowed}}
-  .err{{margin-top:12px;padding:10px 14px;background:#fef2f2;border-radius:8px;color:#b91c1c;font-size:13px;display:none}}
-  .zid-badge{{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:22px}}
-  .zid-badge span{{font-size:13px;color:#6b7280}}
-  .arrow{{color:#d1d5db}}
+  .hint{{font-size:11px;color:#9ca3af;margin-top:4px}}
+  .btn{{width:100%;margin-top:18px;padding:13px;background:#111827;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:.15s}}
+  .btn:hover{{background:#1f2937}}
+  .btn:disabled{{opacity:.55;cursor:not-allowed}}
+  .err{{margin-top:10px;padding:9px 13px;background:#fef2f2;border-radius:8px;color:#b91c1c;font-size:13px;display:none}}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">7ayak</div>
   <div class="sub">مساعد التجارة الذكي</div>
-  <div class="zid-badge">
-    <span>سوق زد</span>
-    <span class="arrow">←</span>
-    <span>ربط المتجر</span>
+  <div class="badge"><span>سوق زد</span><span class="arr">←</span><span>ربط المتجر</span></div>
+
+  <div class="tabs">
+    <button class="{login_tab_cls}"    onclick="switchTab('login')"   type="button">لدي حساب</button>
+    <button class="{register_tab_cls}" onclick="switchTab('register')" type="button">حساب جديد</button>
   </div>
-  <h2>أدخل بريدك الإلكتروني في 7ayak</h2>
-  <p>لإتمام ربط متجر زد مع 7ayak، أدخل البريد الإلكتروني المرتبط بحساب 7ayak الخاص بك.</p>
-  <form id="frm" method="POST" action="/integrations/zid/start">
-    <label for="email">البريد الإلكتروني لحساب 7ayak</label>
-    <input type="email" id="email" name="email" placeholder="example@email.com" required autocomplete="email">
-    <div class="hint">البريد الذي تستخدمه لتسجيل الدخول في 7ayak</div>
-    {err_block}
-    <button type="submit" id="btn">متابعة</button>
-  </form>
+
+  <!-- Tab: Login -->
+  <div id="panel-login" class="{login_panel_cls}">
+    <form method="POST" action="/integrations/zid/start" onsubmit="lock(this)">
+      <input type="hidden" name="action" value="login">
+      <label for="l-email">البريد الإلكتروني لحساب 7ayak</label>
+      <input type="email" id="l-email" name="email" placeholder="example@email.com" required autocomplete="email">
+      {_err(login_error)}
+      <button class="btn" type="submit">متابعة</button>
+    </form>
+  </div>
+
+  <!-- Tab: Register -->
+  <div id="panel-register" class="{register_panel_cls}">
+    <form method="POST" action="/integrations/zid/start" onsubmit="lock(this)">
+      <input type="hidden" name="action" value="register">
+      <label for="r-name">الاسم الكامل</label>
+      <input type="text" id="r-name" name="name" placeholder="محمد عبدالله" required value="{safe_name}">
+      <label for="r-email">البريد الإلكتروني</label>
+      <input type="email" id="r-email" name="email" placeholder="example@email.com" required autocomplete="email" value="{safe_email}">
+      <label for="r-pass">كلمة المرور</label>
+      <input type="password" id="r-pass" name="password" placeholder="8 أحرف على الأقل" required minlength="8" autocomplete="new-password">
+      <label for="r-pass2">تأكيد كلمة المرور</label>
+      <input type="password" id="r-pass2" name="password2" placeholder="أعد إدخال كلمة المرور" required minlength="8">
+      {_err(register_error)}
+      <button class="btn" type="submit">إنشاء حساب والمتابعة</button>
+    </form>
+  </div>
 </div>
 <script>
-document.getElementById('frm').addEventListener('submit',function(){{
-  var btn=document.getElementById('btn');
-  btn.disabled=true;btn.textContent='جارٍ التحقق…';
-}});
+function switchTab(t){{
+  ['login','register'].forEach(function(id){{
+    document.getElementById('panel-'+id).className='panel'+(t===id?' active':'');
+    document.querySelectorAll('.tab').forEach(function(b,i){{
+      b.className='tab'+((['login','register'][i])===t?' active':'');
+    }});
+  }});
+}}
+function lock(form){{
+  form.querySelector('.btn').disabled=true;
+  form.querySelector('.btn').textContent='جارٍ المعالجة…';
+}}
 </script>
 </body>
 </html>"""
@@ -435,59 +478,117 @@ document.getElementById('frm').addEventListener('submit',function(){{
 
 @router.get("/integrations/zid/start", include_in_schema=False)
 async def zid_start_get(request: Request):
-    """
-    Application URL — Zid redirects merchants here from the App Market.
-    Shows a form asking for their 7ayak email.
-    """
+    """Application URL — Zid App Market redirects merchants here on install."""
     return Response(content=_zid_start_page(), media_type="text/html; charset=utf-8")
+
+
+def _zid_oauth_redirect(store_id: str) -> RedirectResponse:
+    """Generate Zid OAuth URL and redirect with a fresh state nonce."""
+    state = secrets.token_urlsafe(32)
+    _prune_oauth_states()
+    _oauth_states[state] = {"store_id": store_id, "platform": "zid", "ts": time.time()}
+    params = urlencode({
+        "client_id":     ZID_CLIENT_ID,
+        "redirect_uri":  f"{BASE_URL}/integrations/zid/callback",
+        "response_type": "code",
+        "state":         state,
+    })
+    return RedirectResponse(f"{ZID_OAUTH_BASE}/oauth/authorize?{params}", status_code=302)
 
 
 @router.post("/integrations/zid/start", include_in_schema=False)
 async def zid_start_post(request: Request):
     """
-    Handles form from zid_start_get.
-    Looks up the store by email, generates OAuth state, redirects to Zid authorization.
+    Handles both tabs from the start page:
+      action=login    → look up existing 7ayak account by email → OAuth
+      action=register → create new 7ayak account → OAuth
     """
+    import re
+    import auth as _auth_lib
+    import store_manager as sm
+
     if not ZID_CLIENT_ID:
         return Response(
-            content=_zid_start_page("خدمة ربط زد غير مفعّلة حالياً، يرجى التواصل مع الدعم."),
+            content=_zid_start_page(login_error="خدمة ربط زد غير مفعّلة، يرجى التواصل مع الدعم."),
             media_type="text/html; charset=utf-8",
         )
 
-    form  = await request.form()
-    email = str(form.get("email", "")).strip().lower()
-    if not email:
-        return Response(content=_zid_start_page("الرجاء إدخال البريد الإلكتروني."),
-                        media_type="text/html; charset=utf-8")
+    form   = await request.form()
+    action = str(form.get("action", "login"))
+    email  = str(form.get("email", "")).strip().lower()
 
-    store_id = await db.find_store_by_owner_email(email)
-    if not store_id:
-        return Response(
-            content=_zid_start_page("لم نجد حساباً بهذا البريد. تأكد من صحة البريد ثم أعد المحاولة."),
-            media_type="text/html; charset=utf-8",
-        )
-
-    # Check exclusivity
-    existing = await db.get_integrations(store_id)
-    for platform, label in {"salla": "سلّة", "shopify": "شوبيفاي", "woocommerce": "ووكومرس"}.items():
-        if existing.get(platform):
+    # ── Login tab ────────────────────────────────────────────────────────
+    if action == "login":
+        if not email:
+            return Response(content=_zid_start_page(login_error="الرجاء إدخال البريد الإلكتروني."),
+                            media_type="text/html; charset=utf-8")
+        store_id = await db.find_store_by_owner_email(email)
+        if not store_id:
             return Response(
-                content=_zid_start_page(f"الحساب مربوط بـ {label} بالفعل — لا يمكن ربط منصتَي تجارة في آنٍ واحد."),
+                content=_zid_start_page(login_error="لم نجد حساباً بهذا البريد. تأكد من صحة البريد أو أنشئ حساباً جديداً."),
                 media_type="text/html; charset=utf-8",
             )
+        existing = await db.get_integrations(store_id)
+        for platform, label in {"salla": "سلّة", "shopify": "شوبيفاي", "woocommerce": "ووكومرس"}.items():
+            if existing.get(platform):
+                return Response(
+                    content=_zid_start_page(login_error=f"الحساب مربوط بـ {label} — لا يمكن ربط منصتَي تجارة في آنٍ واحد."),
+                    media_type="text/html; charset=utf-8",
+                )
+        return _zid_oauth_redirect(store_id)
 
-    state = secrets.token_urlsafe(32)
-    _prune_oauth_states()
-    _oauth_states[state] = {"store_id": store_id, "platform": "zid", "ts": time.time()}
+    # ── Register tab ─────────────────────────────────────────────────────
+    name      = str(form.get("name", "")).strip()
+    password  = str(form.get("password", ""))
+    password2 = str(form.get("password2", ""))
 
-    redirect_uri = f"{BASE_URL}/integrations/zid/callback"
-    params = urlencode({
-        "client_id":     ZID_CLIENT_ID,
-        "redirect_uri":  redirect_uri,
-        "response_type": "code",
-        "state":         state,
-    })
-    return RedirectResponse(f"{ZID_OAUTH_BASE}/oauth/authorize?{params}", status_code=302)
+    def _reg_err(msg: str):
+        return Response(
+            content=_zid_start_page(register_error=msg, active_tab="register",
+                                    prefill_name=name, prefill_email_reg=email),
+            media_type="text/html; charset=utf-8",
+        )
+
+    if not name:
+        return _reg_err("الاسم الكامل مطلوب.")
+    if not email:
+        return _reg_err("البريد الإلكتروني مطلوب.")
+    if len(password) < 8:
+        return _reg_err("كلمة المرور يجب أن تكون 8 أحرف على الأقل.")
+    if password != password2:
+        return _reg_err("كلمتا المرور غير متطابقتين.")
+
+    # Check if email already taken
+    existing_id = await db.find_store_by_owner_email(email)
+    if existing_id:
+        return _reg_err("البريد الإلكتروني مستخدم بالفعل. اضغط على «لدي حساب» لتسجيل الدخول.")
+
+    # Generate unique store_id from email username
+    slug = re.sub(r"[^a-z0-9]", "_", email.split("@")[0].lower())[:20]
+    store_id = slug
+    suffix = 2
+    while sm.is_registered(store_id) or await db.find_store_by_owner_email(store_id):
+        store_id = f"{slug}_{suffix}"
+        suffix += 1
+
+    # Create the store
+    try:
+        await sm.register_store(
+            store_id=store_id,
+            access_token="",
+            store_info={"name": name},
+            owner_email=email,
+        )
+        tokens = sm.get_store_info(store_id)
+        await db.save_store(store_id, tokens)
+        await db.set_store_owner_email(store_id, email)
+        await sm.set_admin_password(store_id, _auth_lib.hash_password(password))
+        print(f"[zid_start] ✅ New store created via marketplace: store_id={store_id!r} email={email!r}")
+    except Exception as exc:
+        print(f"[zid_start] ❌ Account creation failed: {exc}")
+        return _reg_err("فشل إنشاء الحساب، يرجى المحاولة مرة أخرى.")
+
+    return _zid_oauth_redirect(store_id)
 
 
 # ── Zid: marketplace landing-page helpers ────────────────────────────────────
