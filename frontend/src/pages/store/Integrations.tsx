@@ -289,6 +289,7 @@ export default function Integrations({ storeId }: Props) {
       }
     }
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
+    else if (id === 'salla') { window.location.href = '/auth/salla' }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
 
