@@ -3716,13 +3716,17 @@ async def clear_salla_tokens(store_id: str) -> None:
         await conn.execute(
             """
             UPDATE stores
-               SET tokens = COALESCE(tokens, '{}'::jsonb)
-                   - 'access_token'
-                   - 'refresh_token'
-                   - 'token_type'
-                   - 'expires_in'
-                   - 'expires_at'
-                   - 'scope',
+               SET tokens = CASE
+                       WHEN tokens IS NULL OR jsonb_typeof(tokens) != 'object'
+                       THEN '{}'::jsonb
+                       ELSE tokens
+                            - 'access_token'
+                            - 'refresh_token'
+                            - 'token_type'
+                            - 'expires_in'
+                            - 'expires_at'
+                            - 'scope'
+                   END,
                    updated_at = NOW()
              WHERE store_id = $1
             """,
