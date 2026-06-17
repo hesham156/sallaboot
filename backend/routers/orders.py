@@ -20,6 +20,14 @@ async def _get_shopify_creds(store_id: str) -> tuple[str, str] | None:
 
 @router.get("/admin/{store_id}/abandoned-carts")
 async def store_abandoned_carts(store_id: str, source: str = "cache"):
+    # If this store uses Shopify, never fall back to Salla tokens
+    shopify_creds = await _get_shopify_creds(store_id)
+    if shopify_creds:
+        # Shopify doesn't push abandoned-cart webhooks to us yet — return DB cache
+        # (will be empty until Shopify checkout webhooks are wired up)
+        carts = await db.load_abandoned_carts(store_id) if db.available() else []
+        return {"source": "db", "platform": "shopify", "carts": carts, "count": len(carts)}
+
     if source == "api":
         token = sm.get_access_token(store_id)
         if not token:
@@ -29,12 +37,12 @@ async def store_abandoned_carts(store_id: str, source: str = "cache"):
         try:
             data  = await client.get_abandoned_carts(per_page=50)
             carts = data.get("data", [])
-            return {"source": "api", "carts": carts, "count": len(carts)}
+            return {"source": "api", "platform": "salla", "carts": carts, "count": len(carts)}
         except Exception as e:
             raise HTTPException(500, f"{type(e).__name__}: {e}")
 
     carts = await db.load_abandoned_carts(store_id) if db.available() else []
-    return {"source": "db", "carts": carts, "count": len(carts)}
+    return {"source": "db", "platform": "salla", "carts": carts, "count": len(carts)}
 
 
 @router.post("/admin/{store_id}/abandoned-carts/{cart_id}/recover")

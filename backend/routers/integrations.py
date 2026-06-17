@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 import database as db
+import store_manager as sm
 from routers.deps import require_store_owner
 
 router = APIRouter()
@@ -257,6 +258,7 @@ async def shopify_sync_now(store_id: str, request: Request):
 async def salla_disconnect(store_id: str, request: Request):
     require_store_owner(request, store_id)
     await db.clear_salla_tokens(store_id)
+    sm.clear_salla_token(store_id)   # also evict from in-memory registry
     return {"message": "تم قطع الاتصال مع سلّة"}
 
 

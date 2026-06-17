@@ -265,6 +265,18 @@ def get_refresh_token(store_id: str) -> str:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("refresh_token", "")
 
 
+def clear_salla_token(store_id: str) -> None:
+    """Remove Salla OAuth tokens from in-memory registry (keeps other store data intact)."""
+    store_id = str(store_id)
+    if store_id not in _registry:
+        return
+    tokens = _registry[store_id].get("tokens", {})
+    for key in ("access_token", "refresh_token", "token_type", "expires_in", "expires_at", "scope"):
+        tokens.pop(key, None)
+    _registry[store_id]["tokens"] = tokens
+    _registry[store_id]["agent"] = None  # reset agent so it re-initialises without Salla token
+
+
 def get_token_expires_at(store_id: str) -> str:
     """Return ISO timestamp when the access token expires (empty if not stored)."""
     return _registry.get(str(store_id), {}).get("tokens", {}).get("expires_at", "")
