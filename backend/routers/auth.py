@@ -257,6 +257,30 @@ async def unified_login(req: LoginRequest, request: Request):
             "employee":   None,
         }
 
+    # ── 4. Store ID direct lookup ───────────────────────────────────────
+    # Allows owners who don't remember their email to log in with store_id + password.
+    store_id_candidate = email_in.strip()
+    if sm.is_registered(store_id_candidate):
+        stored_hash = sm.get_admin_password_hash(store_id_candidate)
+        if not stored_hash or not _auth.check_password(pwd_in, stored_hash):
+            print(f"[auth] ❌ Store ID bad password for {store_id_candidate!r} from {ip}")
+            raise generic_401
+        if _auth.needs_rehash(stored_hash):
+            try:
+                await sm.set_admin_password(store_id_candidate, _auth.hash_password(pwd_in))
+            except Exception as exc:
+                print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
+        token = _auth.create_token(store_id_candidate)
+        info  = sm.get_store_info(store_id_candidate) or {}
+        print(f"[auth] ✅ Store ID login {store_id_candidate!r} from {ip}")
+        return {
+            "token":      token,
+            "store_id":   store_id_candidate,
+            "store_name": info.get("store_name", f"متجر {store_id_candidate}"),
+            "is_super":   False,
+            "employee":   None,
+        }
+
     # No account matches — generic 401 (don't leak which side failed)
     print(f"[auth] ❌ No account for {email_in!r} from {ip}")
     raise generic_401

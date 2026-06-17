@@ -25,7 +25,7 @@ function Icon({ paths, size = 16, className = '' }: {
 export default function Login() {
   const navigate = useNavigate()
 
-  const [email, setEmail]       = useState('')
+  const [email, setEmail]       = useState('')  // holds email OR store_id
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
@@ -33,7 +33,7 @@ export default function Login() {
   async function handleSubmit() {
     if (loading) return
     setError('')
-    if (!email.trim())  { setError('يرجى إدخال البريد الإلكتروني'); return }
+    if (!email.trim())  { setError('يرجى إدخال البريد الإلكتروني أو معرّف المتجر'); return }
     if (!password)      { setError('يرجى إدخال كلمة المرور');       return }
     setLoading(true)
     try {
@@ -88,10 +88,10 @@ export default function Login() {
 
             {/* Email */}
             <div>
-              <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني أو معرّف المتجر</label>
               <Input
-                placeholder="you@example.com"
-                type="email"
+                placeholder="you@example.com أو store_id"
+                type="text"
                 value={email}
                 onValueChange={v => { setEmail(v); setError('') }}
                 variant="bordered"
