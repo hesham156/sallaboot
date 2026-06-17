@@ -300,7 +300,6 @@ export default function Integrations({ storeId }: Props) {
   }
 
   function handleDisconnect(id: string) {
-    if (id === 'salla') { showToast('لا يمكن فصل سلّة — هي القناة الرئيسية للمتجر', 'error'); return }
     setDisconnectTarget(id)
   }
 
@@ -309,6 +308,7 @@ export default function Integrations({ storeId }: Props) {
     setDisconnecting(true)
     try {
       if (disconnectTarget === 'shopify') await api.shopifyDisconnect(storeId)
+      else if (disconnectTarget === 'salla') await api.sallaDisconnect(storeId)
       await loadIntegrations()
       showToast('تم قطع الاتصال بنجاح', 'success')
     } catch (e) {

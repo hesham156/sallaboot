@@ -541,6 +541,9 @@ export const api = {
 
   shopifyDisconnect: (storeId: string) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/shopify`),
+
+  sallaDisconnect: (storeId: string) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/salla`),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────

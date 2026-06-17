@@ -227,6 +227,15 @@ async def shopify_callback(
     )
 
 
+# ── Salla: disconnect ────────────────────────────────────────────────────────
+
+@router.delete("/admin/{store_id}/integrations/salla")
+async def salla_disconnect(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    await db.clear_salla_tokens(store_id)
+    return {"message": "تم قطع الاتصال مع سلّة"}
+
+
 # ── Shopify: disconnect ───────────────────────────────────────────────────────
 
 @router.delete("/admin/{store_id}/integrations/shopify")

@@ -3706,6 +3706,17 @@ async def contacts_upsert_batch(store_id: str, records: list[dict]) -> int:
 
 # ── Integrations ──────────────────────────────────────────────────────────────
 
+async def clear_salla_tokens(store_id: str) -> None:
+    """Remove Salla OAuth tokens from the store, effectively disconnecting it."""
+    if not _pool:
+        raise RuntimeError("Database pool not initialised")
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE stores SET tokens = '{}'::jsonb, updated_at = NOW() WHERE store_id = $1",
+            store_id,
+        )
+
+
 async def find_store_by_shopify_shop(shop: str) -> str | None:
     """Return the store_id that already owns this Shopify shop, or None."""
     if not _pool:
