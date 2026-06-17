@@ -117,11 +117,11 @@ async def load_from_db():
         if sid == "_diagnostic_test_row":
             continue
 
-        if not tokens.get("access_token"):
-            print(
-                f"[store_manager] ⚠️ Skipped {sid!r} — no access_token in DB. "
-                f"Re-register the store or reinstall the app on Salla."
-            )
+        # A store may have no Salla access_token (disconnected or Shopify-only).
+        # Load it anyway — admin_password_hash, store_name, and integrations
+        # data all live in the same row; skipping wipes the store after redeploy.
+        if not tokens and not row.get("integrations"):
+            print(f"[store_manager] ⚠️ Skipped {sid!r} — row is completely empty")
             skipped += 1
             continue
 
