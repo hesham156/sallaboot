@@ -27,6 +27,30 @@ def set_sync_task(fn):
 
 @router.post("/admin/{store_id}/sync")
 async def store_sync_endpoint(store_id: str):
+    # ── Shopify store: delegate to Shopify sync ───────────────────────────────
+    integrations_data = await db.get_integrations(store_id)
+    shopify_data = integrations_data.get("shopify", {})
+    if shopify_data.get("shop") and shopify_data.get("access_token"):
+        from shopify_sync import sync_shopify_store
+        try:
+            result = await sync_shopify_store(
+                store_id,
+                shopify_data["shop"],
+                shopify_data["access_token"],
+            )
+            return {
+                "status":           "ok",
+                "products_count":   result.get("products", 0),
+                "categories_count": 0,
+                "articles_count":   0,
+                "last_sync":        None,
+                "errors":           result.get("errors", []),
+                "platform":         "shopify",
+            }
+        except Exception as e:
+            raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
+
+    # ── Salla store ───────────────────────────────────────────────────────────
     token = sm.get_access_token(store_id)
     if not token:
         raise HTTPException(400, f"No access token for store '{store_id}'.")
@@ -39,6 +63,7 @@ async def store_sync_endpoint(store_id: str):
             "articles_count":   len(data.get("articles", [])),
             "last_sync":        data.get("last_sync"),
             "errors":           data.get("last_sync_errors", []),
+            "platform":         "salla",
         }
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {str(e)}")

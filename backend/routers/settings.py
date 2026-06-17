@@ -486,6 +486,29 @@ async def update_ai_brain(store_id: str, req: CustomKnowledgeRequest):
 async def retrain_ai_brain(store_id: str):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    # ── Shopify store ─────────────────────────────────────────────────────────
+    integrations_data = await db.get_integrations(store_id)
+    shopify_data = integrations_data.get("shopify", {})
+    if shopify_data.get("shop") and shopify_data.get("access_token"):
+        from shopify_sync import sync_shopify_store
+        try:
+            result = await sync_shopify_store(
+                store_id,
+                shopify_data["shop"],
+                shopify_data["access_token"],
+            )
+            sm.reset_agent(store_id)
+            return {
+                "status":          "ok",
+                "products_synced": result.get("products", 0),
+                "categories":      0,
+                "overview":        brain.get_overview(store_id),
+                "message":         f"تم تحديث ذاكرة المتجر من Shopify — {result.get('products', 0)} منتج ✅",
+            }
+        except Exception as e:
+            raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
+
+    # ── Salla store ───────────────────────────────────────────────────────────
     token = sm.get_access_token(store_id)
     if not token:
         raise HTTPException(400, "لا يوجد access token — لا يمكن المزامنة")
