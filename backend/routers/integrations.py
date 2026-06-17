@@ -364,6 +364,132 @@ async def zid_install(store_id: str, request: Request):
     return {"install_url": f"{ZID_OAUTH_BASE}/oauth/authorize?{params}"}
 
 
+# ── Zid: marketplace start page (Application URL in Zid partner dashboard) ───
+# Set "Application URL" in Zid partner dashboard to:
+#   {BASE_URL}/integrations/zid/start
+# Zid redirects merchants here on install. We ask for their 7ayak email,
+# look up their store, then redirect to Zid OAuth — which comes back with
+# a proper code+state to the Redirection URL (callback).
+
+def _zid_start_page(error: str = "") -> str:
+    err_block = (
+        f'<div class="err" style="display:block">{error}</div>'
+        if error else
+        '<div class="err" id="err"></div>'
+    )
+    return f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>7ayak — ربط متجر زد</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f8fafc;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}}
+  .card{{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:40px 36px;max-width:460px;width:100%}}
+  .logo{{text-align:center;font-size:26px;font-weight:800;color:#111827;margin-bottom:6px;letter-spacing:-.5px}}
+  .sub{{text-align:center;font-size:13px;color:#6b7280;margin-bottom:28px}}
+  h2{{font-size:17px;font-weight:700;color:#111827;margin-bottom:8px}}
+  p{{font-size:13px;color:#6b7280;line-height:1.6;margin-bottom:24px}}
+  label{{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}}
+  input{{width:100%;padding:12px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;transition:.15s}}
+  input:focus{{border-color:#111827}}
+  .hint{{font-size:12px;color:#9ca3af;margin-top:5px}}
+  button{{width:100%;margin-top:20px;padding:13px;background:#111827;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}}
+  button:hover{{background:#1f2937}}
+  button:disabled{{opacity:.55;cursor:not-allowed}}
+  .err{{margin-top:12px;padding:10px 14px;background:#fef2f2;border-radius:8px;color:#b91c1c;font-size:13px;display:none}}
+  .zid-badge{{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:22px}}
+  .zid-badge span{{font-size:13px;color:#6b7280}}
+  .arrow{{color:#d1d5db}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">7ayak</div>
+  <div class="sub">مساعد التجارة الذكي</div>
+  <div class="zid-badge">
+    <span>سوق زد</span>
+    <span class="arrow">←</span>
+    <span>ربط المتجر</span>
+  </div>
+  <h2>أدخل بريدك الإلكتروني في 7ayak</h2>
+  <p>لإتمام ربط متجر زد مع 7ayak، أدخل البريد الإلكتروني المرتبط بحساب 7ayak الخاص بك.</p>
+  <form id="frm" method="POST" action="/integrations/zid/start">
+    <label for="email">البريد الإلكتروني لحساب 7ayak</label>
+    <input type="email" id="email" name="email" placeholder="example@email.com" required autocomplete="email">
+    <div class="hint">البريد الذي تستخدمه لتسجيل الدخول في 7ayak</div>
+    {err_block}
+    <button type="submit" id="btn">متابعة</button>
+  </form>
+</div>
+<script>
+document.getElementById('frm').addEventListener('submit',function(){{
+  var btn=document.getElementById('btn');
+  btn.disabled=true;btn.textContent='جارٍ التحقق…';
+}});
+</script>
+</body>
+</html>"""
+
+
+@router.get("/integrations/zid/start", include_in_schema=False)
+async def zid_start_get(request: Request):
+    """
+    Application URL — Zid redirects merchants here from the App Market.
+    Shows a form asking for their 7ayak email.
+    """
+    return Response(content=_zid_start_page(), media_type="text/html; charset=utf-8")
+
+
+@router.post("/integrations/zid/start", include_in_schema=False)
+async def zid_start_post(request: Request):
+    """
+    Handles form from zid_start_get.
+    Looks up the store by email, generates OAuth state, redirects to Zid authorization.
+    """
+    if not ZID_CLIENT_ID:
+        return Response(
+            content=_zid_start_page("خدمة ربط زد غير مفعّلة حالياً، يرجى التواصل مع الدعم."),
+            media_type="text/html; charset=utf-8",
+        )
+
+    form  = await request.form()
+    email = str(form.get("email", "")).strip().lower()
+    if not email:
+        return Response(content=_zid_start_page("الرجاء إدخال البريد الإلكتروني."),
+                        media_type="text/html; charset=utf-8")
+
+    store_id = await db.find_store_by_owner_email(email)
+    if not store_id:
+        return Response(
+            content=_zid_start_page("لم نجد حساباً بهذا البريد. تأكد من صحة البريد ثم أعد المحاولة."),
+            media_type="text/html; charset=utf-8",
+        )
+
+    # Check exclusivity
+    existing = await db.get_integrations(store_id)
+    for platform, label in {"salla": "سلّة", "shopify": "شوبيفاي", "woocommerce": "ووكومرس"}.items():
+        if existing.get(platform):
+            return Response(
+                content=_zid_start_page(f"الحساب مربوط بـ {label} بالفعل — لا يمكن ربط منصتَي تجارة في آنٍ واحد."),
+                media_type="text/html; charset=utf-8",
+            )
+
+    state = secrets.token_urlsafe(32)
+    _prune_oauth_states()
+    _oauth_states[state] = {"store_id": store_id, "platform": "zid", "ts": time.time()}
+
+    redirect_uri = f"{BASE_URL}/integrations/zid/callback"
+    params = urlencode({
+        "client_id":     ZID_CLIENT_ID,
+        "redirect_uri":  redirect_uri,
+        "response_type": "code",
+        "state":         state,
+    })
+    return RedirectResponse(f"{ZID_OAUTH_BASE}/oauth/authorize?{params}", status_code=302)
+
+
 # ── Zid: marketplace landing-page helpers ────────────────────────────────────
 
 def _zid_no_code_page() -> str:
