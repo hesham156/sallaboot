@@ -47,6 +47,13 @@ function IgIcon({ size = 12 }: { size?: number }) {
   )
 }
 
+function detectChannel(c: { channel?: string; session_id: string }): string {
+  if (c.channel === 'whatsapp' || c.session_id.startsWith('wa:'))        return 'whatsapp'
+  if (c.channel === 'instagram' || c.session_id.startsWith('ig:'))       return 'instagram'
+  if (c.channel === 'widget'    || c.session_id.startsWith('widget:'))   return 'widget'
+  return c.channel || 'widget'
+}
+
 function relTime(iso: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -354,7 +361,7 @@ export default function Conversations({ storeId }: Props) {
 
   // 3. Channel filter (sidebar channel click)
   const chFiltered = channelFilter
-    ? tabFiltered.filter(c => (c.channel || 'widget') === channelFilter)
+    ? tabFiltered.filter(c => detectChannel(c) === channelFilter)
     : tabFiltered
 
   // 4. Employee filter (sidebar employee click — filters by last admin message name)
@@ -760,7 +767,7 @@ export default function Conversations({ storeId }: Props) {
             <div>
               {filtered.map(c => {
                 const isActive = selectedId === c.session_id
-                const ch = (c.channel || 'widget') as string
+                const ch = detectChannel(c)
                 const lastMsg = c.last_message
                 const isAssigning = assigningId === c.session_id
                 return (
