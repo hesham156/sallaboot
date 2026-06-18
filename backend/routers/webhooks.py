@@ -156,6 +156,15 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         or (store_info.get("email") or "").strip().lower()
     )
 
+    # Account unification: if this merchant already signed up on 7ayak (a
+    # platform-less placeholder keyed by their email) and is now installing
+    # Salla, detach the email from that placeholder and carry its chosen
+    # password onto this Salla store so they keep ONE login. Runs BEFORE
+    # register_store so the email match resolves to the placeholder, not the
+    # store we're about to create. Only applied on first install.
+    is_new      = not sm.is_registered(store_id)
+    carried_pwd = await sm.reassign_owner_email(owner_email, store_id) if is_new else ""
+
     await sm.register_store(
         store_id=store_id,
         access_token=access_token,
@@ -163,6 +172,10 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         store_info=merged_info,
         owner_email=owner_email,
     )
+
+    if carried_pwd:
+        await sm.set_admin_password(store_id, carried_pwd)
+        print(f"[webhook] 🔗 linked existing 7ayak account → Salla store {store_id!r}")
 
     # Directly await the DB save for this critical event so data is never
     # lost even if the server restarts seconds after the webhook.

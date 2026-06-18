@@ -140,6 +140,13 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
                 status_code=502,
             )
 
+        # Account unification: fold a pre-existing platform-less /signup
+        # placeholder (same email) into this Salla store so the merchant keeps
+        # ONE login + their chosen password. Runs before register_store so the
+        # email match resolves to the placeholder. First install only.
+        is_new      = not sm.is_registered(store_id)
+        carried_pwd = await sm.reassign_owner_email(owner_email, store_id) if is_new else ""
+
         await sm.register_store(
             store_id      = store_id,
             access_token  = access_token,
@@ -147,6 +154,11 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
             store_info    = {"store_name": store_name} if store_name else None,
             owner_email   = owner_email,
         )
+
+        if carried_pwd:
+            await sm.set_admin_password(store_id, carried_pwd)
+            log.info("salla_linked_existing_account", extra={"store_id": store_id})
+
         if _sync_task:
             asyncio.create_task(_sync_task(store_id, access_token))
 

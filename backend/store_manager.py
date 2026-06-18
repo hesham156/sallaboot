@@ -255,6 +255,44 @@ async def register_store(
         print(f"[store_manager] Warning: could not save store file {store_id!r}: {e}")
 
 
+# ── Account unification (link an existing 7ayak account to a Salla install) ──────
+
+async def reassign_owner_email(owner_email: str, new_store_id: str) -> str:
+    """
+    Ensure `owner_email` resolves to exactly one account: `new_store_id` — the
+    store just connected via Salla.
+
+    Salla's easy-mode install creates an account keyed by the Salla merchant_id.
+    If the merchant had *already* signed up on 7ayak (via /auth/signup) their
+    email belongs to a separate, platform-less placeholder account. Left as-is,
+    the email would match two stores and unified login would be ambiguous.
+
+    This detaches the email from that placeholder and returns its password hash
+    so the caller can preserve the merchant's chosen password on the Salla store.
+
+    Non-destructive by design:
+      • the placeholder's data (if any) is left intact, reachable by store_id;
+      • we REFUSE to touch an account that already has a platform connected
+        (salla/shopify/zid/woocommerce) — that's a live store, not a placeholder.
+
+    Returns the password hash to carry over, or "" when there's nothing to do.
+    """
+    owner_email = (owner_email or "").strip().lower()
+    if not owner_email:
+        return ""
+    other = await db.find_store_by_owner_email(owner_email)
+    if not other or str(other) == str(new_store_id):
+        return ""
+    integrations = await db.get_integrations(other)
+    if any(integrations.get(p) for p in ("salla", "shopify", "zid", "woocommerce")):
+        print(f"[link] {other!r} already has a connected platform — leaving its email intact")
+        return ""
+    pwd_hash = get_admin_password_hash(other)
+    await db.set_store_owner_email(other, "")   # detach → email login is now unambiguous
+    print(f"[link] 🔗 email {owner_email!r} reassigned: placeholder {other!r} → Salla store {new_store_id!r}")
+    return pwd_hash or ""
+
+
 # ── Token access ───────────────────────────────────────────────────────────────
 
 def get_access_token(store_id: str) -> str:
