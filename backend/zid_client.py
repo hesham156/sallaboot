@@ -99,6 +99,14 @@ class ZidClient:
             params={"page": page, "per_page": per_page, "payload_type": "default"},
         )
 
+    async def get_order(self, order_id: str | int) -> dict:
+        data = await self._get(
+            f"/managers/store/orders/{order_id}",
+            params={"payload_type": "default"},
+        )
+        # Zid may wrap the order under "order" or return it directly.
+        return data.get("order", data) if isinstance(data, dict) else {}
+
     # ── Customers ─────────────────────────────────────────────────────────────
 
     async def get_customers(self, page: int = 1, per_page: int = 100) -> dict:

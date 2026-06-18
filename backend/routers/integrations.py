@@ -26,7 +26,11 @@ router = APIRouter()
 SHOPIFY_CLIENT_ID     = os.getenv("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_SCOPES        = "read_orders,read_products,read_customers,read_inventory,write_script_tags"
-BASE_URL              = os.getenv("BASE_URL", "http://localhost:8000")
+# Trailing slash matters: redirect_uri must EXACTLY match the URL registered
+# in the Salla/Shopify/Zid dashboards. A BASE_URL like "https://7ayak.app/"
+# would make redirect_uri "https://7ayak.app//integrations/zid/callback"
+# (double slash) → provider rejects it and bounces back with no code.
+BASE_URL              = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
 
 ZID_CLIENT_ID     = os.getenv("ZID_CLIENT_ID", "")
 ZID_CLIENT_SECRET = os.getenv("ZID_CLIENT_SECRET", "")
@@ -797,6 +801,11 @@ async def zid_callback(
     state: str = "",
     error: str = "",
 ):
+    # Diagnostic: log exactly what Zid sent so a "no code" landing is explainable
+    # (direct visit? error? param-name mismatch?). Mask the code value.
+    _qp = {k: (v[:6] + "…" if k == "code" and v else v) for k, v in request.query_params.items()}
+    print(f"[zid_callback] query={_qp}")
+
     if error:
         store_id = (_oauth_states.pop(state, None) or {}).get("store_id", "unknown")
         return RedirectResponse(
@@ -811,6 +820,8 @@ async def zid_callback(
     # Show a landing page so the merchant can identify their 7ayak store.
     if not state_data or state_data.get("platform") != "zid":
         if not code:
+            print(f"[zid_callback] ⚠️ no code + no valid state — showing no-code page. "
+                  f"query_keys={list(request.query_params.keys())}")
             return Response(
                 content=_zid_no_code_page(),
                 media_type="text/html; charset=utf-8",

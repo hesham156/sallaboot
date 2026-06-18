@@ -75,6 +75,18 @@ async def _process_inbox_row(row: dict) -> None:
         data        = payload.get("data") or {}
         await _webhooks_router.process_salla_event(event, merchant_id, data)
         return
+    if source == "shopify":
+        topic    = row.get("event_type") or ""
+        store_id = row.get("store_id") or ""
+        # Shopify posts the resource object as the body directly (no envelope).
+        await _webhooks_router.process_shopify_event(topic, store_id, payload)
+        return
+    if source == "zid":
+        event    = row.get("event_type") or ""
+        store_id = row.get("store_id") or ""
+        # Payload was already unwrapped to the bare resource at ingest time.
+        await _webhooks_router.process_zid_event(event, store_id, payload)
+        return
     if source == "whatsapp":
         await _webhooks_router.handle_whatsapp_message(payload)
         return

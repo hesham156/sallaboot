@@ -95,6 +95,85 @@ def format_zid_product(p: dict) -> dict:
     }
 
 
+# ── Order formatter ─────────────────────────────────────────────────────────────
+
+def format_zid_order(o: dict) -> dict:
+    """
+    Transform a raw Zid order → the dashboard Order shape (Salla-compatible:
+    id / reference_id / status{name,slug} / total{amount,currency} /
+    date{date} / customer{first_name,last_name,...}).
+
+    Zid's order payload varies by API version and payload_type, so each value
+    tries a few likely keys. Verify against a live Zid store and tighten if a
+    field comes back empty.
+    """
+    cust      = o.get("customer") if isinstance(o.get("customer"), dict) else {}
+    cust_name = str(cust.get("name") or "").strip()
+
+    status_blob = o.get("order_status") or o.get("status") or {}
+    if isinstance(status_blob, dict):
+        status_name = status_blob.get("name") or status_blob.get("code") or ""
+        status_slug = status_blob.get("slug") or status_blob.get("code") or ""
+    else:
+        status_name = str(status_blob or "")
+        status_slug = ""
+
+    total_blob = o.get("order_total") or o.get("total") or o.get("amounts") or {}
+    if isinstance(total_blob, dict):
+        amount   = str(total_blob.get("value") or total_blob.get("amount") or "")
+        currency = total_blob.get("currency") or o.get("currency") or "SAR"
+    else:
+        amount   = str(total_blob or "")
+        currency = o.get("currency") or "SAR"
+
+    return {
+        "id":           o.get("id"),
+        "reference_id": str(o.get("code") or o.get("reference_id") or o.get("id", "")),
+        "status":       {"name": status_name, "slug": status_slug},
+        "total":        {"amount": amount, "currency": currency},
+        "date":         {"date": o.get("created_at") or o.get("created_at_humanize") or "",
+                         "timezone": "UTC"},
+        "customer": {
+            "first_name": cust_name,
+            "last_name":  "",
+            "mobile":     cust.get("mobile") or cust.get("phone") or "",
+            "email":      cust.get("email") or "",
+        },
+        "platform": "zid",
+    }
+
+
+# ── Incremental product patch ───────────────────────────────────────────────────
+
+async def patch_zid_product(store_id: str, product: dict, deleted: bool = False):
+    """
+    Update/remove a single product in the in-memory cache + DB.
+    Called from the Zid webhook handler (product.create|update|delete).
+    """
+    cache = sm.get_cache(store_id)
+    if not cache:
+        return
+
+    store_url = (cache.get("store_info") or {}).get("domain", "")
+    pid       = str(product.get("id", ""))
+    products: list[dict] = cache.get("products") or []
+
+    if deleted:
+        cache["products"] = [p for p in products if str(p.get("id")) != pid]
+    else:
+        product["_store_url"] = store_url
+        updated = format_zid_product(product)
+        idx = next((i for i, p in enumerate(products) if str(p.get("id")) == pid), None)
+        if idx is not None:
+            products[idx] = updated
+        else:
+            products.append(updated)
+        cache["products"] = products
+
+    cache["products_count"] = len(cache["products"])
+    sm.set_cache(store_id, cache)
+
+
 # ── Full sync ──────────────────────────────────────────────────────────────────
 
 async def sync_zid_store(

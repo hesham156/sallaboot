@@ -16,6 +16,15 @@ async def _get_shopify_creds(store_id: str) -> tuple[str, str] | None:
     return (shop, token) if shop and token else None
 
 
+async def _get_zid_creds(store_id: str) -> tuple[str, str, str] | None:
+    """Returns (access_token, authorization_jwt, zid_store_id) if live Zid integration."""
+    integrations = await db.get_integrations(store_id)
+    z = integrations.get("zid", {})
+    at  = z.get("access_token", "")
+    jwt = z.get("authorization_jwt", "")
+    return (at, jwt, z.get("zid_store_id", "")) if at and jwt else None
+
+
 # ── Abandoned carts ───────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/abandoned-carts")
@@ -27,6 +36,13 @@ async def store_abandoned_carts(store_id: str, source: str = "cache"):
         # (will be empty until Shopify checkout webhooks are wired up)
         carts = await db.load_abandoned_carts(store_id) if db.available() else []
         return {"source": "db", "platform": "shopify", "carts": carts, "count": len(carts)}
+
+    # If this store uses Zid, never fall back to Salla tokens
+    zid_creds = await _get_zid_creds(store_id)
+    if zid_creds:
+        # Zid doesn't push abandoned-cart webhooks to us — return DB cache
+        carts = await db.load_abandoned_carts(store_id) if db.available() else []
+        return {"source": "db", "platform": "zid", "carts": carts, "count": len(carts)}
 
     if source == "api":
         token = sm.get_access_token(store_id)
@@ -90,6 +106,29 @@ async def store_orders(
         except Exception as e:
             raise HTTPException(500, f"{type(e).__name__}: {e}")
 
+    # ── Zid store ─────────────────────────────────────────────────────────────
+    zid_creds = await _get_zid_creds(store_id)
+    if zid_creds:
+        from zid_client import ZidClient
+        from zid_sync import format_zid_order
+        at, jwt, zsid = zid_creds
+        client = ZidClient(at, jwt, zid_store_id=zsid, store_id=store_id)
+        try:
+            raw = await client.get_orders(page=page, per_page=per_page)
+            raw_orders = raw.get("orders") or raw.get("results") or raw.get("data") or []
+            orders = [format_zid_order(o) for o in raw_orders]
+            return {
+                "data":     orders,
+                "platform": "zid",
+                "pagination": {
+                    "per_page":     per_page,
+                    "current_page": page,
+                    "total":        raw.get("total_order_count") or raw.get("total") or raw.get("count"),
+                },
+            }
+        except Exception as e:
+            raise HTTPException(500, f"{type(e).__name__}: {e}")
+
     # ── Salla store ───────────────────────────────────────────────────────────
     token = sm.get_access_token(store_id)
     if not token:
@@ -119,6 +158,19 @@ async def store_order_detail(store_id: str, order_id: str):
         try:
             raw = await client.get_order(order_id)
             return {"data": format_shopify_order(raw), "platform": "shopify"}
+        except Exception as e:
+            raise HTTPException(500, f"{type(e).__name__}: {e}")
+
+    # ── Zid store ─────────────────────────────────────────────────────────────
+    zid_creds = await _get_zid_creds(store_id)
+    if zid_creds:
+        from zid_client import ZidClient
+        from zid_sync import format_zid_order
+        at, jwt, zsid = zid_creds
+        client = ZidClient(at, jwt, zid_store_id=zsid, store_id=store_id)
+        try:
+            raw = await client.get_order(order_id)
+            return {"data": format_zid_order(raw), "platform": "zid"}
         except Exception as e:
             raise HTTPException(500, f"{type(e).__name__}: {e}")
 
