@@ -70,6 +70,14 @@ class EmployeeLoginRequest(BaseModel):
     password: str
 
 
+class SignupRequest(BaseModel):
+    """Self-service merchant signup — creates a platform-independent 7ayak
+    account that can later link Salla / Shopify / Zid from the dashboard."""
+    name:     str
+    email:    str
+    password: str
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password:     str

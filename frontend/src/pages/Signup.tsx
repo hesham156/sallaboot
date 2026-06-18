@@ -17,34 +17,42 @@ function Icon({ paths, size = 16, className = '' }: {
 }
 
 /**
- * Single email/password login. The backend's /auth/login figures out
- * whether this email belongs to a super admin, a store employee, or a
- * store owner — we just submit credentials and route based on the
- * `is_super` flag in the response.
+ * Self-service merchant signup. Creates a platform-independent 7ayak account
+ * and logs the merchant straight in. They link Salla / Shopify / Zid afterwards
+ * from the dashboard's Integrations page.
  */
-export default function Login() {
+export default function Signup() {
   const navigate = useNavigate()
 
-  const [email, setEmail]       = useState('')  // holds email OR store_id
+  const [name, setName]         = useState('')
+  const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
+  const [confirm, setConfirm]   = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
+
+  const inputCls = {
+    inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
+    input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
+  }
 
   async function handleSubmit() {
     if (loading) return
     setError('')
-    if (!email.trim())  { setError('يرجى إدخال البريد الإلكتروني أو معرّف المتجر'); return }
-    if (!password)      { setError('يرجى إدخال كلمة المرور');       return }
+    if (!name.trim())            { setError('يرجى إدخال الاسم الكامل'); return }
+    if (!email.trim())           { setError('يرجى إدخال البريد الإلكتروني'); return }
+    if (password.length < 8)     { setError('كلمة المرور يجب أن تكون 8 أحرف على الأقل'); return }
+    if (password !== confirm)    { setError('كلمتا المرور غير متطابقتين'); return }
     setLoading(true)
     try {
-      const res = await api.login(email.trim(), password)
+      const res = await api.signup(name.trim(), email.trim(), password)
       setToken(res.token)
       setStoreId(res.store_id)
       setIsSuper(res.is_super)
       setEmployee(res.employee)
-      navigate(res.is_super ? '/admin' : `/store/${res.store_id}`, { replace: true })
+      navigate(`/store/${res.store_id}`, { replace: true })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'البريد الإلكتروني أو كلمة المرور غير صحيحة')
+      setError(e instanceof Error ? e.message : 'تعذّر إنشاء الحساب، حاول مرة أخرى')
     } finally {
       setLoading(false)
     }
@@ -72,7 +80,7 @@ export default function Login() {
             style={{ maxWidth: '100%', height: 'auto', width: '180px' }}
             className="mx-auto"
           />
-          <p className="text-sm text-slate-500 font-medium">المساعد الذكي لمتاجر سلة</p>
+          <p className="text-sm text-slate-500 font-medium">المساعد الذكي لمتجرك</p>
         </div>
 
         {/* Card */}
@@ -82,24 +90,39 @@ export default function Login() {
           <div className="p-6 sm:p-8 space-y-5">
 
             <div>
-              <h2 className="text-xl font-black text-slate-800 mb-1">تسجيل الدخول</h2>
-              <p className="text-xs text-slate-500">أدخل بياناتك للوصول إلى لوحتك</p>
+              <h2 className="text-xl font-black text-slate-800 mb-1">إنشاء حساب جديد</h2>
+              <p className="text-xs text-slate-500">ابدأ مجاناً — اربط متجرك بعد إنشاء الحساب</p>
+            </div>
+
+            {/* Name */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">الاسم الكامل</label>
+              <Input
+                placeholder="محمد عبدالله"
+                type="text"
+                value={name}
+                onValueChange={v => { setName(v); setError('') }}
+                variant="bordered"
+                autoComplete="name"
+                classNames={inputCls}
+                onKeyDown={handleKey}
+                startContent={
+                  <Icon paths={['M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2', 'M12 7a4 4 0 100 8 4 4 0 000-8z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                }
+              />
             </div>
 
             {/* Email */}
             <div>
-              <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني أو معرّف المتجر</label>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
               <Input
-                placeholder="you@example.com أو store_id"
-                type="text"
+                placeholder="you@example.com"
+                type="email"
                 value={email}
                 onValueChange={v => { setEmail(v); setError('') }}
                 variant="bordered"
                 autoComplete="email"
-                classNames={{
-                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                  input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                }}
+                classNames={inputCls}
                 onKeyDown={handleKey}
                 startContent={
                   <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
@@ -111,16 +134,31 @@ export default function Login() {
             <div>
               <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
               <Input
-                placeholder="أدخل كلمة المرور"
+                placeholder="8 أحرف على الأقل"
                 type="password"
                 value={password}
                 onValueChange={v => { setPassword(v); setError('') }}
                 variant="bordered"
-                autoComplete="current-password"
-                classNames={{
-                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
-                  input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
-                }}
+                autoComplete="new-password"
+                classNames={inputCls}
+                onKeyDown={handleKey}
+                startContent={
+                  <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                }
+              />
+            </div>
+
+            {/* Confirm password */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1.5">تأكيد كلمة المرور</label>
+              <Input
+                placeholder="أعد إدخال كلمة المرور"
+                type="password"
+                value={confirm}
+                onValueChange={v => { setConfirm(v); setError('') }}
+                variant="bordered"
+                autoComplete="new-password"
+                classNames={inputCls}
                 onKeyDown={handleKey}
                 startContent={
                   <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
@@ -142,13 +180,13 @@ export default function Login() {
               isLoading={loading}
               onPress={handleSubmit}
             >
-              {loading ? <Spinner size="sm" /> : 'دخول'}
+              {loading ? <Spinner size="sm" /> : 'إنشاء الحساب'}
             </Button>
 
             <p className="text-[11px] text-slate-400 text-center mt-1">
-              ليس لديك حساب؟
+              لديك حساب بالفعل؟
               {' '}
-              <a href="/signup" className="text-teal-600 font-bold hover:underline">إنشاء حساب جديد</a>
+              <a href="/login" className="text-teal-600 font-bold hover:underline">تسجيل الدخول</a>
             </p>
           </div>
         </div>
@@ -156,7 +194,7 @@ export default function Login() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-[11px] text-slate-400 font-medium">
-            حياك — المساعد الذكي لمتاجر سلة © {new Date().getFullYear()}
+            حياك — المساعد الذكي لمتجرك © {new Date().getFullYear()}
           </p>
         </div>
       </div>

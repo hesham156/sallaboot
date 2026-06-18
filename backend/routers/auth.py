@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 
 import auth as _auth
 import database as db
 import store_manager as sm
-from models import EmployeeLoginRequest, LoginRequest
+from models import EmployeeLoginRequest, LoginRequest, SignupRequest
 from routers.deps import is_rate_limited as _is_rate_limited
 
 
@@ -284,6 +285,84 @@ async def unified_login(req: LoginRequest, request: Request):
     # No account matches — generic 401 (don't leak which side failed)
     print(f"[auth] ❌ No account for {email_in!r} from {ip}")
     raise generic_401
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Self-service signup
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Creates a platform-independent 7ayak account. Salla auto-provisions accounts
+# on install and Zid offers a "create account" tab in its marketplace start
+# page, but a merchant on Shopify (or no platform yet) previously had no way to
+# sign up at all. This endpoint closes that gap: the merchant gets an account +
+# token immediately and links a platform afterwards from the Integrations page.
+#
+# Reuses the exact account-creation sequence as routers.integrations.zid_start_post.
+
+@router.post("/auth/signup")
+async def signup(req: SignupRequest, request: Request):
+    ip    = request.client.host if request.client else "unknown"
+    name  = (req.name or "").strip()
+    email = (req.email or "").strip().lower()
+    pwd   = req.password or ""
+
+    # Throttle automated account creation by IP.
+    if await _is_rate_limited(f"signup_ip:{ip}", max_attempts=10, window=600):
+        raise HTTPException(429, "محاولات كثيرة جداً. انتظر قليلاً ثم حاول مجدداً.")
+
+    # ── Validation ──────────────────────────────────────────────────────
+    if not name:
+        raise HTTPException(400, "الاسم الكامل مطلوب")
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(400, "البريد الإلكتروني غير صالح")
+    if len(pwd) < 8:
+        raise HTTPException(400, "كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+
+    # ── Email must be unique across every account type, so unified login
+    #    resolves it unambiguously (super admin → employee → owner). ──────
+    taken = HTTPException(409, "هذا البريد مستخدم بالفعل. سجّل الدخول بدلاً من ذلك.")
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+    if super_email and hmac.compare_digest(email, super_email):
+        raise taken
+    if await db.find_store_by_owner_email(email):
+        raise taken
+    if await db.find_employee_by_email_any_store(email):
+        raise taken
+
+    # ── Generate a unique store_id from the email local-part ────────────
+    slug = re.sub(r"[^a-z0-9]", "_", email.split("@")[0].lower())[:20] or "store"
+    store_id = slug
+    suffix = 2
+    while sm.is_registered(store_id):
+        store_id = f"{slug}_{suffix}"
+        suffix += 1
+
+    # ── Create the account (mirrors zid_start_post register tab) ────────
+    try:
+        await sm.register_store(
+            store_id=store_id,
+            access_token="",
+            store_info={"name": name},
+            owner_email=email,
+        )
+        tokens = sm.get_store_info(store_id)
+        await db.save_store(store_id, tokens)
+        await db.set_store_owner_email(store_id, email)
+        await sm.set_admin_password(store_id, _auth.hash_password(pwd))
+        print(f"[auth] ✅ Self-service signup: store_id={store_id!r} email={email!r} from {ip}")
+    except Exception as exc:
+        print(f"[auth] ❌ signup failed for {email!r}: {exc}")
+        raise HTTPException(500, "تعذّر إنشاء الحساب، يرجى المحاولة مرة أخرى")
+
+    # Auto-login: return the same shape as /auth/login so the SPA routes straight in.
+    token = _auth.create_token(store_id)
+    return {
+        "token":      token,
+        "store_id":   store_id,
+        "store_name": name,
+        "is_super":   False,
+        "employee":   None,
+    }
 
 
 @router.get("/admin/{store_id}/auth/verify")

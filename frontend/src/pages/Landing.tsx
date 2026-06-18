@@ -349,7 +349,7 @@ export default function Landing() {
 
   const loggedIn = !!getToken()
   function goDashboard() {
-    if (!loggedIn) return navigate('/login')
+    if (!loggedIn) return navigate('/signup')
     navigate(getIsSuper() ? '/admin' : `/store/${getStoreId()}`)
   }
   const cta = loggedIn ? 'لوحة التحكم' : 'ابدأ مجاناً'

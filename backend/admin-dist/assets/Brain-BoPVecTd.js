@@ -1,4 +1,4 @@
-import{d as l,j as e}from"./react-CQhVsFhe.js";import{a as b}from"./index-CWbkm-n6.js";import{r as C,b as M,D as T}from"./heroui-DhX8KuVA.js";function j({d:a,size:t=14,className:i=""}){const n=Array.isArray(a)?a:[a];return e.jsx("svg",{width:t,height:t,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:i,children:n.map((m,u)=>e.jsx("path",{d:m},u))})}const R=`• ساعات العمل: السبت-الخميس ٩ص - ٦م
+import{d as l,j as e}from"./react-CQhVsFhe.js";import{a as b}from"./index-cV101pPa.js";import{r as C,b as M,D as T}from"./heroui-DhX8KuVA.js";function j({d:a,size:t=14,className:i=""}){const n=Array.isArray(a)?a:[a];return e.jsx("svg",{width:t,height:t,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:i,children:n.map((m,u)=>e.jsx("path",{d:m},u))})}const R=`• ساعات العمل: السبت-الخميس ٩ص - ٦م
 • سياسة الإرجاع: استبدال خلال ٧ أيام
 • الشحن: مجاناً فوق ٢٠٠ ريال، ٢-٤ أيام
 • خصومات خاصة: +٥٠٠٠ قطعة → تواصل المبيعات

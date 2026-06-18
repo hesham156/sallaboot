@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Spinner } from '@heroui/react'
 import { getToken, getIsSuper } from './api'
 import Login from './pages/Login'
+import Signup from './pages/Signup'
 import Landing from './pages/Landing'
 import ErrorPage from './pages/ErrorPage'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/landing" element={<Landing />} />
 
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
 
           {/* Public Policy Pages */}
           <Route path="/privacy" element={<PrivacyPolicy />} />

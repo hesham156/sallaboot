@@ -113,6 +113,17 @@ export const api = {
       employee:   SessionEmployee | null
     }>('/auth/login', { email, password }),
 
+  // Self-service signup — creates a platform-independent account and returns
+  // a token (auto-login). Same response shape as login.
+  signup: (name: string, email: string, password: string) =>
+    post<{
+      token:      string
+      store_id:   string
+      store_name: string
+      is_super:   boolean
+      employee:   SessionEmployee | null
+    }>('/auth/signup', { name, email, password }),
+
   // Legacy login endpoints — kept so older clients still work but the
   // SPA itself uses `login()` above.
   superLogin: (email: string, password: string) =>
