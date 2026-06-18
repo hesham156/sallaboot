@@ -18,6 +18,7 @@ import os
 import json
 import asyncio
 import datetime as _dt
+import secrets
 import asyncpg
 from typing import Optional
 
@@ -496,6 +497,11 @@ async def _create_tables():
         # in the main block above doesn't prevent these from running.
         migrations = [
             "ALTER TABLE stores ADD COLUMN IF NOT EXISTS integrations JSONB NOT NULL DEFAULT '{}'::jsonb;",
+            # Per-store linking key: the merchant copies it from their 7ayak
+            # dashboard into the Salla App Settings form to bind a Salla store
+            # to their existing account. See routers/webhooks _handle_app_settings_updated.
+            "ALTER TABLE stores ADD COLUMN IF NOT EXISTS api_key TEXT;",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_stores_api_key ON stores (api_key) WHERE api_key IS NOT NULL;",
         ]
         for sql in migrations:
             try:
@@ -3732,6 +3738,86 @@ async def clear_salla_tokens(store_id: str) -> None:
             """,
             store_id,
         )
+
+
+# ── Per-store linking API key ────────────────────────────────────────────────
+# Used by the Salla App Settings flow: the merchant pastes this key (+ their
+# email) into the app's settings form in their Salla dashboard to bind the
+# Salla store to their existing 7ayak account.
+
+def _new_api_key() -> str:
+    return "7yk_" + secrets.token_urlsafe(24)
+
+
+async def get_or_create_api_key(store_id: str) -> str:
+    """Return the store's linking key, generating + persisting one on first use."""
+    if not _pool:
+        return ""
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT api_key FROM stores WHERE store_id = $1", store_id)
+            if not row:
+                return ""
+            if row["api_key"]:
+                return row["api_key"]
+            key = _new_api_key()
+            await conn.execute(
+                "UPDATE stores SET api_key = $1, updated_at = NOW() WHERE store_id = $2",
+                key, store_id,
+            )
+            return key
+    except Exception as e:
+        print(f"[db] get_or_create_api_key error: {e}")
+        return ""
+
+
+async def regenerate_api_key(store_id: str) -> str:
+    """Rotate the store's linking key (invalidates the old one)."""
+    if not _pool:
+        return ""
+    try:
+        key = _new_api_key()
+        async with _pool.acquire() as conn:
+            r = await conn.execute(
+                "UPDATE stores SET api_key = $1, updated_at = NOW() WHERE store_id = $2",
+                key, store_id,
+            )
+        return key if (r and r.split()[-1] != "0") else ""
+    except Exception as e:
+        print(f"[db] regenerate_api_key error: {e}")
+        return ""
+
+
+async def set_api_key(store_id: str, key: str | None) -> None:
+    """Set or clear (key=None) a store's api_key column directly."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE stores SET api_key = $1, updated_at = NOW() WHERE store_id = $2",
+                (key or None), store_id,
+            )
+    except Exception as e:
+        print(f"[db] set_api_key error: {e}")
+
+
+async def find_store_by_api_key(api_key: str) -> str | None:
+    """Return the store_id that owns this linking key, or None."""
+    if not _pool:
+        return None
+    key = (api_key or "").strip()
+    if not key:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT store_id FROM stores WHERE api_key = $1 LIMIT 1", key,
+            )
+        return row["store_id"] if row else None
+    except Exception as e:
+        print(f"[db] find_store_by_api_key error: {e}")
+        return None
 
 
 async def find_store_by_shopify_shop(shop: str) -> str | None:

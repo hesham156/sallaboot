@@ -215,11 +215,78 @@ async def _handle_app_lifecycle(event: str, merchant_id: str, data: dict):
     """
     Acknowledge remaining app lifecycle events Salla sends + checks for
     during app review: app.installed, app.trial.*, app.subscription.*,
-    app.feedback.created, app.settings.updated.
+    app.feedback.created.
     """
     store_id = merchant_id or "default"
     _log_event(store_id, event, "ok", "acknowledged")
     print(f"[webhook] {event!r} acknowledged for store {store_id!r}")
+
+
+async def _handle_app_settings_updated(merchant_id: str, data: dict):
+    """
+    app.settings.updated — the merchant filled the app's settings form in their
+    Salla dashboard (their 7ayak email + API key) to bind THIS Salla store to
+    their existing 7ayak account.
+
+    Salla delivers the form fields under data.settings as key/value pairs. We
+    resolve the "home" 7ayak account by API key (primary — a secret proof of
+    ownership) or by email (fallback), then move its login identity — email +
+    chosen password + the API key — onto this Salla store and detach them from
+    the home account, so the merchant signs in with their 7ayak credentials and
+    sees this store's data.
+
+    Non-destructive: the home account's data is left intact (reachable by
+    store_id); a home account already running another platform is never touched.
+    """
+    store_id = merchant_id or "default"
+    settings = data.get("settings")
+    settings = settings if isinstance(settings, dict) else {}
+
+    email   = str(settings.get("email") or "").strip().lower()
+    api_key = ""
+    for k in ("api_key", "apikey", "api-key", "apiKey", "key", "token"):
+        v = settings.get(k)
+        if v:
+            api_key = str(v).strip()
+            break
+
+    # Resolve the home 7ayak account: API key first (secret), then email.
+    home = await db.find_store_by_api_key(api_key) if api_key else None
+    if not home and email:
+        home = await db.find_store_by_owner_email(email)
+
+    if not home:
+        _log_event(store_id, "app.settings.updated", "skip",
+                   "no 7ayak account matched the email/API key provided")
+        return
+    if str(home) == str(store_id):
+        _log_event(store_id, "app.settings.updated", "ok", "already linked")
+        return
+
+    # Never hijack a live store that already runs on another platform.
+    home_integrations = await db.get_integrations(home)
+    if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
+        _log_event(store_id, "app.settings.updated", "skip",
+                   f"home account {home!r} already has another platform")
+        return
+
+    # Move identity (email + password + API key) home → this Salla store.
+    link_email = email or (sm.get_store_info(home) or {}).get("owner_email", "")
+    pwd        = sm.get_admin_password_hash(home)
+    if link_email:
+        await db.set_store_owner_email(store_id, link_email)
+        await db.set_store_owner_email(home, "")
+    if pwd:
+        await sm.set_admin_password(store_id, pwd)
+    # Transfer the linking key (clear home first to satisfy the unique index)
+    # so the dashboard + any future settings update resolve straight here.
+    await db.set_api_key(home, None)
+    if api_key:
+        await db.set_api_key(store_id, api_key)
+    sm.reset_agent(store_id)
+
+    _log_event(store_id, "app.settings.updated", "ok", f"linked to 7ayak account (was {home!r})")
+    print(f"[webhook] 🔗 Salla store {store_id!r} linked to 7ayak account via App Settings (home={home!r})")
 
 
 async def _handle_product_event(event: str, merchant_id: str, data: dict):
@@ -652,6 +719,9 @@ async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:
         return
     if event.startswith("shipment."):
         await _handle_shipment_event(event, merchant_id, data)
+        return
+    if event == "app.settings.updated":
+        await _handle_app_settings_updated(merchant_id, data)
         return
     if event.startswith("app."):
         await _handle_app_lifecycle(event, merchant_id, data)

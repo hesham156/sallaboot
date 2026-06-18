@@ -208,6 +208,93 @@ function Toast({ msg, type }: { msg: string; type: 'success' | 'error' | 'info' 
   )
 }
 
+/* ── Salla App-Settings linking key panel ── */
+function SallaLinkPanel({ storeId, onToast }: {
+  storeId: string
+  onToast: (msg: string, type: 'success' | 'error' | 'info') => void
+}) {
+  const [open, setOpen]       = useState(false)
+  const [apiKey, setApiKey]   = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function toggle() {
+    if (open) { setOpen(false); return }
+    if (apiKey) { setOpen(true); return }
+    setLoading(true)
+    try {
+      const res = await api.getApiKey(storeId)
+      setApiKey(res.api_key)
+      setOpen(true)
+    } catch {
+      onToast('تعذّر جلب مفتاح الربط', 'error')
+    } finally { setLoading(false) }
+  }
+
+  function copyKey() {
+    if (!apiKey) return
+    navigator.clipboard?.writeText(apiKey).then(
+      () => onToast('تم نسخ المفتاح', 'success'),
+      () => onToast('تعذّر النسخ', 'error'),
+    )
+  }
+
+  async function regen() {
+    setLoading(true)
+    try {
+      const res = await api.regenerateApiKey(storeId)
+      setApiKey(res.api_key)
+      onToast('تم توليد مفتاح جديد', 'success')
+    } catch {
+      onToast('تعذّر توليد مفتاح جديد', 'error')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="mb-8 bg-content1 border border-divider rounded-2xl overflow-hidden">
+      <button onClick={toggle}
+        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-right hover:bg-content2/50 transition-colors">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-violet-500/10 flex items-center justify-center flex-shrink-0">
+            <Icon paths="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" size={15} className="text-violet-500" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-foreground">ربط سلة عبر سوق التطبيقات</p>
+            <p className="text-[11px] text-default-500">استخدم مفتاح الربط إذا ثبّتت التطبيق من متجر تطبيقات سلة</p>
+          </div>
+        </div>
+        <Icon paths={open ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} size={16} className="text-default-400 flex-shrink-0" />
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5 pt-1 space-y-4 border-t border-divider">
+          <ol className="text-xs text-default-600 leading-relaxed list-decimal mr-4 space-y-1 mt-3">
+            <li>ثبّت تطبيق حياك من متجر تطبيقات سلة.</li>
+            <li>افتح <span className="font-semibold text-foreground">إعدادات ربط التطبيق</span> داخل لوحة سلة.</li>
+            <li>أدخل بريدك الإلكتروني في حياك، وانسخ <span className="font-semibold text-foreground">مفتاح الربط</span> أدناه في حقل API Key، ثم احفظ.</li>
+          </ol>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-default-500 mb-1.5">مفتاح الربط (API Key)</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 px-3 py-2.5 bg-content2 border border-divider rounded-xl text-xs font-mono text-foreground break-all select-all">
+                {apiKey || '—'}
+              </code>
+              <button onClick={copyKey}
+                className="px-3 py-2.5 text-xs font-bold rounded-xl border border-divider text-foreground hover:bg-content2 transition-colors flex-shrink-0">
+                نسخ
+              </button>
+            </div>
+            <button onClick={regen} disabled={loading}
+              className="mt-2 text-[11px] font-semibold text-default-400 hover:text-red-500 transition-colors disabled:opacity-50">
+              توليد مفتاح جديد (يُلغي القديم)
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ══════════════════════════════════ MAIN PAGE ══════════════════════════════════ */
 export default function Integrations({ storeId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -409,6 +496,7 @@ export default function Integrations({ storeId }: Props) {
           </div>
         ) : (
           <>
+            <SallaLinkPanel storeId={storeId} onToast={showToast} />
             {categories.map(cat => {
               const items = integrations.filter(i => i.category === cat.id)
               return (

@@ -113,6 +113,27 @@ async def list_integrations(store_id: str, request: Request):
     return {"integrations": data}
 
 
+# ── Linking API key (for the Salla App Settings flow) ─────────────────────────
+# The merchant copies this key + their email into the Salla app's settings form;
+# Salla then fires app.settings.updated and we bind that Salla store to this
+# 7ayak account (see routers.webhooks._handle_app_settings_updated).
+
+@router.get("/admin/{store_id}/api-key")
+async def get_api_key(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    key = await db.get_or_create_api_key(store_id)
+    return {"api_key": key}
+
+
+@router.post("/admin/{store_id}/api-key/regenerate")
+async def regenerate_api_key(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    key = await db.regenerate_api_key(store_id)
+    if not key:
+        raise HTTPException(500, "تعذّر توليد مفتاح جديد")
+    return {"api_key": key}
+
+
 # ── Shopify: initiate install ─────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/integrations/shopify/install")

@@ -567,6 +567,13 @@ export const api = {
 
   zidSync: (storeId: string) =>
     req<{ message: string; products: number; errors: string[] }>('POST', `/admin/${storeId}/integrations/zid/sync`),
+
+  // Linking key for the Salla App Settings flow
+  getApiKey: (storeId: string) =>
+    get<{ api_key: string }>(`/admin/${storeId}/api-key`),
+
+  regenerateApiKey: (storeId: string) =>
+    req<{ api_key: string }>('POST', `/admin/${storeId}/api-key/regenerate`),
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
