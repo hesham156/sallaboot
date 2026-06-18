@@ -93,6 +93,63 @@ def test_dev_override_is_case_insensitive_strict(monkeypatch):
     assert ok is False, "only 'true' (any case) opts in — never '1' or 'yes'"
 
 
+# ── Token strategy (Salla App Market default) ────────────────────────────
+
+def test_token_strategy_secret_doubles_as_token(monkeypatch):
+    """No X-Salla-Signature, but Authorization: Bearer <secret> → accept.
+
+    This is the exact failure from the live logs: Salla shipped the app with
+    the Token strategy, so it never sent a signature and every event 401'd
+    with signature_required_but_absent.
+    """
+    monkeypatch.setenv("SALLA_WEBHOOK_SECRET", "real-secret")
+    monkeypatch.delenv("SALLA_WEBHOOK_TOKEN", raising=False)
+    headers = {"Authorization": "Bearer real-secret"}
+    ok, detail = main._verify_signature(b'{"event":"app.store.authorize"}', headers)
+    assert ok is True
+    assert detail == "token_ok"
+
+
+def test_token_strategy_dedicated_token_env(monkeypatch):
+    """SALLA_WEBHOOK_TOKEN takes precedence over the HMAC secret."""
+    monkeypatch.setenv("SALLA_WEBHOOK_SECRET", "hmac-secret")
+    monkeypatch.setenv("SALLA_WEBHOOK_TOKEN", "the-token")
+    ok, detail = main._verify_signature(b"x", {"Authorization": "Bearer the-token"})
+    assert ok is True
+    assert detail == "token_ok"
+
+
+def test_token_strategy_without_bearer_prefix(monkeypatch):
+    """Salla docs use Bearer, but accept a bare token defensively too."""
+    monkeypatch.setenv("SALLA_WEBHOOK_SECRET", "real-secret")
+    monkeypatch.delenv("SALLA_WEBHOOK_TOKEN", raising=False)
+    ok, detail = main._verify_signature(b"x", {"Authorization": "real-secret"})
+    assert ok is True
+    assert detail == "token_ok"
+
+
+def test_token_strategy_wrong_token_rejected(monkeypatch):
+    """A forged Authorization token must not pass."""
+    monkeypatch.setenv("SALLA_WEBHOOK_SECRET", "real-secret")
+    monkeypatch.delenv("SALLA_WEBHOOK_TOKEN", raising=False)
+    ok, detail = main._verify_signature(b"x", {"Authorization": "Bearer evil-token"})
+    assert ok is False
+    assert detail.startswith("token_mismatch")
+
+
+def test_signature_takes_priority_over_token(monkeypatch):
+    """When both headers are present, the HMAC signature is authoritative."""
+    monkeypatch.setenv("SALLA_WEBHOOK_SECRET", "real-secret")
+    body = b'{"event":"order.created"}'
+    headers = {
+        "X-Salla-Signature": _sign(body, "real-secret"),
+        "Authorization": "Bearer wrong-token",
+    }
+    ok, detail = main._verify_signature(body, headers)
+    assert ok is True
+    assert detail == "signature_ok"
+
+
 # ── Constant-time comparison hardening ────────────────────────────────────
 
 def test_signature_uses_constant_time_compare(monkeypatch):

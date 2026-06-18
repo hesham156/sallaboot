@@ -70,13 +70,21 @@ def _log_event(store_id: str, event: str, status: str, detail: str = "",
 
 def _verify_signature(body: bytes, headers) -> tuple:
     """
-    Verify X-Salla-Signature using HMAC-SHA256.
-    Returns (ok: bool, detail: str).
+    Verify a Salla webhook using whichever security strategy the request
+    declares. Returns (ok: bool, detail: str).
+
+    Salla supports two strategies (see X-Salla-Security-Strategy header):
+      - Signature (default): X-Salla-Signature = HMAC-SHA256(body, secret).
+      - Token: Authorization: Bearer <token>, where <token> equals the
+        webhook secret. Salla App Market apps frequently ship with the
+        Token strategy, in which case NO X-Salla-Signature is ever sent —
+        the strict signature-only check then rejected every event with
+        signature_required_but_absent.
 
     Behaviour:
       - No secret configured → accept (dev mode only, loud warning).
-      - Secret configured + signature present → verify strictly.
-      - Secret configured + signature ABSENT → REJECT.
+      - Secret configured + a matching credential present → verify strictly.
+      - Secret configured + credential ABSENT → REJECT (unless dev override).
 
     Pre-hardening (before C5) accepted unsigned webhooks by default,
     which let attackers forge app.store.authorize and inject an
@@ -89,6 +97,24 @@ def _verify_signature(body: bytes, headers) -> tuple:
         return True, "no_secret_configured"
 
     sig = headers.get("X-Salla-Signature", "")
+
+    # ── Token strategy ──────────────────────────────────────────────────
+    # When Salla uses the Token strategy it sends the secret in the
+    # Authorization header instead of signing the body. Accept it when no
+    # HMAC signature is present so the two strategies don't conflict.
+    if not sig:
+        auth = headers.get("Authorization", "")
+        token = auth[7:].strip() if auth[:7].lower() == "bearer " else auth.strip()
+        if token:
+            # A dedicated token can be set via SALLA_WEBHOOK_TOKEN; otherwise
+            # the same SALLA_WEBHOOK_SECRET doubles as the Token value, which
+            # is how Salla pre-fills it for App Market apps.
+            expected_token = os.getenv("SALLA_WEBHOOK_TOKEN", "") or secret
+            if hmac.compare_digest(expected_token, token):
+                return True, "token_ok"
+            log.warning("webhook_token_mismatch", extra={"got_prefix": token[:16]})
+            return False, f"token_mismatch got={token[:16]}"
+
     if not sig:
         if os.getenv("WEBHOOK_ALLOW_UNSIGNED", "false").lower() == "true":
             log.warning("webhook_unsigned_dev_override")
