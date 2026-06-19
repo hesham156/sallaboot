@@ -248,53 +248,51 @@ async def _handle_app_lifecycle(event: str, merchant_id: str, data: dict):
     print(f"[webhook] {event!r} acknowledged for store {store_id!r}")
 
 
-async def _handle_app_settings_updated(merchant_id: str, data: dict):
+def extract_app_settings_fields(settings) -> tuple:
     """
-    app.settings.updated — the merchant filled the app's settings form in their
-    Salla dashboard (their 7ayak email + API key) to bind THIS Salla store to
-    their existing 7ayak account.
-
-    Salla delivers the form fields under data.settings as key/value pairs. We
-    resolve the "home" 7ayak account by API key (primary — a secret proof of
-    ownership) or by email (fallback), then move its login identity — email +
-    chosen password + the API key — onto this Salla store and detach them from
-    the home account, so the merchant signs in with their 7ayak credentials and
-    sees this store's data.
-
-    Non-destructive: the home account's data is left intact (reachable by
-    store_id); a home account already running another platform is never touched.
+    Pull (email, api_key) out of a Salla app-settings dict, tolerating the
+    various key spellings a Salla settings form can produce. Shared by the
+    app.settings.updated webhook and the App-Settings Validation URL.
     """
-    store_id = merchant_id or "default"
-    settings = data.get("settings")
     settings = settings if isinstance(settings, dict) else {}
-
-    email   = str(settings.get("email") or "").strip().lower()
+    email = str(settings.get("email") or settings.get("mail") or "").strip().lower()
     api_key = ""
-    for k in ("api_key", "apikey", "api-key", "apiKey", "key", "token"):
+    for k in ("api_key", "apikey", "api-key", "apiKey", "key", "token", "API Key"):
         v = settings.get(k)
         if v:
             api_key = str(v).strip()
             break
+    return email, api_key
 
-    # Resolve the home 7ayak account: API key first (secret), then email.
+
+async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -> tuple:
+    """
+    Bind a Salla store to an existing 7ayak account from the App-Settings
+    fields. Returns (ok: bool, detail: str).
+
+    Resolves the "home" 7ayak account by API key (primary — a secret proof of
+    ownership) or by email (fallback), then moves its login identity — email +
+    chosen password + the API key — onto this Salla store and detaches them
+    from the home account, so the merchant signs in with their 7ayak
+    credentials and sees this store's data.
+
+    Non-destructive: the home account's data is left intact (reachable by
+    store_id); a home account already running another platform is never
+    touched. Shared by the app.settings.updated webhook and the validation URL.
+    """
     home = await db.find_store_by_api_key(api_key) if api_key else None
     if not home and email:
         home = await db.find_store_by_owner_email(email)
 
     if not home:
-        _log_event(store_id, "app.settings.updated", "skip",
-                   "no 7ayak account matched the email/API key provided")
-        return
+        return False, "no 7ayak account matched the email/API key provided"
     if str(home) == str(store_id):
-        _log_event(store_id, "app.settings.updated", "ok", "already linked")
-        return
+        return True, "already linked"
 
     # Never hijack a live store that already runs on another platform.
     home_integrations = await db.get_integrations(home)
     if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
-        _log_event(store_id, "app.settings.updated", "skip",
-                   f"home account {home!r} already has another platform")
-        return
+        return False, f"home account {home!r} already has another platform"
 
     # Move identity (email + password + API key) home → this Salla store.
     link_email = email or (sm.get_store_info(home) or {}).get("owner_email", "")
@@ -311,8 +309,22 @@ async def _handle_app_settings_updated(merchant_id: str, data: dict):
         await db.set_api_key(store_id, api_key)
     sm.reset_agent(store_id)
 
-    _log_event(store_id, "app.settings.updated", "ok", f"linked to 7ayak account (was {home!r})")
-    print(f"[webhook] 🔗 Salla store {store_id!r} linked to 7ayak account via App Settings (home={home!r})")
+    return True, f"linked to 7ayak account (was {home!r})"
+
+
+async def _handle_app_settings_updated(merchant_id: str, data: dict):
+    """
+    app.settings.updated — the merchant filled the app's settings form in their
+    Salla dashboard (their 7ayak email + API key) to bind THIS Salla store to
+    their existing 7ayak account. Salla delivers the form fields under
+    data.settings as key/value pairs.
+    """
+    store_id = merchant_id or "default"
+    email, api_key = extract_app_settings_fields(data.get("settings"))
+    ok, detail = await link_store_via_app_settings(store_id, email, api_key)
+    _log_event(store_id, "app.settings.updated", "ok" if ok else "skip", detail)
+    if ok and detail.startswith("linked"):
+        print(f"[webhook] 🔗 Salla store {store_id!r} linked to 7ayak account via App Settings (detail={detail})")
 
 
 async def _handle_product_event(event: str, merchant_id: str, data: dict):

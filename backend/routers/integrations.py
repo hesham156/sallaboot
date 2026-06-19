@@ -8,6 +8,7 @@ Currently supported:
 
 import hashlib
 import hmac as _hmac
+import json as _json
 import os
 import secrets
 import time
@@ -132,6 +133,75 @@ async def regenerate_api_key(store_id: str, request: Request):
     if not key:
         raise HTTPException(500, "تعذّر توليد مفتاح جديد")
     return {"api_key": key}
+
+
+# ── Salla App-Settings Validation URL ─────────────────────────────────────────
+# Registered in the Salla Partner Portal as the app's "رابط التحقق من الإعدادات".
+# When the merchant saves the app's settings form (their 7ayak email + API key),
+# Salla POSTs the values here BEFORE persisting them. We resolve + bind the store
+# synchronously and return success so the save completes with immediate feedback,
+# rather than waiting on the app.settings.updated webhook. The app.settings.updated
+# webhook still runs as a backstop (idempotent — re-linking the same store is a
+# no-op), so linking works whether or not the validation URL fires.
+
+@router.post("/integrations/salla/app-settings-validation")
+async def salla_app_settings_validation(request: Request):
+    from fastapi.responses import JSONResponse
+    from routers import webhooks as _wh
+
+    body = await request.body()
+
+    # Auth: only hard-reject a *wrong* credential. Salla may send the app's
+    # security strategy here (Token/Signature) — verify it when present — but an
+    # absent credential is allowed because the API key inside the body is itself
+    # the secret proof of ownership (a bad key simply resolves to no account).
+    _ok, sig_detail = _wh._verify_signature(body, request.headers)
+    if "mismatch" in sig_detail:
+        return JSONResponse(status_code=401,
+                            content={"success": False, "message": "توقيع غير صالح"})
+
+    try:
+        payload = _json.loads(body or b"{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:
+        payload = {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+
+    # Settings can arrive under data.settings, top-level settings, or flat.
+    settings = (
+        (data.get("settings") if isinstance(data.get("settings"), dict) else None)
+        or (payload.get("settings") if isinstance(payload.get("settings"), dict) else None)
+        or payload
+    )
+    email, api_key = _wh.extract_app_settings_fields(settings)
+
+    merchant_id = str(
+        payload.get("merchant")
+        or payload.get("merchant_id")
+        or data.get("merchant")
+        or data.get("id")
+        or ""
+    ).strip()
+
+    if not merchant_id:
+        # No store to bind in this request — let the webhook do the linking.
+        # Don't block the merchant's save.
+        return {"success": True}
+
+    ok, detail = await _wh.link_store_via_app_settings(merchant_id, email, api_key)
+    if ok:
+        return {"success": True}
+
+    # Surface a clear, actionable error so the merchant fixes their input.
+    msg = "تعذّر الربط — تأكد من بريدك الإلكتروني في حياك ومن نسخ مفتاح الربط بالكامل"
+    if "another platform" in detail:
+        msg = "حساب حياك مرتبط بمنصة تجارة إلكترونية أخرى بالفعل"
+    return JSONResponse(status_code=422, content={
+        "success": False,
+        "message": msg,
+        "error": {"fields": ["api_key"], "values": [msg]},
+    })
 
 
 # ── Shopify: initiate install ─────────────────────────────────────────────────
