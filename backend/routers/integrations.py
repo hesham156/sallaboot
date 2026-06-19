@@ -168,21 +168,44 @@ async def salla_app_settings_validation(request: Request):
         payload = {}
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
 
-    # Settings can arrive under data.settings, top-level settings, or flat.
-    settings = (
-        (data.get("settings") if isinstance(data.get("settings"), dict) else None)
-        or (payload.get("settings") if isinstance(payload.get("settings"), dict) else None)
-        or payload
-    )
-    email, api_key = _wh.extract_app_settings_fields(settings)
+    # Salla's exact validation payload shape isn't documented, so be liberal:
+    # merge every dict the fields could live in (data.settings, top-level
+    # settings, data itself, the envelope), earlier candidates winning, then
+    # extract email + api_key from the merged view.
+    merged: dict = {}
+    for cand in (
+        data.get("settings") if isinstance(data.get("settings"), dict) else None,
+        payload.get("settings") if isinstance(payload.get("settings"), dict) else None,
+        data or None,
+        payload,
+    ):
+        if isinstance(cand, dict):
+            for k, v in cand.items():
+                if k not in merged and not isinstance(v, (dict, list)):
+                    merged[k] = v
+    email, api_key = _wh.extract_app_settings_fields(merged)
 
     merchant_id = str(
         payload.get("merchant")
         or payload.get("merchant_id")
         or data.get("merchant")
+        or data.get("merchant_id")
         or data.get("id")
+        or merged.get("merchant")
         or ""
     ).strip()
+
+    # Temporary diagnostics — logged server-side (Railway) and echoed in the
+    # error body. Names/lengths only, never the secret key value.
+    debug = {
+        "top_keys":      sorted(str(k) for k in payload.keys()),
+        "data_keys":     sorted(str(k) for k in data.keys()) if data else [],
+        "field_keys":    sorted(str(k) for k in merged.keys()),
+        "merchant_seen": bool(merchant_id),
+        "email_found":   bool(email),
+        "api_key_len":   len(api_key),
+    }
+    print(f"[salla-validation] payload diagnostics: {debug}")
 
     if not merchant_id:
         # No store to bind in this request — let the webhook do the linking.
@@ -201,6 +224,7 @@ async def salla_app_settings_validation(request: Request):
         "success": False,
         "message": msg,
         "error": {"fields": ["api_key"], "values": [msg]},
+        "debug": debug,
     })
 
 
