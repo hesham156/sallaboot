@@ -188,8 +188,10 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     # password onto this Salla store so they keep ONE login. Runs BEFORE
     # register_store so the email match resolves to the placeholder, not the
     # store we're about to create. Only applied on first install.
-    is_new      = not sm.is_registered(store_id)
-    carried_pwd = await sm.reassign_owner_email(owner_email, store_id) if is_new else ""
+    is_new = not sm.is_registered(store_id)
+    carried_pwd, placeholder_id = (
+        await sm.reassign_owner_email(owner_email, store_id) if is_new else ("", "")
+    )
 
     await sm.register_store(
         store_id=store_id,
@@ -202,6 +204,13 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     if carried_pwd:
         await sm.set_admin_password(store_id, carried_pwd)
         print(f"[webhook] 🔗 linked existing 7ayak account → Salla store {store_id!r}")
+
+    # Merge the signup placeholder's data into this Salla store and delete the
+    # duplicate row — same cleanup the app-settings link path does, so the
+    # primary install path doesn't leave an orphaned account behind.
+    if placeholder_id:
+        if await db.merge_placeholder_into(placeholder_id, store_id):
+            sm.unregister(placeholder_id)
 
     # Directly await the DB save for this critical event so data is never
     # lost even if the server restarts seconds after the webhook.

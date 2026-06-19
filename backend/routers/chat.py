@@ -144,8 +144,10 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
         # placeholder (same email) into this Salla store so the merchant keeps
         # ONE login + their chosen password. Runs before register_store so the
         # email match resolves to the placeholder. First install only.
-        is_new      = not sm.is_registered(store_id)
-        carried_pwd = await sm.reassign_owner_email(owner_email, store_id) if is_new else ""
+        is_new = not sm.is_registered(store_id)
+        carried_pwd, placeholder_id = (
+            await sm.reassign_owner_email(owner_email, store_id) if is_new else ("", "")
+        )
 
         await sm.register_store(
             store_id      = store_id,
@@ -158,6 +160,11 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
         if carried_pwd:
             await sm.set_admin_password(store_id, carried_pwd)
             log.info("salla_linked_existing_account", extra={"store_id": store_id})
+
+        # Merge + delete the signup placeholder so OAuth-based linking doesn't
+        # leave a duplicate account behind (consistent with the other paths).
+        if placeholder_id and await db.merge_placeholder_into(placeholder_id, store_id):
+            sm.unregister(placeholder_id)
 
         if _sync_task:
             asyncio.create_task(_sync_task(store_id, access_token))

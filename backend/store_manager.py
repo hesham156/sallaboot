@@ -263,7 +263,7 @@ async def register_store(
 
 # ── Account unification (link an existing 7ayak account to a Salla install) ──────
 
-async def reassign_owner_email(owner_email: str, new_store_id: str) -> str:
+async def reassign_owner_email(owner_email: str, new_store_id: str) -> tuple:
     """
     Ensure `owner_email` resolves to exactly one account: `new_store_id` — the
     store just connected via Salla.
@@ -273,30 +273,31 @@ async def reassign_owner_email(owner_email: str, new_store_id: str) -> str:
     email belongs to a separate, platform-less placeholder account. Left as-is,
     the email would match two stores and unified login would be ambiguous.
 
-    This detaches the email from that placeholder and returns its password hash
-    so the caller can preserve the merchant's chosen password on the Salla store.
+    Detaches the email from that placeholder and returns BOTH its password hash
+    (so the caller preserves the merchant's chosen password on the Salla store)
+    AND the placeholder's store_id (so the caller can merge its data into the new
+    store and delete the duplicate row — same as the app-settings link path).
 
-    Non-destructive by design:
-      • the placeholder's data (if any) is left intact, reachable by store_id;
-      • we REFUSE to touch an account that already has a platform connected
-        (salla/shopify/zid/woocommerce) — that's a live store, not a placeholder.
+    Safe by design: we REFUSE to touch an account that already has a platform
+    connected (salla/shopify/zid/woocommerce) — that's a live store, not a
+    placeholder.
 
-    Returns the password hash to carry over, or "" when there's nothing to do.
+    Returns (pwd_hash, placeholder_id), or ("", "") when there's nothing to do.
     """
     owner_email = (owner_email or "").strip().lower()
     if not owner_email:
-        return ""
+        return "", ""
     other = await db.find_store_by_owner_email(owner_email)
     if not other or str(other) == str(new_store_id):
-        return ""
+        return "", ""
     integrations = await db.get_integrations(other)
     if any(integrations.get(p) for p in ("salla", "shopify", "zid", "woocommerce")):
         print(f"[link] {other!r} already has a connected platform — leaving its email intact")
-        return ""
+        return "", ""
     pwd_hash = get_admin_password_hash(other)
     await db.set_store_owner_email(other, "")   # detach → email login is now unambiguous
     print(f"[link] 🔗 email {owner_email!r} reassigned: placeholder {other!r} → Salla store {new_store_id!r}")
-    return pwd_hash or ""
+    return (pwd_hash or ""), str(other)
 
 
 # ── Token access ───────────────────────────────────────────────────────────────

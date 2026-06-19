@@ -49,20 +49,20 @@ def patched(monkeypatch):
 
 async def test_no_email_is_noop(patched):
     stub = patched(_DBStub())
-    assert await sm.reassign_owner_email("", "merchant_42") == ""
+    assert await sm.reassign_owner_email("", "merchant_42") == ("", "")
     assert stub.cleared == []
 
 
 async def test_no_existing_account_is_noop(patched):
     stub = patched(_DBStub(owner_lookup={}))
-    assert await sm.reassign_owner_email("new@store.com", "merchant_42") == ""
+    assert await sm.reassign_owner_email("new@store.com", "merchant_42") == ("", "")
     assert stub.cleared == []
 
 
 async def test_same_store_is_noop(patched):
     # Email already belongs to the Salla store itself (reinstall) → nothing to do.
     stub = patched(_DBStub(owner_lookup={"a@b.com": "merchant_42"}))
-    assert await sm.reassign_owner_email("a@b.com", "merchant_42") == ""
+    assert await sm.reassign_owner_email("a@b.com", "merchant_42") == ("", "")
     assert stub.cleared == []
 
 
@@ -73,7 +73,7 @@ async def test_placeholder_is_relinked_and_password_carried(patched):
         pwd_hash="argon2$chosen",
     )
     out = await sm.reassign_owner_email("a@b.com", "merchant_42")
-    assert out == "argon2$chosen"
+    assert out == ("argon2$chosen", "signup_abc")
     assert stub.cleared == ["signup_abc"]
 
 
@@ -86,7 +86,7 @@ async def test_live_platform_account_is_left_untouched(patched):
         ),
     )
     out = await sm.reassign_owner_email("a@b.com", "merchant_42")
-    assert out == ""
+    assert out == ("", "")
     assert stub.cleared == []   # email NOT detached
 
 
@@ -99,5 +99,5 @@ async def test_synthetic_salla_account_is_left_untouched(patched):
         ),
     )
     out = await sm.reassign_owner_email("a@b.com", "merchant_42")
-    assert out == ""
+    assert out == ("", "")
     assert stub.cleared == []
