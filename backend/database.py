@@ -3746,7 +3746,11 @@ async def clear_salla_tokens(store_id: str) -> None:
 # Salla store to their existing 7ayak account.
 
 def _new_api_key() -> str:
-    return "7yk_" + secrets.token_urlsafe(24)
+    # Keep the key <= 28 chars: Salla's app-settings text field truncates the
+    # pasted value at 30 chars, and a 36-char key (token_urlsafe(24)) silently
+    # lost its tail there, so the linking key never matched. 18 bytes of
+    # entropy (~144 bits) is still ample. "7yk_" (4) + 24 = 28 chars.
+    return "7yk_" + secrets.token_urlsafe(18)
 
 
 async def get_or_create_api_key(store_id: str) -> str:
