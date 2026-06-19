@@ -208,7 +208,9 @@ async def abandoned_cart_loop() -> None:
         try:
             if await db.try_lead("abandoned_cart_poll", WORKER_ID, ttl_seconds=1800):
                 import shopify_sync as _ss
+                import zid_sync as _zs
                 await _ss.poll_abandoned_checkouts()
+                await _zs.poll_zid_abandoned_carts()
         except Exception as exc:
             print(f"[abandoned_cart] loop error: {exc}")
         await asyncio.sleep(1800)

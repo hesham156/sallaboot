@@ -808,6 +808,30 @@ def shopify_checkout_to_notification(checkout: dict) -> tuple:
     return notification, phone
 
 
+def zid_cart_to_notification(cart: dict) -> tuple:
+    """
+    Map a Zid abandoned cart (list endpoint shape) → the shared abandoned-cart
+    notification shape. Returns (notification, phone). Used by the Zid poller.
+    """
+    phone = _normalize_phone(cart.get("customer_mobile") or "")
+    notification = {
+        "id":             str(cart.get("id") or ""),
+        "ts":             cart.get("updated_at") or (_dt.datetime.utcnow().isoformat() + "Z"),
+        "customer_name":  (cart.get("customer_name") or "").strip() or "—",
+        "customer_phone": phone or "—",
+        "customer_email": cart.get("customer_email") or "—",
+        "total":          str(cart.get("cart_total") if cart.get("cart_total") is not None
+                              else (cart.get("cart_total_string") or "—")),
+        "currency":       cart.get("currency_code") or "SAR",
+        "items_count":    int(cart.get("products_count") or 0),
+        "age_minutes":    0,
+        "checkout_url":   cart.get("url", ""),
+        "status":         "active",
+        "recovered":      False,
+    }
+    return notification, phone
+
+
 async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:
     """
     Single dispatch point for Salla events — called by both the inbox

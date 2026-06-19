@@ -47,6 +47,26 @@ def test_shopify_checkout_falls_back_to_token_id():
     assert note["items_count"] == 0
 
 
+def test_zid_cart_maps_to_notification():
+    cart = {
+        "id": "b978fcc2-ccd0-45f6-81a7-7ab1f3b8f85d",
+        "url": "https://osama.zid.store/checkout/fromBasket/3:694ff",
+        "customer_name": "mahmoud",
+        "customer_mobile": "966500000005",
+        "customer_email": "a@zid.sa",
+        "cart_total": 509.83,
+        "currency_code": "EGP",
+        "products_count": 3,
+    }
+    note, phone = w.zid_cart_to_notification(cart)
+    assert note["id"] == "b978fcc2-ccd0-45f6-81a7-7ab1f3b8f85d"
+    assert note["customer_name"] == "mahmoud"
+    assert note["currency"] == "EGP"
+    assert note["items_count"] == 3
+    assert note["checkout_url"].startswith("https://osama.zid.store")
+    assert phone and phone != "—"
+
+
 @pytest.fixture
 def patched(monkeypatch):
     calls = {"notify": [], "wa": [], "saved": []}

@@ -263,6 +263,42 @@ _WEBHOOK_EVENTS = [
 ]
 
 
+async def poll_zid_abandoned_carts(per_page: int = 100) -> int:
+    """
+    Sweep every connected Zid store for abandoned carts and record newly-seen
+    ones (dashboard + owner email + customer WhatsApp) — parity with Salla's
+    abandoned.cart webhook. Zid doesn't push these, but exposes a list endpoint
+    (a cart is abandoned after 10 min of inactivity), so we poll on a schedule.
+
+    Returns the number of newly-recorded carts. Per-store failures are isolated.
+    """
+    # Lazy import to avoid a module-load cycle.
+    from routers.webhooks import record_abandoned_cart, zid_cart_to_notification
+
+    stores = await db.list_stores_with_integration("zid")
+    if not stores:
+        return 0
+    total_new = 0
+    for store_id, cfg in stores:
+        access_token = (cfg or {}).get("access_token", "")
+        auth_jwt     = (cfg or {}).get("authorization_jwt", "")
+        zid_store_id = (cfg or {}).get("zid_store_id", "")
+        if not access_token or not auth_jwt:
+            continue
+        try:
+            client = ZidClient(access_token, auth_jwt, zid_store_id=zid_store_id, store_id=store_id)
+            carts  = await client.get_abandoned_carts(per_page=per_page)
+            for cart in carts:
+                notification, phone = zid_cart_to_notification(cart)
+                if notification["id"] and await record_abandoned_cart(store_id, notification, phone=phone):
+                    total_new += 1
+        except Exception as e:
+            print(f"[zid_sync] abandoned-cart poll failed for {store_id!r}: {e}")
+    if total_new:
+        print(f"[zid_sync] 🛒 {total_new} new abandoned cart(s) recorded across {len(stores)} store(s)")
+    return total_new
+
+
 async def register_zid_webhooks(
     access_token: str,
     authorization_jwt: str,

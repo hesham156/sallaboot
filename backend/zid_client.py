@@ -99,6 +99,18 @@ class ZidClient:
             params={"page": page, "per_page": per_page, "payload_type": "default"},
         )
 
+    async def get_abandoned_carts(self, page: int = 1, per_page: int = 100) -> list[dict]:
+        """
+        List abandoned carts (Zid marks a cart abandoned after 10 min of
+        inactivity). Each item carries id, url (recovery link), customer_name,
+        customer_mobile, customer_email, cart_total, currency_code, products_count.
+        """
+        data = await self._get(
+            "/managers/store/abandoned-carts",
+            params={"page": page, "per_page": per_page},
+        )
+        return data.get("abandoned-carts", []) or []
+
     async def get_order(self, order_id: str | int) -> dict:
         data = await self._get(
             f"/managers/store/orders/{order_id}",
