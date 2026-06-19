@@ -72,6 +72,28 @@ def patched(monkeypatch):
     return _apply
 
 
+def test_extract_handles_salla_arabic_slugs():
+    """Salla derives field keys from Arabic labels: الايميل→alaemel, الـ API Key→al_api_key."""
+    email, api_key = w.extract_app_settings_fields(
+        {"alaemel": "Sales@Najdc.com", "al_api_key": "7yk_ABC", "merchant": 123}
+    )
+    assert email == "sales@najdc.com"
+    assert api_key == "7yk_ABC"
+
+
+def test_extract_email_by_value_shape():
+    """Even with an unknown email slug, an @-bearing value is recognised."""
+    email, api_key = w.extract_app_settings_fields(
+        {"some_weird_label": "user@example.com", "another_field": "7yk_K"}
+    )
+    assert email == "user@example.com"
+
+
+def test_extract_clean_slugs_still_work():
+    email, api_key = w.extract_app_settings_fields({"email": "a@b.com", "api_key": "7yk_K"})
+    assert (email, api_key) == ("a@b.com", "7yk_K")
+
+
 async def test_links_by_api_key(patched):
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),

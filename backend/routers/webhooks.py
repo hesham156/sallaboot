@@ -250,19 +250,30 @@ async def _handle_app_lifecycle(event: str, merchant_id: str, data: dict):
 
 def extract_app_settings_fields(settings) -> tuple:
     """
-    Pull (email, api_key) out of a Salla app-settings dict, tolerating the
-    various key spellings a Salla settings form can produce. Shared by the
-    app.settings.updated webhook and the App-Settings Validation URL.
+    Pull (email, api_key) out of a Salla app-settings dict. Salla derives a
+    field's programmatic key from its (often Arabic) label, so the slugs are
+    unpredictable — e.g. "الايميل" → `alaemel`, "الـ API Key" → `al_api_key`.
+    Match on shape/intent rather than an exact key name:
+      • api_key  → key contains both "api" and "key", or a known key slug.
+      • email    → value looks like an email (contains "@"), or key mentions mail.
+    Shared by the app.settings.updated webhook and the App-Settings Validation URL.
     """
     settings = settings if isinstance(settings, dict) else {}
-    email = str(settings.get("email") or settings.get("mail") or "").strip().lower()
+    email = ""
     api_key = ""
-    for k in ("api_key", "apikey", "api-key", "apiKey", "key", "token", "API Key"):
-        v = settings.get(k)
-        if v:
-            api_key = str(v).strip()
-            break
-    return email, api_key
+    _API_SLUGS = {"api_key", "apikey", "api-key", "apikey", "key", "token", "al_api_key"}
+    for raw_k, raw_v in settings.items():
+        if raw_v is None or isinstance(raw_v, (dict, list)):
+            continue
+        key = str(raw_k).strip().lower().replace("-", "_").replace(" ", "_")
+        val = str(raw_v).strip()
+        if not val:
+            continue
+        if not api_key and (("api" in key and "key" in key) or key in _API_SLUGS):
+            api_key = val
+        elif not email and ("@" in val or "email" in key or "mail" in key or "aemel" in key):
+            email = val
+    return email.strip().lower(), api_key
 
 
 async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -> tuple:

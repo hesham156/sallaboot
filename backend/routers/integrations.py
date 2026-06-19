@@ -224,7 +224,6 @@ async def salla_app_settings_validation(request: Request):
         "success": False,
         "message": msg,
         "error": {"fields": ["api_key"], "values": [msg]},
-        "debug": debug,
     })
 
 
