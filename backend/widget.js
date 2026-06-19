@@ -6,8 +6,24 @@
   // In Salla Partners Portal Snippets, {{ merchant.id }} is resolved server-side
   // so storeId is automatically the correct merchant ID for every store.
   var _ext = window.SallaChatConfig || {};
+  // Derive the backend origin from this script's own <script src> so API calls
+  // hit the host that actually served the widget — even when the Snippet didn't
+  // set apiUrl. Falls back to the production host.
+  function _selfOrigin() {
+    try {
+      var cur = document.currentScript;
+      if (!cur || !cur.src) {
+        var ss = document.getElementsByTagName("script");
+        for (var i = ss.length - 1; i >= 0; i--) {
+          if (ss[i].src && ss[i].src.indexOf("widget.js") !== -1) { cur = ss[i]; break; }
+        }
+      }
+      if (cur && cur.src) return new URL(cur.src).origin;
+    } catch (e) {}
+    return "";
+  }
   var _defaults = {
-    apiUrl:         "https://sallaboot-t.up.railway.app",
+    apiUrl:         _selfOrigin() || "https://7ayak.app",
     storeId:        "default",
     primaryColor:   "#1a56db",
     position:       "left",   // "left" | "right"

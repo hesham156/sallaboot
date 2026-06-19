@@ -330,6 +330,8 @@ async def snippet_guide():
         f"<!-- Salla Chat Bot — paste this in Partners Portal → App → Snippets -->\n"
         f"<script>\n"
         f"window.SallaChatConfig = {{\n"
+        f'  apiUrl:       "{base}",\n'
+        f'  platform:     "salla",\n'
         f'  storeId:      "{{{{ merchant.id }}}}",\n'
         f'  storeName:    "{{{{ store.name }}}}",\n'
         f'  primaryColor: "#1a56db",\n'
