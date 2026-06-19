@@ -77,9 +77,19 @@ def super_viewing_other_store(request, store_id: str) -> bool:
 def require_store_owner(request, store_id: str):
     from fastapi import HTTPException
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    claims = _auth.verify_token(token) or {}
+    claims = _auth.verify_token(token)
+    # No / invalid token → reject. (Without this an unauthenticated caller fell
+    # through to the implicit allow below — and these owner endpoints sit OUTSIDE
+    # the middleware's _PROTECTED_RE allowlist, so this guard is the only gate.)
+    if not claims:
+        raise HTTPException(401, "يرجى تسجيل الدخول")
     if claims.get("su"):
         return
+    # Bind the token to the store being acted on. Without this, any valid owner
+    # token authorised every other store (cross-store IDOR — e.g. reading another
+    # merchant's linking api-key, then hijacking their account).
+    if (claims.get("s") or "") != store_id:
+        raise HTTPException(403, "غير مصرح لك بالوصول")
     if "eid" in claims:
         raise HTTPException(403, "هذا الإجراء مخصّص لمالك المتجر")
 

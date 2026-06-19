@@ -224,11 +224,17 @@ async def register_store(
         "owner_email":         resolved_email,
     }
 
-    # Auto-set initial password = store_id on first registration
+    # Set an UNGUESSABLE initial password on first registration. It used to be
+    # the store_id itself — but a Salla store_id is the merchant id (semi-public:
+    # it's in every webhook payload and dashboard URL), and the store_id+password
+    # login path then let anyone who knew that id sign in as the store. Merchants
+    # get a real password via /signup, the Salla app-settings link, a super reset,
+    # or skip it entirely with OAuth auto-login.
     if not tokens["admin_password_hash"]:
         from auth import hash_password
-        tokens["admin_password_hash"] = hash_password(str(store_id))
-        print(f"[store_manager] Initial password for {store_id!r} set to store_id")
+        import secrets as _secrets
+        tokens["admin_password_hash"] = hash_password(_secrets.token_urlsafe(32))
+        print(f"[store_manager] Initial random password set for {store_id!r}")
 
 
     if store_id in _registry:

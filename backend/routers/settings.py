@@ -1051,5 +1051,12 @@ async def super_reset_password(store_id: str, request: Request):
         raise HTTPException(403, "مصرح للمدير العام فقط")
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    await sm.set_admin_password(store_id, _auth.hash_password(str(store_id)))
-    return {"status": "ok", "message": f"تمت إعادة تعيين كلمة المرور إلى: {store_id}"}
+    # Reset to a RANDOM temp password, not the store_id. Resetting to the
+    # store_id (the semi-public merchant id) left the account open to anyone via
+    # the store_id+password login path. Hand the super a one-time secret to relay.
+    import secrets as _secrets
+    new_pwd = _secrets.token_urlsafe(9)
+    await sm.set_admin_password(store_id, _auth.hash_password(new_pwd))
+    await audit(request, "super_reset_password", target_store=store_id)
+    return {"status": "ok", "password": new_pwd,
+            "message": f"كلمة المرور المؤقتة الجديدة: {new_pwd} — سلّمها للتاجر ليغيّرها."}
