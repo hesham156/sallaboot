@@ -367,17 +367,31 @@ async def sync_store(access_token: str, store_id: str = "default") -> dict:
 
     data = await _do_sync(access_token, store_id)
 
-    # Auto-refresh and retry on 401
+    # Recover from an expired/stale token (401).
     errors = data.get("last_sync_errors", [])
     if any("401" in str(e) for e in errors):
-        try:
-            from salla_oauth import refresh_access_token
-            print(f"[store_sync:{store_id}] 401 detected — refreshing token and retrying …")
-            new_token = await refresh_access_token(store_id)
-            data      = await _do_sync(new_token, store_id)
-        except Exception as exc:
-            print(f"[store_sync:{store_id}] Token refresh during sync failed: {exc}")
-            # Keep the original data (with the 401 error recorded)
+        # (1) Easy Mode: Salla re-sends app.store.authorize with a fresh token
+        # before expiry, and store_manager already persisted it. The token we
+        # were called with may simply be stale — retry with the latest stored
+        # one before attempting an OAuth refresh (Easy-Mode apps can't refresh
+        # via the token endpoint, so that call would only fail with invalid_client).
+        current = sm.get_access_token(store_id)
+        if current and current != access_token:
+            print(f"[store_sync:{store_id}] 401 — retrying with the latest stored token …")
+            data   = await _do_sync(current, store_id)
+            errors = data.get("last_sync_errors", [])
+
+        # (2) Custom/OAuth mode: refresh via the token endpoint, then retry once.
+        if any("401" in str(e) for e in errors):
+            try:
+                from salla_oauth import refresh_access_token
+                print(f"[store_sync:{store_id}] still 401 — refreshing token and retrying …")
+                new_token = await refresh_access_token(store_id)
+                data      = await _do_sync(new_token, store_id)
+            except Exception as exc:
+                print(f"[store_sync:{store_id}] token refresh failed: {exc} — "
+                      f"store likely needs to reopen the app to reauthorize")
+                # Keep the original data (with the 401 error recorded).
 
     sm.set_cache(store_id, data)
 
