@@ -3806,6 +3806,58 @@ async def set_api_key(store_id: str, key: str | None) -> None:
         print(f"[db] set_api_key error: {e}")
 
 
+async def merge_placeholder_into(placeholder_id: str, target_id: str) -> bool:
+    """
+    Migrate a freshly-signed-up placeholder account's merchant-authored content
+    onto the canonical Salla store, then delete the placeholder row. Used by the
+    app-settings linking flow so a merchant who signed up on 7ayak and then
+    installed Salla ends up with ONE account, not a duplicate.
+
+    Scope (a placeholder is a brand-new signup, so this is normally near-empty):
+      • ai_config (bot settings) — copied only if the target hasn't set one yet.
+      • bot_training + uploads (knowledge / files) — store_id repointed.
+    Salla-sourced tables (orders, contacts, conversations) never exist on a
+    placeholder, so they're left untouched. Runs in one transaction: a failure
+    rolls back and leaves the placeholder intact rather than half-merged.
+    """
+    placeholder_id = str(placeholder_id)
+    target_id      = str(target_id)
+    if not _pool or not placeholder_id or placeholder_id == target_id:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            async with conn.transaction():
+                # Carry the bot config only if the target doesn't have one yet,
+                # so we never clobber settings already made on the Salla store.
+                await conn.execute(
+                    """
+                    UPDATE stores t
+                    SET ai_config = p.ai_config, updated_at = NOW()
+                    FROM stores p
+                    WHERE t.store_id = $1 AND p.store_id = $2
+                      AND (t.ai_config IS NULL OR t.ai_config = '{}'::jsonb)
+                      AND p.ai_config IS NOT NULL AND p.ai_config <> '{}'::jsonb
+                    """,
+                    target_id, placeholder_id,
+                )
+                await conn.execute(
+                    "UPDATE bot_training SET store_id = $1 WHERE store_id = $2",
+                    target_id, placeholder_id,
+                )
+                await conn.execute(
+                    "UPDATE uploads SET store_id = $1 WHERE store_id = $2",
+                    target_id, placeholder_id,
+                )
+                await conn.execute(
+                    "DELETE FROM stores WHERE store_id = $1", placeholder_id,
+                )
+        print(f"[db] merged placeholder {placeholder_id!r} → {target_id!r} and deleted it")
+        return True
+    except Exception as e:
+        print(f"[db] merge_placeholder_into({placeholder_id!r}→{target_id!r}) error: {e}")
+        return False
+
+
 async def find_store_by_api_key(api_key: str) -> str | None:
     """Return the store_id that owns this linking key, or None."""
     if not _pool:

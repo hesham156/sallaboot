@@ -329,7 +329,18 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
         await db.set_api_key(store_id, api_key)
     sm.reset_agent(store_id)
 
-    return True, f"linked to 7ayak account (was {home!r})"
+    # De-duplicate: the home account was a pure signup placeholder (no platform
+    # checked above, no access token) — migrate any bot config/training it has
+    # onto the Salla store and delete the now-empty row so the merchant is left
+    # with ONE account instead of a duplicate. Only when it's truly a placeholder
+    # (an access token means it's a real store we must never delete).
+    merged = ""
+    if not sm.get_access_token(home):
+        if await db.merge_placeholder_into(home, store_id):
+            sm.unregister(home)
+            merged = " (placeholder merged + removed)"
+
+    return True, f"linked to 7ayak account (was {home!r}){merged}"
 
 
 async def _handle_app_settings_updated(merchant_id: str, data: dict):

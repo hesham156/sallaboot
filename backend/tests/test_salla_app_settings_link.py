@@ -25,6 +25,7 @@ class _DBStub:
         self._integrations = integrations or {}
         self.owner_email_set: dict = {}
         self.api_key_set: dict = {}
+        self.merged: list = []
 
     async def find_store_by_api_key(self, key):
         return self._by_key.get((key or "").strip())
@@ -42,16 +43,28 @@ class _DBStub:
     async def set_api_key(self, store_id, key):
         self.api_key_set[store_id] = key
 
+    async def merge_placeholder_into(self, placeholder_id, target_id):
+        self.merged.append((placeholder_id, target_id))
+        return True
+
 
 class _SMStub:
-    def __init__(self, pwd="argon2$home", registered=True):
+    def __init__(self, pwd="argon2$home", registered=True, access_token=""):
         self._pwd = pwd
         self._registered = registered
+        self._access_token = access_token
         self.password_set: dict = {}
         self.reset: list = []
+        self.unregistered: list = []
 
     def is_registered(self, store_id):
         return self._registered
+
+    def get_access_token(self, store_id):
+        return self._access_token
+
+    def unregister(self, store_id):
+        self.unregistered.append(store_id)
 
     def get_store_info(self, store_id):
         return {"owner_email": "home@acct.com"}
@@ -133,6 +146,33 @@ async def test_no_link_when_salla_store_not_yet_created(patched):
     assert db.owner_email_set == {}
     assert db.api_key_set == {}
     assert sm.password_set == {}
+
+
+async def test_placeholder_merged_and_deleted(patched):
+    """A pure signup placeholder (no access token) is merged into the Salla
+    store and removed, so the merchant ends up with ONE account."""
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
+        _SMStub(access_token=""),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
+    )
+    assert db.merged == [("home_acct", "merchant_99")]
+    assert sm.unregistered == ["home_acct"]
+
+
+async def test_home_with_access_token_is_not_deleted(patched):
+    """If the matched account is a real store (has a token), never delete it."""
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
+        _SMStub(access_token="real-salla-token"),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
+    )
+    assert db.merged == []
+    assert sm.unregistered == []
 
 
 async def test_falls_back_to_email_when_no_key(patched):

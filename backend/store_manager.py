@@ -416,6 +416,12 @@ def is_registered(store_id: str) -> bool:
     return str(store_id) in _registry
 
 
+def unregister(store_id: str) -> None:
+    """Drop a store from the in-memory registry (e.g. after a placeholder
+    account is merged into a Salla store and deleted from the DB)."""
+    _registry.pop(str(store_id), None)
+
+
 def get_owner_email(store_id: str) -> str:
     """Stored owner email for unified email/password login. '' if unknown."""
     return _registry.get(str(store_id), {}).get("tokens", {}).get("owner_email", "")
