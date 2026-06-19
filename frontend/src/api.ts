@@ -870,6 +870,9 @@ export interface AIConfig {
   bot_name: string
   provider: 'groq' | 'anthropic' | 'openai' | 'env'
   store_type: 'printing' | 'general'
+  // Categories hidden from the bot + the full list to pick from (read-only).
+  excluded_categories?: string[]
+  available_categories?: string[]
   whatsapp_enabled?: boolean
   whatsapp_phone_id?: string
   whatsapp_token?: string

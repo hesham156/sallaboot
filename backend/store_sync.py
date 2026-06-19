@@ -539,13 +539,16 @@ def build_knowledge_summary(store_id: str = "default") -> str:
 
     lines = []
 
+    _excluded = sm.get_excluded_categories(store_id)
     cats = data.get("categories", [])
     if cats:
-        cat_names = "، ".join(c["name"] for c in cats[:30] if c.get("name"))
+        cat_names = "، ".join(
+            c["name"] for c in cats[:30]
+            if c.get("name") and c["name"].strip().lower() not in _excluded
+        )
         lines.append(f"تصنيفات المتجر: {cat_names}")
 
-    products  = data.get("products", [])
-    available = [p for p in products if p.get("status") != "hidden"]
+    available = sm.bot_visible_products(store_id)
     if available:
         lines.append(f"\nعدد المنتجات المتاحة: {len(available)} منتج\n")
         lines.append("=== قائمة المنتجات ===")

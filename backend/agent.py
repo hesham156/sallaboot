@@ -1752,8 +1752,8 @@ class PrintingAgent:
             elif name == "suggest_products":
                 needs   = inputs.get("needs", "").strip().lower()
                 budget  = inputs.get("budget", "")
-                store   = get_store_data(self.store_id)
-                prods   = store.get("products", [])
+                # Discovery path → respect admin category exclusions (and hidden).
+                prods   = sm.bot_visible_products(self.store_id)
                 if not prods:
                     return "⚠️ لا توجد منتجات محملة بعد."
 

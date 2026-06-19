@@ -56,6 +56,13 @@ async def get_ai_settings(store_id: str):
     store_type = (cfg.get("store_type") or "").strip().lower()
     if not store_type:
         store_type = "printing" if cfg.get("pricing_config") else "general"
+    # Categories the merchant can pick from to hide from the bot, plus the
+    # current selection. Names come from the synced catalogue.
+    _cache_cats = (sm.get_cache(store_id) or {}).get("categories", []) or []
+    available_categories = sorted(
+        {c.get("name", "").strip() for c in _cache_cats if c.get("name", "").strip()}
+    )
+    excluded_categories = [str(c) for c in (cfg.get("excluded_categories") or [])]
     import whatsapp as _wa
     base = os.getenv("BASE_URL", "").rstrip("/")
     return {
@@ -66,6 +73,8 @@ async def get_ai_settings(store_id: str):
         "bot_name":          cfg.get("bot_name",  ""),
         "provider":          provider,
         "store_type":        store_type,
+        "excluded_categories":  excluded_categories,
+        "available_categories": available_categories,
         "whatsapp_enabled":    bool(cfg.get("whatsapp_enabled")),
         "whatsapp_phone_id":   cfg.get("whatsapp_phone_id", ""),
         "whatsapp_token":      "••••" if cfg.get("whatsapp_token") else "",
@@ -126,6 +135,18 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
         st = req.store_type.strip().lower()
         if st in ("printing", "general"):
             config["store_type"] = st
+
+    if req.excluded_categories is not None:
+        # De-dupe while preserving order; drop blanks.
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for c in req.excluded_categories:
+            name = str(c).strip()
+            key = name.lower()
+            if name and key not in seen:
+                seen.add(key)
+                cleaned.append(name)
+        config["excluded_categories"] = cleaned
 
     if req.whatsapp_phone_id is not None:
         config["whatsapp_phone_id"] = req.whatsapp_phone_id.strip()
@@ -198,7 +219,7 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
         if (existing.get(field) or "") != (config.get(field) or ""):
             _changed.append(field)
     other_changes = {}
-    for field in ("ai_model", "bot_name", "store_type", "whatsapp_enabled", "whatsapp_phone_id"):
+    for field in ("ai_model", "bot_name", "store_type", "excluded_categories", "whatsapp_enabled", "whatsapp_phone_id"):
         if (existing.get(field) or None) != (config.get(field) or None):
             other_changes[field] = config.get(field)
     if _changed or other_changes:

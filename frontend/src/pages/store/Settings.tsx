@@ -72,6 +72,8 @@ export default function Settings({ storeId }: Props) {
   const [model, setModel]       = useState('')
   const [botName, setBotName]   = useState('')
   const [storeType, setStoreType] = useState<'printing' | 'general'>('general')
+  const [excludedCats, setExcludedCats] = useState<string[]>([])
+  const [availableCats, setAvailableCats] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
   const [aiSaving, setAiSaving]   = useState(false)
   const [aiMsg, setAiMsg]         = useState('')
@@ -170,6 +172,8 @@ export default function Settings({ storeId }: Props) {
       setBotName(ai.bot_name || '')
       setModel(ai.ai_model || '')
       setStoreType(ai.store_type === 'printing' ? 'printing' : 'general')
+      setExcludedCats(ai.excluded_categories || [])
+      setAvailableCats(ai.available_categories || [])
       setCouponsEnabled(!!ai.coupons_enabled)
       setCouponMaxPct(ai.coupon_max_percent ?? 15)
       setCouponMaxVal(ai.coupon_max_discount_value ?? 200)
@@ -228,9 +232,10 @@ export default function Settings({ storeId }: Props) {
   async function saveAI() {
     setAiSaving(true); setAiMsg('')
     try {
-      const payload: Record<string, string> = {
+      const payload: Partial<AIConfig> = {
         groq_api_key: '', anthropic_api_key: '', openai_api_key: '',
         ai_model: model, bot_name: botName, store_type: storeType,
+        excluded_categories: excludedCats,
       }
       if (apiKey.trim()) {
         if (provider === 'groq')      payload.groq_api_key      = apiKey.trim()
@@ -605,6 +610,42 @@ export default function Settings({ storeId }: Props) {
                     </button>
                   ))}
                 </div>
+              </section>
+
+              {/* Categories to hide from the bot */}
+              <section>
+                <label className="text-xs font-bold text-default-500 block mb-1">
+                  فئات مخفية عن البوت
+                </label>
+                <p className="text-[11px] text-default-400 mb-2">
+                  المنتجات في الفئات المختارة لن يعرضها البوت أو يقترحها على العملاء.
+                </p>
+                {availableCats.length === 0 ? (
+                  <p className="text-[11px] text-default-400 rounded-xl border border-divider bg-content2 p-3">
+                    لا توجد فئات بعد — تأكد من مزامنة منتجات المتجر أولاً.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {availableCats.map(cat => {
+                      const on = excludedCats.some(c => c.toLowerCase() === cat.toLowerCase())
+                      return (
+                        <button key={cat} type="button"
+                          onClick={() => setExcludedCats(prev =>
+                            on
+                              ? prev.filter(c => c.toLowerCase() !== cat.toLowerCase())
+                              : [...prev, cat]
+                          )}
+                          className={`text-xs rounded-full border px-3 py-1.5 transition-all ${
+                            on
+                              ? 'border-danger bg-danger/10 text-danger line-through'
+                              : 'border-divider bg-content2 text-foreground hover:border-primary/40'
+                          }`}>
+                          {on ? '🚫 ' : ''}{cat}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </section>
 
               <InlineAlert text={aiMsg} />

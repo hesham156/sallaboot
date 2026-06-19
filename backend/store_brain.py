@@ -111,7 +111,7 @@ def get_overview(store_id: str) -> dict:
     """
     cache = sm.get_cache(store_id) or {}
     products  = cache.get("products", [])
-    available = [p for p in products if p.get("status") != "hidden"]
+    available = sm.bot_visible_products(store_id)
     categories = cache.get("categories", [])
     last_sync  = cache.get("last_sync", "never")
     store_info = cache.get("store_info") or {}
@@ -288,8 +288,7 @@ def _build_category_map(store_id: str, max_examples_per_cat: int = 3) -> str:
     Per-category lines: 'كروت شخصية (12 منتج، 5-150 ريال): مثل …'
     Compact and high-signal — gives the AI a navigable map of the catalog.
     """
-    cache = sm.get_cache(store_id) or {}
-    products = [p for p in cache.get("products", []) if p.get("status") != "hidden"]
+    products = sm.bot_visible_products(store_id)
     if not products:
         return ""
 
@@ -334,8 +333,7 @@ def _build_top_products(store_id: str, budget_chars: int) -> str:
     List as many products as fit in `budget_chars` with name+price+status.
     Stops cleanly at a product boundary.
     """
-    cache = sm.get_cache(store_id) or {}
-    products = [p for p in cache.get("products", []) if p.get("status") != "hidden"]
+    products = sm.bot_visible_products(store_id)
     if not products or budget_chars <= 100:
         return ""
 
@@ -376,8 +374,7 @@ def search_by_category(store_id: str, category_name: str, limit: int = 20) -> li
     Return all products in a category (case-insensitive substring match).
     Used by the agent's `search_by_category` tool.
     """
-    cache = sm.get_cache(store_id) or {}
-    products = [p for p in cache.get("products", []) if p.get("status") != "hidden"]
+    products = sm.bot_visible_products(store_id)
     needle = (category_name or "").strip().lower()
     if not needle:
         return []

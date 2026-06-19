@@ -345,6 +345,41 @@ def get_cache(store_id: str) -> dict:
     return _registry.get(str(store_id), {}).get("cache", {})
 
 
+def get_excluded_categories(store_id: str) -> set[str]:
+    """Lower-cased set of category names the admin hid from the bot (ai_config
+    `excluded_categories`). Products in these categories are treated as if
+    hidden for every customer-facing/discovery path."""
+    cfg = get_ai_config(store_id) or {}
+    return {
+        str(c).strip().lower()
+        for c in (cfg.get("excluded_categories") or [])
+        if str(c).strip()
+    }
+
+
+def bot_visible_products(store_id: str) -> list[dict]:
+    """
+    The products the bot is allowed to surface to a customer: not `hidden`
+    and not belonging to an admin-excluded category. This is the single
+    choke-point used by every discovery/knowledge path (catalogue summary,
+    suggest_products, category map, overview…). Direct by-id lookups for an
+    existing order or a product the customer already named deliberately
+    bypass this — exclusion controls discovery, not record retrieval.
+    """
+    cache = get_cache(store_id) or {}
+    excluded = get_excluded_categories(store_id)
+    out: list[dict] = []
+    for p in cache.get("products", []):
+        if p.get("status") == "hidden":
+            continue
+        if excluded and any(
+            (c or "").strip().lower() in excluded for c in (p.get("categories") or [])
+        ):
+            continue
+        out.append(p)
+    return out
+
+
 def set_cache(store_id: str, data: dict):
     store_id = str(store_id)
     if store_id not in _registry:

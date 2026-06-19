@@ -8,7 +8,7 @@ without dragging in the FastAPI app or its dependencies.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -92,6 +92,9 @@ class AIConfigRequest(BaseModel):
     ai_model:          Optional[str] = ""  # e.g. "gpt-4o", "llama-3.3-70b-versatile", "claude-sonnet-4-6"
     bot_name:          Optional[str] = ""
     store_type:        Optional[str] = None  # "printing" | "general" — gates printing features
+    # Category names hidden from the bot — products in these categories are never
+    # surfaced in discovery/knowledge paths. None = leave unchanged; [] = clear.
+    excluded_categories: Optional[List[str]] = None
     # WhatsApp Cloud API (Meta) — per-store channel config
     whatsapp_token:    Optional[str] = None  # access token (write-only; "" keeps existing)
     whatsapp_phone_id: Optional[str] = None  # Phone Number ID
