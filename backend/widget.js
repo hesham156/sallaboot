@@ -567,11 +567,28 @@
 
     var bubble = document.createElement("div");
     bubble.className = "bubble";
-    // Basic markdown bold support + XSS protection
-    bubble.innerHTML = String(text || "")
+    // Escape first (XSS protection), then re-introduce a safe, controlled set of
+    // rich elements: **bold**, markdown links [label](url), and bare URLs. Links
+    // are restricted to http/https so escaped text can never break out of the
+    // href attribute (we also strip " and < from the URL match below).
+    var safe = String(text || "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    // Markdown links: [label](https://…) → clickable anchor.
+    safe = safe.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"]+)\)/g, function (_m, label, url) {
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+    });
+    // Bare URLs (not already inside an href="…") → clickable. The preceding
+    // char must be start-of-string, whitespace, or "(" so we never re-match a
+    // URL we just put inside an anchor attribute.
+    safe = safe.replace(/(^|[\s(])(https?:\/\/[^\s<"]+)/g, function (_m, pre, url) {
+      var trail = "";
+      var mt = url.match(/[).,!؟،؛'"]+$/);   // don't swallow trailing punctuation
+      if (mt) { trail = mt[0]; url = url.slice(0, url.length - trail.length); }
+      return pre + '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>' + trail;
+    });
+    bubble.innerHTML = safe;
     msg.appendChild(bubble);
     container.appendChild(msg);
     container.scrollTop = container.scrollHeight;
