@@ -1550,21 +1550,30 @@ async def find_employee_by_email_any_store(email: str) -> dict | None:
 async def purge_store(store_id: str) -> dict:
     """
     Delete ALL data for a store — called on app.uninstalled to comply with
-    Salla's data-privacy requirement that uninstalling removes merchant data.
-    Removes the store row plus its conversations, abandoned carts, uploads,
-    bot training, and webhook log. Returns a per-table deleted count.
+    Salla's data-privacy requirement that uninstalling removes merchant AND
+    customer data. Covers every table carrying a store_id column, including the
+    customer-PII ones (contacts: phone/name/email, bot_orders, wa_campaigns).
+    Deleting wa_campaigns cascades to wa_campaign_recipients via its FK.
+    Returns a per-table deleted count.
     """
     if not _pool:
         return {}
     counts: dict = {}
     tables = [
-        ("stores",          "store_id"),
-        ("conversations",   "store_id"),
-        ("abandoned_carts", "store_id"),
-        ("uploads",         "store_id"),
-        ("bot_training",    "store_id"),
-        ("webhook_log",     "store_id"),
-        ("employees",       "store_id"),
+        ("stores",                "store_id"),
+        ("conversations",         "store_id"),
+        ("abandoned_carts",       "store_id"),
+        ("uploads",               "store_id"),
+        ("bot_training",          "store_id"),
+        ("webhook_log",           "store_id"),
+        ("webhook_inbox",         "store_id"),
+        ("outbox",                "store_id"),
+        ("employees",             "store_id"),
+        ("contacts",              "store_id"),  # customer PII: phone/name/email
+        ("bot_orders",            "store_id"),
+        ("wa_campaigns",          "store_id"),  # cascades → wa_campaign_recipients
+        ("llm_usage",             "store_id"),
+        ("support_access_grants", "store_id"),
     ]
     try:
         async with _pool.acquire() as conn:
