@@ -26,7 +26,14 @@ router = APIRouter()
 
 SHOPIFY_CLIENT_ID     = os.getenv("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
-SHOPIFY_SCOPES        = "read_orders,read_products,read_customers,read_inventory,write_script_tags"
+SHOPIFY_SCOPES        = (
+    "read_orders,read_products,read_customers,read_inventory,write_script_tags,"
+    # Catalogue-context + abandoned-cart parity with Salla. read_checkouts is
+    # required for the abandoned-checkout poll; the rest feed the bot's knowledge
+    # (locations/branches, shipping zones, discounts). Adding scopes means
+    # already-connected stores must reconnect to grant them.
+    "read_checkouts,read_locations,read_shipping,read_price_rules"
+)
 # Trailing slash matters: redirect_uri must EXACTLY match the URL registered
 # in the Salla/Shopify/Zid dashboards. A BASE_URL like "https://7ayak.app/"
 # would make redirect_uri "https://7ayak.app//integrations/zid/callback"

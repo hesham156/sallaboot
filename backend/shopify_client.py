@@ -131,6 +131,21 @@ class ShopifyClient:
         data = await self._get("/checkouts.json", params)
         return data.get("checkouts", []) or []
 
+    async def get_locations(self) -> list[dict]:
+        """Store locations / branches (id, name, address, city, country, phone)."""
+        data = await self._get("/locations.json")
+        return data.get("locations", []) or []
+
+    async def get_shipping_zones(self) -> list[dict]:
+        """Shipping zones (name + the countries/provinces each covers)."""
+        data = await self._get("/shipping_zones.json")
+        return data.get("shipping_zones", []) or []
+
+    async def get_price_rules(self, limit: int = 100) -> list[dict]:
+        """Discounts / promotions (price rules) — surfaced to the bot as offers."""
+        data = await self._get("/price_rules.json", {"limit": min(int(limit or 100), 250)})
+        return data.get("price_rules", []) or []
+
     # ── Customers ─────────────────────────────────────────────────────────────
 
     async def get_all_customers(self) -> list[dict]:

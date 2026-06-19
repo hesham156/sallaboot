@@ -184,6 +184,66 @@ def format_shopify_order(o: dict) -> dict:
     }
 
 
+# ── Catalogue-context formatters (→ the shared cache shapes the bot reads) ─────
+
+def _format_location(loc: dict) -> dict:
+    addr = " ".join(p for p in [loc.get("address1", ""), loc.get("address2", "")] if p).strip()
+    return {
+        "id":      loc.get("id"),
+        "name":    loc.get("name", ""),
+        "city":    loc.get("city", ""),
+        "country": loc.get("country_name") or loc.get("country", ""),
+        "address": addr,
+        "phone":   loc.get("phone", ""),
+    }
+
+
+def _format_shipping_zone(z: dict) -> dict:
+    countries = z.get("countries") or []
+    country_names = [c.get("name", "") for c in countries if c.get("name")]
+    provinces = [
+        p.get("name", "")
+        for c in countries
+        for p in (c.get("provinces") or [])
+        if p.get("name")
+    ]
+    return {
+        "id":      z.get("id"),
+        "name":    z.get("name", ""),
+        "country": ", ".join(country_names),
+        "cities":  provinces,
+        "status":  "active",
+    }
+
+
+def _format_price_rule(r: dict) -> dict | None:
+    """Map a Shopify price rule → the shared offer shape. Returns None if expired."""
+    ends_at = r.get("ends_at")
+    if ends_at:
+        try:
+            if datetime.fromisoformat(ends_at.replace("Z", "+00:00")) < datetime.now(timezone.utc):
+                return None
+        except Exception:
+            pass
+    vtype = r.get("value_type", "")
+    raw   = str(r.get("value", "")).lstrip("-")
+    if vtype == "percentage":
+        message = f"خصم {raw}%"
+    elif vtype == "fixed_amount":
+        message = f"خصم {raw}"
+    else:
+        message = r.get("title", "")
+    return {
+        "id":         r.get("id"),
+        "name":       r.get("title", ""),
+        "type":       vtype,
+        "message":    message,
+        "applied_to": r.get("target_selection", ""),
+        "start_date": r.get("starts_at", "") or "",
+        "end_date":   ends_at or "",
+    }
+
+
 # ── Full sync ─────────────────────────────────────────────────────────────────
 
 async def sync_shopify_store(store_id: str, shop: str, access_token: str) -> dict:
@@ -233,6 +293,31 @@ async def sync_shopify_store(store_id: str, shop: str, access_token: str) -> dic
         p["_shop"] = shop
         products.append(format_shopify_product(p, currency=currency))
 
+    # ── Branches / shipping / offers (parity with Salla's catalogue sync, so
+    #    the bot can answer "where are you?" / "how do you ship?" / "any offers?").
+    #    Each is best-effort: a missing scope (403) must not break the product sync.
+    branches: list[dict] = []
+    try:
+        branches = [_format_location(loc) for loc in await client.get_locations()]
+    except Exception as e:
+        errors.append(f"locations: {e}")
+        print(f"[shopify_sync] locations error: {e}")
+
+    shipping_zones: list[dict] = []
+    try:
+        shipping_zones = [_format_shipping_zone(z) for z in await client.get_shipping_zones()]
+    except Exception as e:
+        errors.append(f"shipping_zones: {e}")
+        print(f"[shopify_sync] shipping_zones error: {e}")
+
+    special_offers: list[dict] = []
+    try:
+        special_offers = [_format_price_rule(r) for r in await client.get_price_rules()]
+        special_offers = [o for o in special_offers if o]   # drop expired
+    except Exception as e:
+        errors.append(f"price_rules: {e}")
+        print(f"[shopify_sync] price_rules error: {e}")
+
     # ── Save cache ────────────────────────────────────────────────────────────
     cache = {
         "products":           products,
@@ -241,10 +326,10 @@ async def sync_shopify_store(store_id: str, shop: str, access_token: str) -> dic
         "store_info":         shop_info,
         "shipping_companies": [],
         "brands":             [],
-        "special_offers":     [],
-        "branches":           [],
-        "payment_methods":    [],
-        "shipping_zones":     [],
+        "special_offers":     special_offers,
+        "branches":           branches,
+        "payment_methods":    [],   # Shopify has no clean REST list of enabled gateways
+        "shipping_zones":     shipping_zones,
         "products_count":     len(products),
         "last_sync":          datetime.now(timezone.utc).isoformat(),
         "last_sync_errors":   errors,
