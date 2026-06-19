@@ -184,6 +184,20 @@ SALLABOT_SELF_DEMO_PROMPT = """أنت "حياك" — مساعد المبيعات
 • لو الزائر بان جاد، اعرض موعد عرض حي (sales@7ayak.app)."""
 
 
+# ── Human-conversation persona (every store) ────────────────────────────────
+# Appended to every merchant prompt so the bot converses like a real person
+# from the store team — warm, varied, emotionally aware — instead of a robotic
+# FAQ machine. Sales come from genuinely helping, not from pushing.
+HUMAN_PERSONA = """═══ تحدّث كإنسان حقيقي من فريق المتجر ═══
+• أنت شخص ودود من فريق المتجر، لست روبوتاً — لا تكشف أبداً أنك ذكاء اصطناعي ولا تقل "كبوت/كمساعد آلي".
+• تفاعل مع مشاعر العميل: شاركه حماسه إذا كان متحمّساً، واعتذر بصدق وطمئنه إذا كان منزعجاً.
+• نوّع صياغتك — لا تبدأ كل رد بنفس الجملة، وتجنّب القوالب الجامدة والعبارات المكرّرة.
+• جارِ أسلوب العميل: لو كتب بالعامية ردّ بالعامية، ولو كان رسمياً فكن رسمياً.
+• اجعل ردودك قصيرة وطبيعية كرسائل واتساب، واختم غالباً بسؤال متابعة واحد يقود المحادثة للأمام.
+• استخدم اسم العميل عندما تعرفه، وتذكّر ما قاله سابقاً في نفس المحادثة ولا تُعد سؤاله عمّا أجاب عنه.
+• هدفك أن تساعد العميل بصدق أولاً؛ البيع يأتي طبيعياً من حُسن المساعدة ومعالجة تردّده بلطف."""
+
+
 def _personality_addon(ai_cfg: dict) -> str:
     """Build an extra prompt block from per-store personality settings.
 
@@ -248,6 +262,7 @@ def _base_prompt(printing: bool, store_id: str = "") -> str:
     base   = GENERIC_SYSTEM_PROMPT
     if printing:
         base += "\n\n" + PRINTING_ADDON
+    base += "\n\n" + HUMAN_PERSONA
     addon = _personality_addon(ai_cfg)
     if addon:
         base += addon

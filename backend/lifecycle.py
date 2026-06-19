@@ -161,6 +161,34 @@ async def periodic_flush_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def learning_loop() -> None:
+    """
+    Every 6h (leader-elected): mine each store's conversations for auto-learning
+    suggestions — pending FAQ drafts from repeated questions + weak-spot lessons
+    from negative reactions — and refresh the cached customer-insights prompt
+    block. Every suggestion is saved DISABLED; it only reaches the bot after the
+    admin approves it on the "تدريب البوت" page (same safety gate as corrections).
+    """
+    await asyncio.sleep(300)          # let startup settle
+    while True:
+        try:
+            if db.available() and await db.try_lead("learning_mine", WORKER_ID, ttl_seconds=6 * 3600):
+                import bot_learning as bl
+                stores = [s["store_id"] for s in sm.list_stores()]
+                total = 0
+                for sid in stores:
+                    try:
+                        total += await bl.mine_store(sid)
+                    except Exception:
+                        log.exception("learning_mine_store_failed", extra={"store_id": sid})
+                if total:
+                    print(f"[learning] 🧠 {total} new pending suggestion(s) across "
+                          f"{len(stores)} store(s) (leader={WORKER_ID})")
+        except Exception:
+            log.exception("learning_loop_top_level_error")
+        await asyncio.sleep(6 * 3600)
+
+
 async def periodic_cleanup_loop() -> None:
     """
     Every 6h: prune the small bookkeeping tables. Leader-elected with a
@@ -398,6 +426,7 @@ async def startup() -> None:
         asyncio.create_task(followup_loop())
         asyncio.create_task(campaign_scheduler_loop())
         asyncio.create_task(abandoned_cart_loop())
+        asyncio.create_task(learning_loop())
         print("[startup] 🔄💾🧹 Periodic loops registered (leader-elected)")
     else:
         print("[startup] ⏸ Periodic loops disabled (ENABLE_PERIODIC=false)")

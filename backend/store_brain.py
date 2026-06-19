@@ -409,10 +409,21 @@ async def get_knowledge_for_prompt_async(store_id: str) -> str:
     except Exception as exc:
         print(f"[store_brain] training block failed for {store_id!r}: {exc}")
         training = ""
-    if training:
-        # Training comes RIGHT AFTER store profile + custom knowledge so the
-        # bot sees it before the bulkier product catalogue.
-        return base + "\n\n" + training if base else training
+
+    # Auto-learned customer-insights block (refreshed by the learning loop and
+    # cached on the store). Cheap to read — no recompute per request.
+    insights = ""
+    try:
+        insights = (sm.get_ai_config(store_id) or {}).get("learned_insights_block", "") or ""
+        insights = insights.strip()
+    except Exception:
+        insights = ""
+
+    extra = "\n\n".join(b for b in (training, insights) if b)
+    if extra:
+        # Training + insights come RIGHT AFTER store profile + custom knowledge
+        # so the bot sees them before the bulkier product catalogue.
+        return base + "\n\n" + extra if base else extra
     return base
 
 
