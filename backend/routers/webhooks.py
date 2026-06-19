@@ -1126,6 +1126,38 @@ async def _handle_shopify_customer_created(store_id: str, data: dict):
     await _wa_send(store_id, cfg, phone, msg)
 
 
+async def _handle_shopify_fulfillment(store_id: str, data: dict):
+    """fulfillments/create — order shipped → WhatsApp tracking to the customer
+    (parity with Salla's shipment.created)."""
+    order_ref = data.get("name") or f"#{data.get('order_id', '')}"
+    company   = data.get("tracking_company") or ""
+    tracking  = data.get("tracking_number") or (data.get("tracking_numbers") or [""])[0] or ""
+    track_url = data.get("tracking_url") or (data.get("tracking_urls") or [""])[0] or ""
+    dest      = data.get("destination") or {}
+    phone     = _normalize_phone(dest.get("phone") or data.get("phone") or "")
+    name      = dest.get("name") or _extract_name(dest) or "عزيزي العميل"
+
+    _log_event(store_id, "shopify:fulfillments/create", "ok",
+               f"order={order_ref} tracking={tracking} company={company}")
+    if not phone:
+        return
+    cfg        = sm.get_ai_config(store_id) or {}
+    store_info = sm.get_store_info(store_id) or {}
+    store_name = store_info.get("store_name", "متجرنا")
+    msg = (
+        f"أهلاً {name} 🚚\n"
+        f"تم شحن طلبك {order_ref} من {store_name}!\n\n"
+    )
+    if company:
+        msg += f"شركة الشحن: {company}\n"
+    if tracking:
+        msg += f"رقم التتبع: *{tracking}*\n"
+    if track_url:
+        msg += f"رابط التتبع: {track_url}\n"
+    msg += "\nيمكنك تتبع شحنتك للاطلاع على موعد التسليم. 📦"
+    await _wa_send(store_id, cfg, phone, msg)
+
+
 async def process_shopify_event(topic: str, store_id: str, data: dict) -> None:
     """
     Single dispatch point for Shopify webhook topics — called by the inbox
@@ -1137,6 +1169,9 @@ async def process_shopify_event(topic: str, store_id: str, data: dict) -> None:
         return
     if topic == "app/uninstalled":
         await _handle_shopify_uninstall(store_id, data)
+        return
+    if topic == "fulfillments/create":
+        await _handle_shopify_fulfillment(store_id, data)
         return
     if topic in ("products/create", "products/update"):
         await _handle_shopify_product(store_id, data, deleted=False)

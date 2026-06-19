@@ -296,6 +296,7 @@ _WEBHOOK_TOPICS = [
     "products/delete",
     "orders/create",
     "orders/updated",
+    "fulfillments/create",
     "customers/create",
     "app/uninstalled",
 ]
