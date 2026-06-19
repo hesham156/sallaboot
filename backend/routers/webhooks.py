@@ -693,19 +693,69 @@ async def _recovery_coupon_line(store_id: str, cfg: dict) -> str:
     return line
 
 
+async def record_abandoned_cart(store_id: str, notification: dict, *, phone: str = "") -> bool:
+    """
+    Persist an abandoned cart and — ONLY when it's newly seen — email the owner
+    and WhatsApp the customer a recovery reminder. Shared by every platform
+    (Salla webhook, Shopify poller, …) so the dashboard + notifications behave
+    identically. Returns True if the cart was newly recorded.
+
+    The newly-seen gate (db.save_abandoned_cart returns False on conflict) is
+    what makes the Shopify poller safe to run every few minutes without
+    re-spamming the same customer.
+    """
+    cart_id = str(notification.get("id", ""))
+    if not cart_id:
+        return False
+    if not await db.save_abandoned_cart(store_id, cart_id, notification):
+        return False  # already recorded — don't double-notify
+
+    total_str = f"{notification.get('total', '—')} {notification.get('currency', 'SAR')}"
+    _log_event(store_id, "abandoned.cart", "ok",
+               f"cart_id={cart_id}  customer={notification.get('customer_name', '—')}  total={total_str}")
+    print(f"[abandoned_cart] 🛒 {cart_id!r} — {notification.get('customer_name', '—')} — "
+          f"{total_str} — store={store_id!r}")
+
+    asyncio.create_task(_notif.notify(store_id, "abandoned_cart", {
+        "customer_name": notification.get("customer_name", "—"),
+        "cart_total":    total_str,
+    }))
+
+    # WhatsApp recovery reminder to the customer
+    if phone and phone != "—":
+        cfg        = sm.get_ai_config(store_id) or {}
+        store_info = sm.get_store_info(store_id) or {}
+        store_name = store_info.get("store_name", "متجرنا")
+        name       = (notification.get("customer_name") or "").strip() or "عزيزي العميل"
+        checkout   = notification.get("checkout_url", "")
+
+        msg = (
+            f"مرحباً {name} 👋\n"
+            f"لاحظنا أنك تركت سلة التسوق في {store_name} بدون إتمام الطلب.\n\n"
+            f"إجمالي سلتك: *{total_str}*\n"
+        )
+        coupon_line = await _recovery_coupon_line(store_id, cfg)
+        if coupon_line:
+            msg += f"\n🎁 {coupon_line}\n"
+        if checkout:
+            msg += f"\nأكمل طلبك الآن: {checkout}"
+        msg += "\n\nنحن هنا لمساعدتك إذا كان لديك أي استفسار 😊"
+        asyncio.create_task(_wa_send(store_id, cfg, phone, msg))
+
+    return True
+
+
 async def _handle_abandoned_cart(merchant_id: str, data: dict):
     """
-    abandoned.cart — customer added items but didn't complete checkout.
-    Persists to abandoned_carts (admin dashboard reads it) and fires a
-    notify_event so the store owner gets an email if they're subscribed.
+    abandoned.cart (Salla) — customer added items but didn't complete checkout.
+    Normalises the payload and hands off to the shared recorder.
     """
     store_id = merchant_id or "default"
-    cart_id  = str(data.get("id", ""))
     customer = data.get("customer") or {}
     total    = data.get("total")    or {}
 
     notification = {
-        "id":             cart_id,
+        "id":             str(data.get("id", "")),
         "ts":             _dt.datetime.utcnow().isoformat() + "Z",
         "customer_name":  customer.get("name", "—"),
         "customer_phone": customer.get("mobile", customer.get("phone", "—")),
@@ -718,52 +768,44 @@ async def _handle_abandoned_cart(merchant_id: str, data: dict):
         "status":         data.get("status", "active"),
         "recovered":      False,
     }
-
-    if cart_id:
-        await db.save_abandoned_cart(store_id, cart_id, notification)
-
-    _log_event(
-        store_id, "abandoned.cart", "ok",
-        f"cart_id={cart_id}  customer={notification['customer_name']}  "
-        f"total={notification['total']} {notification['currency']}"
-    )
-    print(
-        f"[webhook] 🛒 Abandoned cart {cart_id!r} — "
-        f"{notification['customer_name']} — "
-        f"{notification['total']} {notification['currency']} — "
-        f"store={store_id!r}"
-    )
-
-    asyncio.create_task(_notif.notify(store_id, "abandoned_cart", {
-        "customer_name": notification["customer_name"],
-        "cart_total":    f"{notification['total']} {notification['currency']}",
-    }))
-
-    # WhatsApp reminder to the customer
     phone = _extract_phone(customer) or notification["customer_phone"]
-    if phone and phone != "—":
-        cfg        = sm.get_ai_config(store_id) or {}
-        store_info = sm.get_store_info(store_id) or {}
-        store_name = store_info.get("store_name", "متجرنا")
-        name       = customer.get("name", "").strip() or "عزيزي العميل"
-        total_str  = f"{notification['total']} {notification['currency']}"
-        checkout   = notification["checkout_url"]
+    await record_abandoned_cart(store_id, notification, phone=phone)
 
-        msg = (
-            f"مرحباً {name} 👋\n"
-            f"لاحظنا أنك تركت سلة التسوق في {store_name} بدون إتمام الطلب.\n\n"
-            f"إجمالي سلتك: *{total_str}*\n"
-        )
-        # Optional AI recovery coupon (opt-in per store) — created before the
-        # checkout link so the customer sees the incentive right next to it.
-        coupon_line = await _recovery_coupon_line(store_id, cfg)
-        if coupon_line:
-            msg += f"\n🎁 {coupon_line}\n"
-        if checkout:
-            msg += f"\nأكمل طلبك الآن: {checkout}"
-        msg += "\n\nنحن هنا لمساعدتك إذا كان لديك أي استفسار 😊"
 
-        asyncio.create_task(_wa_send(store_id, cfg, phone, msg))
+def shopify_checkout_to_notification(checkout: dict) -> tuple:
+    """
+    Map a Shopify abandoned checkout → the shared abandoned-cart notification
+    shape. Returns (notification, phone). Used by the Shopify poller.
+    """
+    customer = checkout.get("customer") or {}
+    name = (
+        _extract_name(customer)
+        or (checkout.get("billing_address") or {}).get("name", "")
+        or "—"
+    )
+    phone = _normalize_phone(
+        checkout.get("phone")
+        or customer.get("phone")
+        or (checkout.get("billing_address") or {}).get("phone")
+        or (checkout.get("shipping_address") or {}).get("phone")
+        or ""
+    )
+    notification = {
+        "id":             str(checkout.get("id") or checkout.get("token") or ""),
+        "ts":             checkout.get("updated_at") or checkout.get("created_at")
+                          or (_dt.datetime.utcnow().isoformat() + "Z"),
+        "customer_name":  name,
+        "customer_phone": phone or "—",
+        "customer_email": checkout.get("email") or customer.get("email") or "—",
+        "total":          str(checkout.get("total_price") or "—"),
+        "currency":       checkout.get("currency") or checkout.get("presentment_currency") or "SAR",
+        "items_count":    len(checkout.get("line_items") or []),
+        "age_minutes":    0,
+        "checkout_url":   checkout.get("abandoned_checkout_url", ""),
+        "status":         "active",
+        "recovered":      False,
+    }
+    return notification, phone
 
 
 async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:

@@ -301,6 +301,43 @@ _WEBHOOK_TOPICS = [
 ]
 
 
+async def poll_abandoned_checkouts(lookback_hours: int = 48) -> int:
+    """
+    Sweep every connected Shopify store for abandoned checkouts and record the
+    newly-seen ones (dashboard row + owner email + customer WhatsApp) — the
+    parity equivalent of Salla's abandoned.cart webhook. Shopify has no
+    abandoned webhook, so this is polled on a schedule by lifecycle.
+
+    Returns the number of newly-recorded carts. Per-store failures are isolated.
+    """
+    from datetime import timedelta
+    # Lazy import to avoid a module-load cycle (webhooks → store_sync → …).
+    from routers.webhooks import record_abandoned_cart, shopify_checkout_to_notification
+
+    stores = await db.list_stores_with_integration("shopify")
+    if not stores:
+        return 0
+    created_min = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+    total_new = 0
+    for store_id, cfg in stores:
+        shop  = (cfg or {}).get("shop", "")
+        token = (cfg or {}).get("access_token", "")
+        if not shop or not token:
+            continue
+        try:
+            client    = ShopifyClient(shop, token, store_id=store_id)
+            checkouts = await client.get_abandoned_checkouts(created_at_min=created_min)
+            for co in checkouts:
+                notification, phone = shopify_checkout_to_notification(co)
+                if notification["id"] and await record_abandoned_cart(store_id, notification, phone=phone):
+                    total_new += 1
+        except Exception as e:
+            print(f"[shopify_sync] abandoned-cart poll failed for {store_id!r}: {e}")
+    if total_new:
+        print(f"[shopify_sync] 🛒 {total_new} new abandoned checkout(s) recorded across {len(stores)} store(s)")
+    return total_new
+
+
 async def register_shopify_webhooks(shop: str, access_token: str, store_id: str, base_url: str):
     """Register all required Shopify webhooks pointing to our handler endpoint."""
     client = ShopifyClient(shop, access_token, store_id=store_id)

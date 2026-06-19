@@ -115,6 +115,22 @@ class ShopifyClient:
         data = await self._get(f"/orders/{order_id}.json")
         return data.get("order", {})
 
+    async def get_abandoned_checkouts(
+        self, created_at_min: str | None = None, limit: int = 250
+    ) -> list[dict]:
+        """
+        Fetch abandoned checkouts (the customer started checkout but never
+        completed an order). Shopify has no 'abandoned' webhook — it marks a
+        checkout abandoned server-side after a delay — so we poll this endpoint.
+        Each item carries customer/email/phone, line_items, total_price, and
+        abandoned_checkout_url.
+        """
+        params: dict = {"limit": min(int(limit or 250), 250), "status": "open"}
+        if created_at_min:
+            params["created_at_min"] = created_at_min
+        data = await self._get("/checkouts.json", params)
+        return data.get("checkouts", []) or []
+
     # ── Customers ─────────────────────────────────────────────────────────────
 
     async def get_all_customers(self) -> list[dict]:

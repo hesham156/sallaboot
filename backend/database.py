@@ -1746,13 +1746,17 @@ async def save_conversation(session_id: str, store_id: str, data: dict):
 
 # ── Abandoned carts ────────────────────────────────────────────────────────────
 
-async def save_abandoned_cart(store_id: str, cart_id: str, cart_data: dict):
-    """Insert a new abandoned cart notification (ignore duplicate cart_ids)."""
+async def save_abandoned_cart(store_id: str, cart_id: str, cart_data: dict) -> bool:
+    """
+    Insert a new abandoned cart notification (ignore duplicate cart_ids).
+    Returns True only when a NEW row was inserted — callers use this to avoid
+    re-notifying (email/WhatsApp) the same cart on every poll/retry.
+    """
     if not _pool:
-        return
+        return False
     try:
         async with _pool.acquire() as conn:
-            await conn.execute(
+            r = await conn.execute(
                 """
                 INSERT INTO abandoned_carts (store_id, cart_id, cart_data)
                 VALUES ($1, $2, $3::jsonb)
@@ -1762,8 +1766,40 @@ async def save_abandoned_cart(store_id: str, cart_id: str, cart_data: dict):
                 cart_id,
                 json.dumps(cart_data, ensure_ascii=False, default=str),
             )
+        # asyncpg returns 'INSERT 0 1' on insert, 'INSERT 0 0' on conflict.
+        return bool(r) and r.split()[-1] == "1"
     except Exception as e:
         print(f"[db] save_abandoned_cart({cart_id!r}) error: {e}")
+        return False
+
+
+async def list_stores_with_integration(platform: str) -> list:
+    """
+    Return [(store_id, integration_cfg_dict), …] for every store that has the
+    given platform connected. Used by the abandoned-cart poller (and any other
+    per-platform background sweep) to enumerate live integrations.
+    """
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT store_id, integrations->$1 AS cfg FROM stores WHERE integrations ? $1",
+                platform,
+            )
+        out = []
+        for row in rows:
+            cfg = row["cfg"]
+            if isinstance(cfg, str):
+                try:
+                    cfg = json.loads(cfg)
+                except Exception:
+                    cfg = {}
+            out.append((row["store_id"], cfg or {}))
+        return out
+    except Exception as e:
+        print(f"[db] list_stores_with_integration({platform!r}) error: {e}")
+        return []
 
 
 async def load_abandoned_carts(store_id: str) -> list:

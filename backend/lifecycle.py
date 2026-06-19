@@ -196,6 +196,24 @@ async def periodic_cleanup_loop() -> None:
         await asyncio.sleep(6 * 3600)
 
 
+async def abandoned_cart_loop() -> None:
+    """
+    Every 30 min: poll connected platforms that don't push abandoned carts
+    (Shopify) and record newly-abandoned ones — dashboard row + owner email +
+    customer WhatsApp recovery, parity with Salla's abandoned.cart webhook.
+    Leader-elected so only one instance polls each store.
+    """
+    await asyncio.sleep(180)          # let startup settle
+    while True:
+        try:
+            if await db.try_lead("abandoned_cart_poll", WORKER_ID, ttl_seconds=1800):
+                import shopify_sync as _ss
+                await _ss.poll_abandoned_checkouts()
+        except Exception as exc:
+            print(f"[abandoned_cart] loop error: {exc}")
+        await asyncio.sleep(1800)
+
+
 async def campaign_scheduler_loop() -> None:
     """Every 60s: fire any scheduled campaigns whose time has come."""
     await asyncio.sleep(60)
@@ -377,6 +395,7 @@ async def startup() -> None:
         asyncio.create_task(periodic_cleanup_loop())
         asyncio.create_task(followup_loop())
         asyncio.create_task(campaign_scheduler_loop())
+        asyncio.create_task(abandoned_cart_loop())
         print("[startup] 🔄💾🧹 Periodic loops registered (leader-elected)")
     else:
         print("[startup] ⏸ Periodic loops disabled (ENABLE_PERIODIC=false)")
