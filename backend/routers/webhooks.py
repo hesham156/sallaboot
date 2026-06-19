@@ -300,6 +300,15 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
     if str(home) == str(store_id):
         return True, "already linked"
 
+    # Guard: the Salla store must already exist (created by app.store.authorize)
+    # before we move identity onto it. Without this, a link that arrives before
+    # the authorize webhook clears the home account's email + api_key while the
+    # SET on the not-yet-existent Salla store is a silent no-op (registry miss /
+    # 0-row UPDATE) — gutting the merchant's account so they can no longer log in
+    # by email, and leaving two orphaned rows. Bail out without touching anything.
+    if not sm.is_registered(store_id):
+        return False, "salla_store_not_ready"
+
     # Never hijack a live store that already runs on another platform.
     home_integrations = await db.get_integrations(home)
     if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):

@@ -220,6 +220,8 @@ async def salla_app_settings_validation(request: Request):
     msg = "تعذّر الربط — تأكد من بريدك الإلكتروني في حياك ومن نسخ مفتاح الربط بالكامل"
     if "another platform" in detail:
         msg = "حساب حياك مرتبط بمنصة تجارة إلكترونية أخرى بالفعل"
+    elif detail == "salla_store_not_ready":
+        msg = "لم يكتمل تثبيت التطبيق بعد — انتظر لحظات ثم احفظ مرة أخرى"
     return JSONResponse(status_code=422, content={
         "success": False,
         "message": msg,

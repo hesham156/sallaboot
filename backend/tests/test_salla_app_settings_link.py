@@ -44,10 +44,14 @@ class _DBStub:
 
 
 class _SMStub:
-    def __init__(self, pwd="argon2$home"):
+    def __init__(self, pwd="argon2$home", registered=True):
         self._pwd = pwd
+        self._registered = registered
         self.password_set: dict = {}
         self.reset: list = []
+
+    def is_registered(self, store_id):
+        return self._registered
 
     def get_store_info(self, store_id):
         return {"owner_email": "home@acct.com"}
@@ -110,6 +114,25 @@ async def test_links_by_api_key(patched):
     assert db.api_key_set["home_acct"] is None
     assert db.api_key_set["merchant_99"] == "7yk_K"
     assert sm.reset == ["merchant_99"]
+
+
+async def test_no_link_when_salla_store_not_yet_created(patched):
+    """
+    The critical guard: if the app-settings link arrives before the Salla store
+    exists (app.store.authorize not delivered yet), we must NOT clear the home
+    account's email/api_key — doing so gutted the merchant's login.
+    """
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
+        _SMStub(registered=False),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
+    )
+    # home account untouched — nothing moved or cleared
+    assert db.owner_email_set == {}
+    assert db.api_key_set == {}
+    assert sm.password_set == {}
 
 
 async def test_falls_back_to_email_when_no_key(patched):
