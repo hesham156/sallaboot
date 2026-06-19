@@ -162,13 +162,31 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
         if _sync_task:
             asyncio.create_task(_sync_task(store_id, access_token))
 
-        resp = HTMLResponse(f"""
-        <html><body style='font-family:Arial;text-align:center;padding:60px;direction:rtl'>
-          <h2 style='color:#16a34a'>✅ تم ربط متجر "{store_name or store_id}" بنجاح!</h2>
-          <p>يمكنك إغلاق هذه الصفحة والعودة لاستخدام الشات بوت.</p>
-          <a href='/admin' style='color:#3b82f6'>← فتح لوحة التحكم</a>
-        </body></html>
-        """)
+        # Auto-login: the OAuth round-trip just proved this visitor controls the
+        # Salla store, so log them straight into its dashboard instead of leaving
+        # them at a password wall (after a reinstall the store's password is an
+        # unguessable default). This page is same-origin, so its inline JS can
+        # seed the exact localStorage keys the SPA reads on login, then redirect.
+        import json as _json
+        import html as _html
+        session_token = _auth.create_token(store_id)
+        safe_name = _html.escape(store_name or store_id)
+        resp = HTMLResponse(f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<title>تم الربط — جارٍ الدخول</title></head>
+<body style="font-family:system-ui,Arial,sans-serif;text-align:center;padding:60px;direction:rtl">
+  <h2 style="color:#16a34a">✅ تم ربط متجر "{safe_name}" — جارٍ الدخول…</h2>
+  <script>
+    try {{
+      localStorage.setItem('admin_token', {_json.dumps(session_token)});
+      localStorage.setItem('admin_store_id', {_json.dumps(str(store_id))});
+      localStorage.setItem('admin_is_super', 'false');
+      localStorage.removeItem('admin_employee');
+    }} catch (e) {{}}
+    location.replace('/store/' + encodeURIComponent({_json.dumps(str(store_id))}));
+  </script>
+  <noscript><a href="/store/{store_id}" style="color:#3b82f6">← فتح لوحة التحكم</a></noscript>
+</body></html>""")
         # State cookie consumed — invalidate it so it can't be reused.
         resp.delete_cookie(_OAUTH_STATE_COOKIE, path="/auth")
         return resp
