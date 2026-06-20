@@ -1613,7 +1613,8 @@ async def handle_whatsapp_message(msg: dict):
         sender   = msg.get("from", "")
         text     = msg.get("text", "")
 
-        print(f"[whatsapp] 📨 incoming: phone_id={phone_id!r} from={sender!r} text={text[:60]!r}")
+        # Log metadata only — never the message body (PII / message content, M-17).
+        print(f"[whatsapp] 📨 incoming: phone_id={phone_id!r} from={sender!r} chars={len(text)}")
 
         if not (phone_id and sender and text):
             print(f"[whatsapp] ⚠️ missing required fields — dropped")
@@ -1710,7 +1711,8 @@ async def handle_messenger_message(msg: dict):
         sender       = str(msg.get("from", "") or "")           # PSID / IGSID
         text         = msg.get("text", "")
 
-        print(f"[{channel}] 📨 incoming: recipient={recipient_id!r} from={sender!r} text={text[:60]!r}")
+        # Log metadata only — never the message body (PII / message content, M-17).
+        print(f"[{channel}] 📨 incoming: recipient={recipient_id!r} from={sender!r} chars={len(text)}")
         if not (recipient_id and sender and text):
             return
 

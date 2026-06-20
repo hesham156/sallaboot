@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -155,6 +156,95 @@ def _format_value(v: Any) -> str:
     return s
 
 
+# ── PII / secret redaction (M-17) ────────────────────────────────────────
+# Logs are a secondary data store: phone numbers, emails, and access tokens
+# must not land in them in the clear (GDPR data-minimisation). redact() masks
+# the common shapes, and is applied two ways:
+#   • RedactingFilter — scrubs every structured log record before formatting.
+#   • _RedactingStream — wraps stdout/stderr in production so plain print()
+#     debug lines are covered too (skipped under pytest — see setup_logging).
+# Free-form message *bodies* can't be detected by pattern; those call sites
+# must avoid logging the content (e.g. log a length instead).
+
+# Phones: 11+ digit runs (E.164 WhatsApp ids are ~12). The >=11 threshold
+# deliberately spares 9-10 digit Salla store ids so logs stay greppable.
+_PHONE_RE  = re.compile(r"\+?\d{11,}")
+_EMAIL_RE  = re.compile(r"([A-Za-z0-9])[A-Za-z0-9._%+\-]*@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
+_TOKEN_RE  = re.compile(r"\b(?:7yk_|gsk_|sk-ant-|sk-proj-|sk-|EAA|xoxb-)[A-Za-z0-9._\-]{6,}")
+_BEARER_RE = re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")
+
+
+def redact(s: str) -> str:
+    """Mask emails, phone numbers, and access tokens. Best-effort + defensive —
+    returns the input unchanged on any error or non-str input."""
+    if not isinstance(s, str) or not s:
+        return s
+    try:
+        s = _BEARER_RE.sub("Bearer <redacted>", s)
+        s = _TOKEN_RE.sub("<redacted-token>", s)
+        s = _EMAIL_RE.sub(lambda m: f"{m.group(1)}***@{m.group(2)}", s)
+        s = _PHONE_RE.sub(lambda m: "***" + re.sub(r"\D", "", m.group(0))[-4:], s)
+        return s
+    except Exception:
+        return s
+
+
+class RedactingFilter(logging.Filter):
+    """Scrub PII/secrets from every log record before it is formatted."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = redact(record.msg)
+            if record.args:
+                if isinstance(record.args, dict):
+                    record.args = {
+                        k: (redact(v) if isinstance(v, str) else v)
+                        for k, v in record.args.items()
+                    }
+                else:
+                    record.args = tuple(
+                        redact(a) if isinstance(a, str) else a for a in record.args
+                    )
+            for k, v in list(record.__dict__.items()):
+                if k not in _STANDARD_RECORD_FIELDS and isinstance(v, str):
+                    record.__dict__[k] = redact(v)
+        except Exception:
+            pass
+        return True
+
+
+class _RedactingStream:
+    """Transparent stdout/stderr wrapper that redacts everything written — so
+    plain print() is scrubbed as well as the logging handler. Delegates all
+    other attributes to the wrapped stream."""
+
+    _is_redacting = True
+
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+
+    def write(self, s):
+        try:
+            return self._wrapped.write(redact(s) if isinstance(s, str) else s)
+        except Exception:
+            return self._wrapped.write(s)
+
+    def flush(self):
+        return self._wrapped.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+
+def _install_stream_redaction() -> None:
+    """Wrap sys.stdout / sys.stderr once so all output is redacted."""
+    for attr in ("stdout", "stderr"):
+        stream = getattr(sys, attr, None)
+        if stream is not None and not getattr(stream, "_is_redacting", False):
+            setattr(sys, attr, _RedactingStream(stream))
+
+
 # ── Setup ───────────────────────────────────────────────────────────────
 
 _setup_done = False
@@ -179,8 +269,16 @@ def setup_logging() -> None:
     fmt = (os.getenv("LOG_FORMAT", "text") or "text").strip().lower()
     formatter: logging.Formatter = JsonFormatter() if fmt == "json" else TextFormatter()
 
+    # M-17: redact stdout/stderr in production so plain print() debug lines are
+    # scrubbed too. Skipped under pytest — wrapping pytest's captured streams
+    # interferes with capsys, and the RedactingFilter below still exercises the
+    # redaction logic in tests.
+    if "pytest" not in sys.modules:
+        _install_stream_redaction()
+
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
+    handler.addFilter(RedactingFilter())
 
     root = logging.getLogger()
     # Clear any handlers the application or a test fixture added at import

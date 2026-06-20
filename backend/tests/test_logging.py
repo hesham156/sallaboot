@@ -209,18 +209,17 @@ def test_stopwatch_measures_elapsed_ms():
     assert sw.ms <  200   # nothing pathological
 
 
-# ── Defensive: secret-shaped values pass through unchanged ────────────────
+# ── Redaction: secret-shaped values are masked in logs (M-17) ─────────────
 
-def test_secret_value_not_split_or_escaped_in_json():
+def test_secret_value_is_redacted_in_json():
     """
-    Smoke check: an api-key-shaped string in extras lands in the JSON
-    record as ONE value, not split across multiple fields. If a future
-    refactor breaks this, we'd risk leaking a secret across log lines.
-    The test does NOT assert we SHOULD log secrets — callers must avoid
-    that themselves. It just protects against a bizarre formatter bug.
+    M-17: an api-key-shaped string in extras must be REDACTED before it hits
+    the log sink (it used to pass through unchanged). The RedactingFilter runs
+    on every record, so the secret never lands in the clear.
     """
     log, buf = _capture_log_output(fmt="json")
-    fake_secret = "sk-abcdef0123456789-XYZ_special.chars/AAA=="
+    fake_secret = "sk-abcdef0123456789-XYZ"
     log.warning("oddly_shaped_value", extra={"value": fake_secret})
     payload = json.loads(buf.getvalue().strip())
-    assert payload["value"] == fake_secret
+    assert "<redacted-token>" in payload["value"]
+    assert "abcdef0123456789" not in payload["value"]
