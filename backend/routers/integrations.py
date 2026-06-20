@@ -10,6 +10,7 @@ import hashlib
 import hmac as _hmac
 import json as _json
 import os
+import re
 import secrets
 import time
 from urllib.parse import urlencode
@@ -76,15 +77,37 @@ def _shopify_api(shop: str) -> str:
     return f"https://{shop}/admin/api/2024-01"
 
 
+# A Shopify shop domain is a single lowercase alphanumeric/hyphen label under
+# .myshopify.com — nothing else. Anchored so an embedded delimiter can't smuggle
+# a second host past the check.
+_SHOPIFY_SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
+
+
 def _normalize_shop(shop: str) -> str:
-    shop = shop.strip().lower().rstrip("/")
+    """Normalise + STRICTLY validate a Shopify shop domain.
+
+    Returns the canonical "<store>.myshopify.com". Raises HTTPException(400)
+    for anything that isn't a bare myshopify.com subdomain.
+
+    The previous check only did ``endswith(".myshopify.com")``, so a value like
+    "attacker.com#x.myshopify.com" (or ".../path", "user@evil", "host:port")
+    passed — yet, placed into ``https://{shop}/...``, the fragment/userinfo made
+    the real host attacker.com (SSRF / open-redirect, finding M-13). We now strip
+    every delimiter that could introduce a second host and validate the result
+    against a strict anchored pattern.
+    """
+    shop = (shop or "").strip().lower().rstrip("/")
     for prefix in ("https://", "http://", "https//", "http//"):
         if shop.startswith(prefix):
             shop = shop[len(prefix):]
             break
-    shop = shop.split("/")[0].split("?")[0]
-    if not shop.endswith(".myshopify.com"):
+    # Cut anything after a path/query/fragment, and drop any userinfo prefix.
+    shop = shop.split("/")[0].split("?")[0].split("#")[0].split("@")[-1]
+    # Lenient convenience: a bare handle ("mystore") → "mystore.myshopify.com".
+    if "." not in shop:
         shop = shop + ".myshopify.com"
+    if not _SHOPIFY_SHOP_RE.match(shop):
+        raise HTTPException(400, "نطاق متجر Shopify غير صالح")
     return shop
 
 
