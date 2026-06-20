@@ -393,6 +393,29 @@ async def subscribe_waba(token: str, waba_id: str) -> bool:
         return False
 
 
+async def unsubscribe_waba(token: str, waba_id: str) -> bool:
+    """
+    Inverse of subscribe_waba: detach THIS app from the merchant's WhatsApp
+    Business Account so Meta stops delivering their message webhooks to us.
+    DELETE /{waba_id}/subscribed_apps. Used on full disconnect so unlinking
+    from the app is a real unlink at Meta, not just clearing local creds.
+    Idempotent on Meta's side. Returns True on success; never raises.
+    """
+    if not (token and waba_id):
+        return False
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{waba_id}/subscribed_apps"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.delete(url, headers={"Authorization": f"Bearer {token}"})
+            if r.status_code >= 400:
+                print(f"[whatsapp] unsubscribe_waba {r.status_code}: {r.text[:200]}")
+                return False
+            return True
+    except Exception as exc:
+        print(f"[whatsapp] unsubscribe_waba error: {exc}")
+        return False
+
+
 def _split(text: str, limit: int) -> list[str]:
     if len(text) <= limit:
         return [text]

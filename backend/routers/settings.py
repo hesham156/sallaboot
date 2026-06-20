@@ -470,6 +470,20 @@ async def whatsapp_disconnect(store_id: str, request: Request):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     existing = sm.get_ai_config(store_id)
+
+    # Real unlink at Meta: detach our app from the merchant's WABA so Meta
+    # stops delivering their messages to us. Best-effort — done BEFORE we wipe
+    # the token/waba (we need them to call Meta). Never blocks the disconnect.
+    unsubscribed = False
+    token   = (existing.get("whatsapp_token")   or "").strip()
+    waba_id = (existing.get("whatsapp_waba_id") or "").strip()
+    if token and waba_id:
+        import whatsapp as _wa
+        try:
+            unsubscribed = await _wa.unsubscribe_waba(token, waba_id)
+        except Exception as exc:
+            print(f"[whatsapp] disconnect unsubscribe skipped: {exc}")
+
     config = dict(existing)
     config.update({
         "whatsapp_token":    "",
@@ -479,8 +493,14 @@ async def whatsapp_disconnect(store_id: str, request: Request):
     })
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
-    await audit(request, "whatsapp_disconnect", target_store=store_id)
-    return {"status": "ok", "message": "تم إلغاء ربط واتساب"}
+    await audit(request, "whatsapp_disconnect", target_store=store_id,
+                details={"meta_unsubscribed": unsubscribed})
+    return {
+        "status":  "ok",
+        "message": "تم إلغاء ربط واتساب" + ("" if unsubscribed or not waba_id
+                                            else " (لكن تعذّر إلغاء الاشتراك من Meta تلقائياً)"),
+        "meta_unsubscribed": unsubscribed,
+    }
 
 
 # ── AI Brain ──────────────────────────────────────────────────────────────────
