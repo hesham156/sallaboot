@@ -59,6 +59,11 @@ jobs:
       # grep the workflow file to see exactly what was set).
       ADMIN_SECRET:          ci-admin-secret-32-hex-bytes-stable-value
       SALLA_WEBHOOK_SECRET:  ci-test-webhook-secret
+      # Migration 0002 (encrypt existing secrets) hard-requires a Fernet key.
+      # Throwaway value — the test DB is ephemeral and dropped after the run;
+      # this is NOT a production key. Generate prod's with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      ENCRYPTION_KEY:        dibeThFsAhdbD_kJJXI6TaZfslSICCk7n7GwRgcgZD4=
       SUPER_ADMIN_EMAIL:     ci@admin.example
       SUPER_ADMIN_PASSWORD:  ci-super-pw
       BASE_URL:              https://ci.sallabot.example
@@ -158,6 +163,9 @@ jobs:
     env:
       DATABASE_URL: postgresql://test:test@localhost:5433/sallabot_alembic
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # Migration 0002 (and its downgrade) hard-require a Fernet key. Throwaway
+      # CI value — ephemeral DB, not a production key.
+      ENCRYPTION_KEY: dibeThFsAhdbD_kJJXI6TaZfslSICCk7n7GwRgcgZD4=
 
     steps:
       - uses: actions/checkout@v4
