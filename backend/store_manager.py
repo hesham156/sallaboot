@@ -690,3 +690,18 @@ async def set_admin_password(store_id: str, password_hash: str):
         print(f"[store_manager] Password updated for {store_id!r}")
     except Exception as e:
         print(f"[store_manager] Warning: could not save password file {store_id!r}: {e}")
+
+
+async def mark_password_changed(store_id: str) -> None:
+    """Stamp the moment the owner password changed (epoch seconds) so the auth
+    boundary rejects every owner token issued before now — session revocation on
+    password change (finding H-2). Persisted in the store's tokens JSON, so it is
+    NOT bumped by the silent argon2 rehash-on-login path (which would otherwise
+    log the user out on every login). Call this ONLY on an explicit change."""
+    import time as _t
+    store_id = str(store_id)
+    if store_id not in _registry:
+        return
+    tokens = _registry[store_id]["tokens"]
+    tokens["pwd_changed_at"] = int(_t.time())
+    await db.save_store(store_id, tokens)

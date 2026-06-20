@@ -300,12 +300,15 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
     store_id); a home account already running another platform is never
     touched. Shared by the app.settings.updated webhook and the validation URL.
     """
+    # Resolve the home account ONLY by the API key — it is the secret proof of
+    # ownership. Falling back to the (non-secret) email let an attacker who
+    # merely knew a victim's email resolve, hijack and clear that account
+    # (finding C-4). The email below is still used as data (to set the linked
+    # store's owner_email), never as the lookup credential.
     home = await db.find_store_by_api_key(api_key) if api_key else None
-    if not home and email:
-        home = await db.find_store_by_owner_email(email)
 
     if not home:
-        return False, "no 7ayak account matched the email/API key provided"
+        return False, "no 7ayak account matched the API key provided"
     if str(home) == str(store_id):
         return True, "already linked"
 
@@ -320,7 +323,7 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
 
     # Never hijack a live store that already runs on another platform.
     home_integrations = await db.get_integrations(home)
-    if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
+    if any(home_integrations.get(p) for p in ("salla", "shopify", "zid", "woocommerce")):
         return False, f"home account {home!r} already has another platform"
 
     # Move identity (email + password + API key) home → this Salla store.
@@ -1429,6 +1432,33 @@ async def whatsapp_verify(request: Request):
     raise HTTPException(403, "verify token mismatch")
 
 
+def _verify_meta_signature(body: bytes, headers) -> tuple[bool, str]:
+    """
+    Verify Meta's X-Hub-Signature-256 over the RAW request body using the app
+    secret (HMAC-SHA256). Mirrors _verify_signature / _verify_shopify_webhook:
+      - secret unset             → accept (dev mode only, loud warning)
+      - secret set + sig present  → strict verify
+      - secret set + sig absent   → REJECT
+
+    Meta signs EVERY webhook delivery, so a missing/invalid signature on a
+    configured app means the request did NOT come from Meta — i.e. a forged
+    inbound WhatsApp / Messenger / Instagram event (finding C-3).
+    """
+    secret = os.getenv("META_APP_SECRET", "")
+    if not secret:
+        log.warning("meta_webhook_no_secret_dev_mode")
+        return True, "no_secret_configured"
+    sig = headers.get("X-Hub-Signature-256", "")
+    if not sig:
+        log.warning("meta_webhook_signature_missing")
+        return False, "signature_required_but_absent"
+    expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        log.warning("meta_webhook_signature_mismatch", extra={"got_prefix": sig[:23]})
+        return False, "signature_mismatch"
+    return True, "signature_ok"
+
+
 @router.post("/whatsapp/webhook")
 async def meta_webhook(request: Request):
     """
@@ -1445,8 +1475,15 @@ async def meta_webhook(request: Request):
     """
     import whatsapp as wa
     import messenger as ms
+
+    body = await request.body()
+    sig_ok, sig_detail = _verify_meta_signature(body, request.headers)
+    if not sig_ok:
+        _log_event("", "meta.webhook", "rejected", f"signature: {sig_detail}",
+                   sig_status=sig_detail)
+        raise HTTPException(403, f"invalid signature: {sig_detail}")
     try:
-        payload = await request.json()
+        payload = _json.loads(body)
     except Exception:
         return {"status": "ignored"}
 

@@ -72,6 +72,45 @@ def super_viewing_other_store(request, store_id: str) -> bool:
     return (claims.get("s") or "") != store_id
 
 
+# ── Session revocation (H-2) ───────────────────────────────────────────────────
+# Single source of truth for "should this still-unexpired token be REJECTED
+# because the principal changed since it was issued?" Used by the middleware AND
+# every inline guard so revocation is enforced identically everywhere.
+# auth.session_invalidated() holds the actual decision; these helpers only fetch
+# the current backing state. Fail-open on any backend hiccup so a transient
+# outage can't lock everyone out.
+
+def _owner_session_revoked(claims: dict, store_id: str) -> bool:
+    """Owner-token revocation (password change). Synchronous + in-memory: the
+    store's pwd_changed_at lives in the registry, so no I/O is needed. Employee
+    tokens are handled by session_is_revoked (they need a DB read)."""
+    try:
+        pwd_at = (sm.get_store_info(store_id) or {}).get("pwd_changed_at", 0)
+        return _auth.session_invalidated(claims, pwd_changed_at=float(pwd_at or 0))
+    except Exception:
+        return False
+
+
+async def session_is_revoked(claims: dict, store_id: str) -> bool:
+    """Full revocation check for the auth boundary. True if the token must be
+    rejected. Super tokens are env-credential based and are never revoked here
+    (rotate ADMIN_SECRET instead)."""
+    if claims.get("su"):
+        return False
+    if "eid" in claims:
+        # Employee: verify the live DB record — but only when the DB is
+        # reachable, else fail-open (a missing row during an outage must not be
+        # misread as "deleted" → mass lockout).
+        if not db.available():
+            return False
+        try:
+            emp = await db.get_employee(int(claims["eid"]))
+        except Exception:
+            return False
+        return _auth.session_invalidated(claims, employee=emp)
+    return _owner_session_revoked(claims, store_id)
+
+
 # ── Role guards ───────────────────────────────────────────────────────────────
 
 def require_store_owner(request, store_id: str):
@@ -92,6 +131,39 @@ def require_store_owner(request, store_id: str):
         raise HTTPException(403, "غير مصرح لك بالوصول")
     if "eid" in claims:
         raise HTTPException(403, "هذا الإجراء مخصّص لمالك المتجر")
+    # H-2: revoke owner tokens issued before the last password change. (Employees
+    # are rejected above, so only owner tokens reach here → the sync check is
+    # sufficient; no DB read needed.)
+    if _owner_session_revoked(claims, store_id):
+        raise HTTPException(401, "انتهت الجلسة، يرجى تسجيل الدخول مجدداً")
+
+
+async def require_store_member(request, store_id: str):
+    """Any authenticated member of THIS store (owner, manager, or agent),
+    bound to store_id. Super admin passes (cross-store).
+
+    Use on per-store routes that sit OUTSIDE the middleware's _PROTECTED_RE
+    allowlist and therefore have no other gate (e.g. contacts, campaigns).
+    Unlike require_store_owner this does NOT reject employees — it only
+    enforces authentication + tenant binding, so an agent or manager of the
+    same store still passes, while a token for another store (or no token at
+    all) is rejected (closes the unauthenticated + cross-store IDOR).
+
+    Async because the H-2 revocation check needs a DB read for employee tokens;
+    it shares session_is_revoked() with the middleware so enforcement is
+    identical on these inline-guarded routes."""
+    from fastapi import HTTPException
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims:
+        raise HTTPException(401, "يرجى تسجيل الدخول")
+    if claims.get("su"):
+        return
+    if (claims.get("s") or "") != store_id:
+        raise HTTPException(403, "غير مصرح لك بالوصول")
+    # H-2: reject fired/deactivated/demoted employees + post-password-change owners.
+    if await session_is_revoked(claims, store_id):
+        raise HTTPException(401, "انتهت الجلسة، يرجى تسجيل الدخول مجدداً")
 
 
 def require_manager_or_owner(request):
@@ -164,3 +236,19 @@ async def budget_exhausted(store_id: str) -> tuple[bool, int, int]:
     snapshot = await db.llm_usage_today(store_id)
     used = int(snapshot.get("tokens_total", 0))
     return used >= budget, used, budget
+
+
+# ── Public widget session safety ───────────────────────────────────────────────
+# Channel-owned conversations (WhatsApp / Messenger / Instagram) use
+# deterministic, enumerable session ids (wa:<phone>, msgr:<psid>, ig:<igsid>).
+# The PUBLIC widget endpoints (/chat/history, /chat/poll, /chat/stream,
+# /chat/rate) must never expose those by id — only the random-uuid widget
+# sessions. Without this, anyone could read a customer's WhatsApp transcript
+# (or live-tap their replies) by guessing their phone number (finding H-1).
+_INTERNAL_SESSION_PREFIXES = ("wa:", "msgr:", "ig:")
+
+
+def is_internal_session_id(session_id: str) -> bool:
+    """True for channel-owned session ids that the public widget API must not
+    serve. Case-insensitive so a mixed-case prefix can't slip through."""
+    return (session_id or "").strip().lower().startswith(_INTERNAL_SESSION_PREFIXES)

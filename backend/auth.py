@@ -134,10 +134,12 @@ def create_token(
     under a store. The store-level routes still authorise (same store_id),
     but admin replies and audit trails carry the employee's name.
     """
+    now = int(time.time())
     payload: dict = {
         "s":   store_id,
         "su":  is_super,
-        "exp": int(time.time()) + TOKEN_EXPIRY_SECONDS,
+        "iat": now,   # issued-at — enables password-change session revocation (H-2)
+        "exp": now + TOKEN_EXPIRY_SECONDS,
     }
     if employee_id is not None:
         payload["eid"] = int(employee_id)
@@ -194,3 +196,33 @@ def token_employee(token: str) -> Optional[dict]:
         "name": str(p.get("en", "")),
         "role": str(p.get("er", "agent")),
     }
+
+
+def session_invalidated(claims: dict, *, pwd_changed_at: float = 0.0,
+                        employee: Optional[dict] = None) -> bool:
+    """
+    Decide whether a still-unexpired token must nonetheless be REJECTED because
+    the underlying principal changed since the token was issued (finding H-2).
+
+    Stateless verify_token() can't see these changes, so the auth boundary
+    (middleware) supplies the current backing state and calls this:
+
+      • Employee token ("eid" present): pass the live DB record as `employee`.
+        Revoked when the employee is deleted (None), deactivated (active=False),
+        or their role no longer matches the role baked into the token.
+        NOTE: only call this for employees when the DB is reachable — otherwise
+        a missing record is indistinguishable from an outage. The caller must
+        skip the check (fail-open) when the DB is down.
+
+      • Owner token (no "eid"): pass the store's `pwd_changed_at` (epoch secs).
+        Revoked when the token was issued before the last password change.
+
+    Super tokens are env-credential based and are never versioned here (rotate
+    ADMIN_SECRET to revoke them); the caller skips super tokens entirely.
+    """
+    if "eid" in claims:
+        if not employee or not employee.get("active"):
+            return True
+        return str(employee.get("role", "agent")) != str(claims.get("er", "agent"))
+    iat = int(claims.get("iat", 0))
+    return bool(pwd_changed_at) and iat < int(pwd_changed_at)

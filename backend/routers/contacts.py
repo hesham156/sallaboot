@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 
 import database as db
 import store_manager as sm
+from routers.deps import require_store_member
 
 router = APIRouter()
 
@@ -32,10 +33,12 @@ def _require_store(store_id: str):
 @router.get("/admin/{store_id}/contacts")
 async def list_contacts(
     store_id: str,
+    request: Request,
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
 ):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     total   = await db.contacts_count(store_id, search)
     records = await db.contacts_list(store_id, page, per_page, search)
@@ -69,7 +72,8 @@ async def list_contacts(
 # ── Sync ───────────────────────────────────────────────────────────────────────
 
 @router.post("/admin/{store_id}/contacts/sync")
-async def sync_contacts(store_id: str):
+async def sync_contacts(store_id: str, request: Request):
+    await require_store_member(request, store_id)
     _require_store(store_id)
 
     chat_count   = 0
@@ -199,7 +203,8 @@ async def sync_contacts(store_id: str):
 # ── Export CSV ─────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/contacts/export")
-async def export_contacts(store_id: str, search: str = Query("")):
+async def export_contacts(store_id: str, request: Request, search: str = Query("")):
+    await require_store_member(request, store_id)
     _require_store(store_id)
 
     total   = await db.contacts_count(store_id, search)

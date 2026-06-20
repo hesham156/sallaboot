@@ -20,7 +20,7 @@ import realtime
 import notifications as _notif
 from models import ChatRequest, ChatResponse, RateRequest
 from salla_oauth import get_auth_url, exchange_code, get_user_info, save_tokens
-from routers.deps import chat_rate_limited, budget_exhausted, daily_token_budget
+from routers.deps import chat_rate_limited, budget_exhausted, daily_token_budget, is_internal_session_id
 import log as _logmod
 
 log = _logmod.get_logger("backend.chat")
@@ -271,6 +271,11 @@ async def chat(req: ChatRequest, request: Request):
         raise HTTPException(400, "الرسالة فارغة")
     if len(req.message) > 4000:
         raise HTTPException(413, "الرسالة طويلة جداً. اختصرها وحاول مجدداً.")
+    # H-1: the public widget must never address a channel-owned conversation
+    # (wa:/msgr:/ig:) by id — that would inject into a customer's thread and let
+    # the agent leak their history. Channel customers never use this endpoint.
+    if is_internal_session_id(req.session_id):
+        raise HTTPException(404, "الجلسة غير موجودة")
 
     store_id = req.store_id or "default"
     if "{{" in store_id or "}}" in store_id:
@@ -451,6 +456,8 @@ async def chat(req: ChatRequest, request: Request):
 async def chat_rate(req: RateRequest):
     if not 1 <= req.rating <= 5:
         raise HTTPException(400, "التقييم يجب أن يكون بين 1 و 5")
+    if is_internal_session_id(req.session_id):
+        raise HTTPException(404, "الجلسة غير موجودة")
     await cs.restore_to_memory(req.session_id)
     await cs.set_rating(req.session_id, req.rating, req.comment)
 
@@ -486,6 +493,8 @@ async def chat_rate(req: RateRequest):
 
 @router.get("/chat/poll")
 async def chat_poll(session_id: str):
+    if is_internal_session_id(session_id):
+        return {"messages": [], "bot_enabled": True}
     await cs.restore_to_memory(session_id)
     pending = await cs.pop_pending_for_widget(session_id)
     bot_on  = cs.is_bot_enabled(session_id)
@@ -511,7 +520,7 @@ async def widget_config(store_id: str = "default"):
 
 @router.get("/chat/history")
 async def chat_history(session_id: str):
-    if not session_id or "{{" in session_id:
+    if not session_id or "{{" in session_id or is_internal_session_id(session_id):
         return {"messages": [], "bot_enabled": True}
     await cs.restore_to_memory(session_id)
     conv = cs.all_conversations().get(session_id)

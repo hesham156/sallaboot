@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 import database as db
 import store_manager as sm
 from campaign_sender import resolve_audience, run_campaign
+from routers.deps import require_store_member
 
 router = APIRouter()
 
@@ -40,6 +41,7 @@ def _require_wa(store_id: str) -> tuple[str, str]:
 
 @router.post("/admin/{store_id}/campaigns")
 async def create_campaign(store_id: str, request: Request):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     body = await request.json()
 
@@ -76,7 +78,8 @@ async def create_campaign(store_id: str, request: Request):
 # ── List ───────────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/campaigns")
-async def list_campaigns(store_id: str):
+async def list_campaigns(store_id: str, request: Request):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     campaigns = await db.campaign_list(store_id)
     return {"campaigns": campaigns, "count": len(campaigns)}
@@ -85,7 +88,8 @@ async def list_campaigns(store_id: str):
 # ── Detail + stats ─────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/campaigns/{campaign_id}")
-async def get_campaign(store_id: str, campaign_id: int):
+async def get_campaign(store_id: str, request: Request, campaign_id: int):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     row = await db.campaign_get(campaign_id)
     if not row or row["store_id"] != store_id:
@@ -115,7 +119,8 @@ async def get_campaign(store_id: str, campaign_id: int):
 # ── Audience preview (dry-run count) ──────────────────────────────────────────
 
 @router.get("/admin/{store_id}/campaigns/{campaign_id}/preview")
-async def preview_campaign(store_id: str, campaign_id: int):
+async def preview_campaign(store_id: str, request: Request, campaign_id: int):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     row = await db.campaign_get(campaign_id)
     if not row or row["store_id"] != store_id:
@@ -133,6 +138,7 @@ async def preview_campaign(store_id: str, campaign_id: int):
 
 @router.post("/admin/{store_id}/campaigns/{campaign_id}/launch")
 async def launch_campaign(store_id: str, campaign_id: int, request: Request):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     _require_wa(store_id)
 
@@ -170,7 +176,8 @@ async def launch_campaign(store_id: str, campaign_id: int, request: Request):
 # ── Delete ─────────────────────────────────────────────────────────────────────
 
 @router.delete("/admin/{store_id}/campaigns/{campaign_id}")
-async def delete_campaign(store_id: str, campaign_id: int):
+async def delete_campaign(store_id: str, request: Request, campaign_id: int):
+    await require_store_member(request, store_id)
     _require_store(store_id)
     row = await db.campaign_get(campaign_id)
     if not row or row["store_id"] != store_id:

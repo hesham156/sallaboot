@@ -1066,12 +1066,14 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest, reque
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     current_hash = sm.get_admin_password_hash(store_id)
-    if not _auth.verify_password(req.current_password, current_hash):
+    if not _auth.check_password(req.current_password, current_hash):
         raise HTTPException(401, "كلمة المرور الحالية غير صحيحة")
     if len(req.new_password) < 6:
         raise HTTPException(400, "كلمة المرور الجديدة قصيرة جداً (6 أحرف على الأقل)")
     await sm.set_admin_password(store_id, _auth.hash_password(req.new_password))
     await db.save_store(store_id, sm.get_store_info(store_id))
+    # Revoke every owner token issued before now (H-2 session revocation).
+    await sm.mark_password_changed(store_id)
     await audit(request, "change_store_password", target_store=store_id)
     return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
 

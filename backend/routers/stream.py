@@ -10,7 +10,10 @@ from fastapi.responses import StreamingResponse
 import auth as _auth
 import realtime
 import conversation_store as cs
-from routers.deps import audit, super_viewing_other_store, _REASON_MIN_LENGTH, _REASON_MAX_LENGTH
+from routers.deps import (
+    audit, super_viewing_other_store, is_internal_session_id, session_is_revoked,
+    _REASON_MIN_LENGTH, _REASON_MAX_LENGTH,
+)
 
 router = APIRouter()
 
@@ -65,6 +68,12 @@ async def admin_stream_ticket(store_id: str, request: Request, reason: str = "")
         raise HTTPException(401, "يرجى تسجيل الدخول")
     if not claims.get("su") and claims.get("s") != store_id:
         raise HTTPException(403, "غير مصرح لك بالوصول")
+    # H-2: a stream ticket grants ~30 min of live access — refuse to mint one for
+    # a revoked principal (fired/deactivated/demoted employee, post-password
+    # owner). Shares the middleware's revocation logic (stream is outside
+    # _PROTECTED_RE, so the middleware check doesn't run for it).
+    if await session_is_revoked(claims, store_id):
+        raise HTTPException(401, "انتهت الجلسة، يرجى تسجيل الدخول مجدداً")
 
     if super_viewing_other_store(request, store_id):
         reason_clean = (reason or "").strip()
@@ -118,7 +127,7 @@ async def admin_stream(store_id: str, ticket: str = "", request: Request = None)
 
 @router.get("/chat/stream")
 async def chat_stream(session_id: str):
-    if not session_id or len(session_id) > 200:
+    if not session_id or len(session_id) > 200 or is_internal_session_id(session_id):
         raise HTTPException(400, "session_id required")
     if not realtime.available():
         raise HTTPException(503, "Realtime channel unavailable")

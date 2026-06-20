@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response
 
 import database as db
 import conversation_store as cs
-from routers.deps import UPLOAD_DIR, MAX_FILE_MB, ALLOWED_EXTENSIONS, CONTENT_TYPES
+from routers.deps import UPLOAD_DIR, MAX_FILE_MB, ALLOWED_EXTENSIONS, CONTENT_TYPES, is_internal_session_id
 
 router = APIRouter()
 
@@ -29,6 +29,11 @@ async def upload_file(
     session_id: str        = Form(default=""),
     store_id:   str        = Form(default="default"),
 ):
+    # H-1: refuse to attach a file to a channel-owned conversation (wa:/msgr:/ig:)
+    # — that would inject a forged "customer sent a file" message into a real
+    # WhatsApp/Messenger/Instagram thread. Widget uploads use random-uuid ids.
+    if is_internal_session_id(session_id):
+        raise HTTPException(404, "الجلسة غير موجودة")
     if "{{" in store_id or "}}" in store_id:
         store_id = "default"
 

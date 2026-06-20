@@ -4,9 +4,9 @@ App Settings linking flow.
 
 The merchant pastes their 7ayak email + API key into the Salla app's settings
 form; Salla fires app.settings.updated with the fields under data.settings. The
-handler must bind the Salla store to the home 7ayak account (resolved by API key,
-or email) — moving identity onto the Salla store — and must never hijack a home
-account that already runs another platform.
+handler must bind the Salla store to the home 7ayak account (resolved by API key
+— the secret proof of ownership) — moving identity onto the Salla store — and
+must never hijack a home account that already runs another platform.
 """
 from __future__ import annotations
 
@@ -175,7 +175,11 @@ async def test_home_with_access_token_is_not_deleted(patched):
     assert sm.unregistered == []
 
 
-async def test_falls_back_to_email_when_no_key(patched):
+async def test_email_only_does_not_link(patched):
+    """C-4: the email is NOT a secret. Resolving the home account by email
+    alone let an attacker who merely knew a victim's email hijack and clear
+    that account. Linking now requires the API key (the secret proof of
+    ownership), so an email-only payload is a no-op — nothing is moved."""
     db, sm = patched(
         _DBStub(by_email={"me@store.com": "home_acct"}, integrations={"home_acct": {}}),
         _SMStub(),
@@ -183,8 +187,9 @@ async def test_falls_back_to_email_when_no_key(patched):
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "me@store.com"}}
     )
-    assert db.owner_email_set.get("merchant_99") == "me@store.com"
-    assert db.owner_email_set.get("home_acct") == ""
+    assert db.owner_email_set == {}
+    assert db.api_key_set == {}
+    assert sm.password_set == {}
 
 
 async def test_no_match_is_noop(patched):
@@ -208,6 +213,22 @@ async def test_live_platform_home_not_hijacked(patched):
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "real_store"},
                 integrations={"real_store": {"shopify": {"shop": "x.myshopify.com"}}}),
+        _SMStub(),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "x@y.com", "api_key": "7yk_K"}}
+    )
+    assert db.owner_email_set == {}      # nothing moved
+    assert db.api_key_set == {}
+
+
+async def test_live_salla_home_not_hijacked(patched):
+    """C-4: 'salla' was missing from the exclusivity guard, so an account that
+    is itself already a live Salla store could be moved onto another merchant_id.
+    It must now be protected like the other platforms."""
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "real_salla_store"},
+                integrations={"real_salla_store": {"salla": {"store_id": "real_salla_store"}}}),
         _SMStub(),
     )
     await w._handle_app_settings_updated(

@@ -104,6 +104,20 @@ async def admin_auth_middleware(request: Request, call_next):
         if not claims.get("su") and claims.get("s") != store_id:
             return JSONResponse({"detail": "غير مصرح لك بالوصول"}, status_code=403)
 
+        # ── Session revocation (H-2) ───────────────────────────────────
+        # verify_token() only checks signature + expiry. Re-validate the
+        # principal against current backing state so a fired / deactivated /
+        # demoted employee — or an owner who just reset their password — loses
+        # access immediately instead of riding a still-valid 7-day token. Shared
+        # with the inline guards (deps.session_is_revoked) so enforcement is
+        # identical everywhere; the helper fails open on any backend hiccup.
+        from routers import deps as _deps
+        if await _deps.session_is_revoked(claims, store_id):
+            return JSONResponse(
+                {"detail": "انتهت الجلسة، يرجى تسجيل الدخول مجدداً"},
+                status_code=401,
+            )
+
         # ── Super-admin JIT access gate ────────────────────────────────
         # Cross-store super reads now REQUIRE a time-boxed grant from the
         # merchant. The store's owner endpoints for granting (under
