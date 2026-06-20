@@ -1589,6 +1589,61 @@ async def purge_store(store_id: str) -> dict:
     return counts
 
 
+async def clear_whatsapp_phone_id(phone_id: str, keep_store_id: str = "") -> list[str]:
+    """
+    DB-authoritative WhatsApp unlink. Wipe whatsapp_token / phone_id / waba_id
+    and disable the channel in EVERY store whose ai_config (or tokens.ai_config)
+    carries `phone_id`, except `keep_store_id` (pass "" to clear ALL).
+
+    Why this matters: the in-memory registry clear only touches stores currently
+    loaded in this process, but `load_from_db` reloads EVERY store's ai_config
+    column at startup. If a stale store keeps the phone_id only in the DB, it
+    reclaims the number on the next reload and inbound messages route to it again.
+    whatsapp_phone_id is stored plaintext, so the match is a plain JSONB compare.
+    Returns the cleared store_ids.
+    """
+    if not _pool:
+        return []
+    pid  = str(phone_id or "").strip()
+    keep = str(keep_store_id or "")
+    if not pid:
+        return []
+    wipe = json.dumps({
+        "whatsapp_token":    "",
+        "whatsapp_phone_id": "",
+        "whatsapp_waba_id":  "",
+        "whatsapp_enabled":  False,
+    })
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE stores
+                   SET ai_config = ai_config || $1::jsonb,
+                       tokens = CASE
+                           WHEN tokens ? 'ai_config'
+                           THEN jsonb_set(tokens, '{ai_config}',
+                                          (tokens->'ai_config') || $1::jsonb)
+                           ELSE tokens
+                       END,
+                       updated_at = NOW()
+                 WHERE (ai_config->>'whatsapp_phone_id' = $2
+                        OR tokens->'ai_config'->>'whatsapp_phone_id' = $2)
+                   AND store_id <> $3
+                RETURNING store_id
+                """,
+                wipe, pid, keep,
+            )
+        cleared = [r["store_id"] for r in rows]
+        if cleared:
+            print(f"[db] cleared WhatsApp phone_id {pid} from {len(cleared)} "
+                  f"store(s): {cleared}")
+        return cleared
+    except Exception as e:
+        print(f"[db] clear_whatsapp_phone_id({phone_id!r}) error: {e}")
+        return []
+
+
 async def save_ai_config(store_id: str, ai_config: dict):
     """
     Upsert only the ai_config column. Provider API keys

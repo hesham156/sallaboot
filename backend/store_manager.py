@@ -553,6 +553,7 @@ async def _release_whatsapp(phone_id: str, exclude_store_id: str = "") -> list[s
     cleared: list[str] = []
     if not pid:
         return cleared
+    # 1) In-memory stores in THIS process: clear + persist + reset agent now.
     for sid in list(_registry.keys()):
         if exclude and str(sid) == exclude:
             continue
@@ -568,6 +569,14 @@ async def _release_whatsapp(phone_id: str, exclude_store_id: str = "") -> list[s
         })
         await set_ai_config(sid, newcfg)        # persists to DB + resets agent
         cleared.append(str(sid))
+    # 2) DB-authoritative sweep: clears any store NOT loaded in this process so a
+    #    stale row can't reclaim the number on the next startup reload.
+    try:
+        for sid in await db.clear_whatsapp_phone_id(pid, exclude):
+            if str(sid) not in cleared:
+                cleared.append(str(sid))
+    except Exception as exc:
+        print(f"[store_manager] db clear_whatsapp_phone_id skipped: {exc}")
     return cleared
 
 
