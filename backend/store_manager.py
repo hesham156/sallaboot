@@ -542,41 +542,64 @@ def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
     return fallback
 
 
+async def _release_whatsapp(phone_id: str, exclude_store_id: str = "") -> list[str]:
+    """
+    Wipe a WhatsApp number's creds (token/phone_id/waba_id + disable) from every
+    store that holds `phone_id`, except `exclude_store_id` (pass "" to clear ALL).
+    Persists to DB and resets each affected agent. Returns cleared store_ids.
+    """
+    pid     = str(phone_id or "").strip()
+    exclude = str(exclude_store_id or "")
+    cleared: list[str] = []
+    if not pid:
+        return cleared
+    for sid in list(_registry.keys()):
+        if exclude and str(sid) == exclude:
+            continue
+        cfg = (_registry[sid].get("tokens", {}) or {}).get("ai_config", {}) or {}
+        if str(cfg.get("whatsapp_phone_id", "")).strip() != pid:
+            continue
+        newcfg = dict(cfg)
+        newcfg.update({
+            "whatsapp_token":    "",
+            "whatsapp_phone_id": "",
+            "whatsapp_waba_id":  "",
+            "whatsapp_enabled":  False,
+        })
+        await set_ai_config(sid, newcfg)        # persists to DB + resets agent
+        cleared.append(str(sid))
+    return cleared
+
+
 async def claim_whatsapp_phone_id(phone_id: str, owner_store_id: str) -> list[str]:
     """
     Enforce GLOBAL uniqueness of a WhatsApp phone_number_id across stores.
 
-    Inbound WhatsApp webhooks are routed by phone_id to the first store that
-    claims it (find_store_by_whatsapp_phone_id). If a merchant unlinks a number
-    from store A and links the SAME number to store B, but A still carries the
-    creds, A keeps receiving the messages. Calling this right after a store
-    links/saves a phone_id wipes that number's WhatsApp creds from every OTHER
-    store, so the latest store to link a number is its sole owner.
-
-    Returns the list of store_ids that were released (usually empty).
+    Inbound WhatsApp webhooks are routed by phone_id to the store that claims it
+    (find_store_by_whatsapp_phone_id). If a merchant unlinks a number from store
+    A and links the SAME number to store B but A still carries the creds, A keeps
+    receiving the messages. Calling this right after a store links/saves a
+    phone_id wipes that number from every OTHER store, so the latest store to
+    link a number is its sole owner. Returns released store_ids (usually empty).
     """
-    pid  = str(phone_id or "").strip()
-    keep = str(owner_store_id)
-    released: list[str] = []
-    if not pid:
-        return released
-    for sid in list(_registry.keys()):
-        if str(sid) == keep:
-            continue
-        cfg = (_registry[sid].get("tokens", {}) or {}).get("ai_config", {}) or {}
-        if str(cfg.get("whatsapp_phone_id", "")).strip() == pid:
-            newcfg = dict(cfg)
-            newcfg.update({
-                "whatsapp_token":    "",
-                "whatsapp_phone_id": "",
-                "whatsapp_waba_id":  "",
-                "whatsapp_enabled":  False,
-            })
-            await set_ai_config(sid, newcfg)   # persists to DB + resets agent
-            released.append(str(sid))
-            print(f"[store_manager] released WhatsApp phone_id {pid} from store "
-                  f"{sid!r} — re-claimed by {keep!r}")
+    released = await _release_whatsapp(phone_id, exclude_store_id=str(owner_store_id))
+    for sid in released:
+        print(f"[store_manager] released WhatsApp phone_id {phone_id!r} from store "
+              f"{sid!r} — re-claimed by {owner_store_id!r}")
     return released
+
+
+async def purge_whatsapp_phone_id(phone_id: str) -> list[str]:
+    """
+    Fully release a WhatsApp number: wipe its creds from EVERY store that holds
+    it (no exclusions). Used on disconnect so "unlink a number" deletes all of
+    that number's data wherever it lingers — fixing inbound messages still
+    landing on a stale store the operator can't reach. Returns cleared store_ids.
+    """
+    cleared = await _release_whatsapp(phone_id, exclude_store_id="")
+    for sid in cleared:
+        print(f"[store_manager] purged WhatsApp phone_id {phone_id!r} from store {sid!r}")
+    return cleared
 
 
 def find_store_by_page_id(page_id: str) -> str:

@@ -486,6 +486,7 @@ async def whatsapp_disconnect(store_id: str, request: Request):
     unsubscribed = False
     token   = (existing.get("whatsapp_token")   or "").strip()
     waba_id = (existing.get("whatsapp_waba_id") or "").strip()
+    phone_id = (existing.get("whatsapp_phone_id") or "").strip()
     if token and waba_id:
         import whatsapp as _wa
         try:
@@ -502,13 +503,27 @@ async def whatsapp_disconnect(store_id: str, request: Request):
     })
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
+
+    # Unlinking a NUMBER must delete the number everywhere — not just this store.
+    # The operator may be unable to reach the other store that still holds the
+    # same phone_id (a different 7ayak account), yet that stale store is what
+    # keeps receiving the messages. Purge the number from every store holding it.
+    purged: list[str] = []
+    if phone_id:
+        purged = await sm.purge_whatsapp_phone_id(phone_id)
+        purged = [s for s in purged if s != str(store_id)]
+
     await audit(request, "whatsapp_disconnect", target_store=store_id,
-                details={"meta_unsubscribed": unsubscribed})
+                details={"meta_unsubscribed": unsubscribed,
+                         "phone_id": phone_id, "also_purged_from": purged})
+    extra = (f" — وأُزيل الرقم أيضاً من {len(purged)} حساب آخر" if purged else "")
     return {
         "status":  "ok",
-        "message": "تم إلغاء ربط واتساب" + ("" if unsubscribed or not waba_id
-                                            else " (لكن تعذّر إلغاء الاشتراك من Meta تلقائياً)"),
+        "message": "تم إلغاء ربط واتساب" + extra
+                   + ("" if unsubscribed or not waba_id
+                      else " (لكن تعذّر إلغاء الاشتراك من Meta تلقائياً)"),
         "meta_unsubscribed": unsubscribed,
+        "also_purged_from":  purged,
     }
 
 
