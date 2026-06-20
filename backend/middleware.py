@@ -180,16 +180,10 @@ async def admin_auth_middleware(request: Request, call_next):
                 return RedirectResponse(url="/admin", status_code=302)
             return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
 
+    # Security headers are applied by cors_middleware (the OUTERMOST layer) so
+    # that EVERY response — including the auth-rejection 401/403s returned above
+    # — carries them. See _apply_security_headers.
     response = await call_next(request)
-
-    # ── Security hardening headers (defense-in-depth) ─────────────────
-    # nosniff + a sane referrer policy are safe everywhere. Clickjacking
-    # protection is applied only to the admin dashboard pages — never the
-    # script-injected widget or the /chat API, so embedding still works.
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    if path == "/admin" or path.startswith("/admin/"):
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     return response
 
 
@@ -235,6 +229,38 @@ _CORS_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 _CORS_HEADERS = "Authorization, Content-Type, X-Salla-Signature, X-Requested-With"
 
 
+def _apply_security_headers(response, path: str) -> None:
+    """Defensive response headers (finding M-18). Applied from the outermost
+    middleware so EVERY response carries them — including the auth middleware's
+    early 401/403 rejections.
+
+    nosniff + referrer + HSTS + Permissions-Policy are safe everywhere. The
+    clickjacking/CSP set is scoped to the dashboard only (never the
+    script-injected widget or the /chat API, so storefront embedding keeps
+    working). The CSP intentionally omits script-src/style-src: a strict
+    script-src would break the inline <script> in the Salla OAuth callback +
+    /snippet pages — a full nonce-based document CSP is a separate, tested
+    follow-up.
+    """
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # HSTS — pin clients to HTTPS for a year (incl. subdomains). Browsers honour
+    # it only over HTTPS, so it's safe to send everywhere (Railway terminates TLS).
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+    )
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+    )
+    if path == "/admin" or path.startswith("/admin/"):
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
+        )
+
+
 async def cors_middleware(request: Request, call_next):
     """
     Outermost middleware (declared last → wraps everything). Echoes
@@ -272,6 +298,9 @@ async def cors_middleware(request: Request, call_next):
         response.headers["Access-Control-Allow-Origin"] = allowed_origin
         response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Expose-Headers"] = "*"
+    # Defense-in-depth headers on EVERY response (incl. auth 401/403 rejections,
+    # which the auth middleware returns before reaching its own response path).
+    _apply_security_headers(response, path)
     return response
 
 
