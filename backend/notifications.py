@@ -202,6 +202,25 @@ async def _send_email(to: str, subject: str, html: str) -> bool:
         return False
 
 
+async def send_otp_email(to: str, code: str, purpose: str = "login") -> bool:
+    """Email a 6-digit verification code (signup confirmation / login 2FA).
+    Returns True if Resend accepted it (False when email isn't configured)."""
+    title = "تأكيد إنشاء الحساب" if purpose == "signup" else "رمز تسجيل الدخول"
+    html = (
+        '<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;max-width:480px;'
+        'margin:0 auto;padding:24px">'
+        f'<h2 style="color:#0f766e;margin:0 0 8px">{title} — حياك</h2>'
+        '<p style="color:#334155;font-size:14px;margin:0 0 16px">رمز التحقق الخاص بك هو:</p>'
+        '<div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#0f172a;'
+        'background:#f1f5f9;border-radius:12px;padding:16px;text-align:center">'
+        f'{code}</div>'
+        '<p style="color:#64748b;font-size:12px;margin:16px 0 0">صالح لمدة 10 دقائق. '
+        'إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.</p>'
+        '</div>'
+    )
+    return await _send_email(to, f"رمز التحقق: {code} — حياك", html)
+
+
 async def _send_webhook(url: str, payload: dict) -> bool:
     """POST a JSON payload to a custom webhook URL (Slack, Zapier, etc.)."""
     if not url:

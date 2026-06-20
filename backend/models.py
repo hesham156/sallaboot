@@ -63,6 +63,21 @@ class EndConversationRequest(BaseModel):
 class LoginRequest(BaseModel):
     password: str
     email: Optional[str] = ""
+    # "Remember this device" token from a previous OTP-verified login. When valid
+    # for this email, login skips the OTP step (finding: email 2FA, 30-day trust).
+    device_token: Optional[str] = ""
+
+
+class OtpVerifyRequest(BaseModel):
+    """Second step of OTP-gated signup/login: the user submits the emailed code
+    plus the signed challenge and the original credentials (re-checked server-side)."""
+    email:           str
+    code:            str
+    challenge:       str
+    purpose:         str                    # "signup" | "login"
+    password:        str
+    name:            Optional[str] = ""     # signup only
+    remember_device: Optional[bool] = True  # issue a 30-day device-trust token
 
 
 class EmployeeLoginRequest(BaseModel):

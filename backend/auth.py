@@ -198,6 +198,98 @@ def token_employee(token: str) -> Optional[dict]:
     }
 
 
+# ── Email OTP + trusted-device tokens ──────────────────────────────────────────
+#
+# Both are STATELESS (no DB table): a payload is HMAC-signed with ADMIN_SECRET,
+# exactly like the session tokens above. For OTP the signed "challenge" carries
+# only the HMAC of the 6-digit code — never the code itself — so even if the
+# challenge leaks, the code can't be brute-forced offline (the attacker lacks
+# ADMIN_SECRET). Online guessing is capped by the verify endpoint's rate limit.
+
+OTP_TTL_SECONDS          = 10 * 60          # code valid for 10 minutes
+DEVICE_TRUST_TTL_SECONDS = 30 * 24 * 60 * 60  # "remember this device" for 30 days
+
+
+def _sign_payload(payload: dict) -> str:
+    """base64url(json).hmac — same envelope as create_token."""
+    data = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    sig = hmac.new(ADMIN_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
+    return f"{data}.{sig}"
+
+
+def _unsign_payload(token: str) -> Optional[dict]:
+    """Verify signature + return the payload, or None. Does NOT check expiry."""
+    if not token or "." not in token:
+        return None
+    try:
+        data, sig = token.rsplit(".", 1)
+        expected = hmac.new(ADMIN_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return None
+        padding = 4 - len(data) % 4
+        return json.loads(base64.urlsafe_b64decode(data + "=" * padding))
+    except Exception:
+        return None
+
+
+def generate_otp_code() -> str:
+    """A 6-digit numeric one-time code (cryptographically random)."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _otp_code_hash(code: str) -> str:
+    return hmac.new(ADMIN_SECRET.encode(), code.encode(), hashlib.sha256).hexdigest()
+
+
+def make_otp_challenge(email: str, purpose: str, code: str) -> str:
+    """Signed proof of an outstanding OTP. Carries the code's HMAC, not the code."""
+    return _sign_payload({
+        "em":  (email or "").strip().lower(),
+        "p":   purpose,
+        "ch":  _otp_code_hash(code),
+        "exp": int(time.time()) + OTP_TTL_SECONDS,
+        "n":   secrets.token_hex(4),
+    })
+
+
+def verify_otp_challenge(challenge: str, email: str, purpose: str, code: str) -> bool:
+    """True iff `challenge` is a valid, unexpired challenge for (email, purpose)
+    and `code` matches the hash it carries."""
+    p = _unsign_payload(challenge)
+    if not p:
+        return False
+    if int(p.get("exp", 0)) < int(time.time()):
+        return False
+    if p.get("em") != (email or "").strip().lower():
+        return False
+    if p.get("p") != purpose:
+        return False
+    return hmac.compare_digest(str(p.get("ch", "")), _otp_code_hash(code or ""))
+
+
+def make_device_trust(email: str) -> str:
+    """A 30-day 'this device already passed OTP' token, bound to the email."""
+    return _sign_payload({
+        "em":  (email or "").strip().lower(),
+        "typ": "devtrust",
+        "exp": int(time.time()) + DEVICE_TRUST_TTL_SECONDS,
+    })
+
+
+def device_trust_valid(token: str, email: str) -> bool:
+    """True iff `token` is a valid, unexpired device-trust token for `email`."""
+    p = _unsign_payload(token)
+    if not p:
+        return False
+    return (
+        p.get("typ") == "devtrust"
+        and p.get("em") == (email or "").strip().lower()
+        and int(p.get("exp", 0)) >= int(time.time())
+    )
+
+
 def session_invalidated(claims: dict, *, pwd_changed_at: float = 0.0,
                         employee: Optional[dict] = None) -> bool:
     """

@@ -23,8 +23,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 import auth as _auth
 import database as db
+import notifications as _notif
 import store_manager as sm
-from models import EmployeeLoginRequest, LoginRequest, SignupRequest
+from models import EmployeeLoginRequest, LoginRequest, OtpVerifyRequest, SignupRequest
 from routers.deps import is_rate_limited as _is_rate_limited
 
 
@@ -161,6 +162,117 @@ async def employee_login(store_id: str, req: EmployeeLoginRequest, request: Requ
 # endpoint succeeded. Same generic 401 message on every miss so callers
 # can't probe whether an email exists.
 
+def _otp_enabled() -> bool:
+    """Email-OTP gate. Default OFF so deploying the backend never breaks an
+    older frontend that can't render the OTP step. Turn ON with OTP_ENABLED=true
+    once the frontend OTP step is live AND RESEND_API_KEY is configured
+    (otherwise users couldn't receive the code)."""
+    return os.getenv("OTP_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+async def _resolve_login(email_raw: str, pwd_in: str) -> dict | None:
+    """
+    Resolve email/store-id + password to a full session-response dict, or None
+    on any miss. Order: super → employee → owner(email) → owner(store-id).
+    Single source of truth shared by unified_login and the OTP verify step.
+    Legacy SHA-256 hashes are transparently upgraded on success (unchanged).
+    """
+    email_raw = (email_raw or "").strip()
+    email_in  = email_raw.lower()
+    pwd_in    = pwd_in or ""
+    if not email_in or not pwd_in:
+        return None
+
+    # 1. Super admin (env-driven, exact email match)
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "")
+    if super_email and hmac.compare_digest(email_in, super_email):
+        if not hmac.compare_digest(pwd_in, super_pass):
+            return None
+        return {
+            "token":      _auth.create_token("super", is_super=True),
+            "store_id":   "super",
+            "store_name": "لوحة الإدارة العامة",
+            "is_super":   True,
+            "employee":   None,
+        }
+
+    # 2. Employee (any store)
+    emp = await db.find_employee_by_email_any_store(email_in)
+    if emp:
+        stored_hash = emp.get("password_hash", "")
+        if not _auth.check_password(pwd_in, stored_hash):
+            return None
+        store_id = emp["store_id"]
+        if _auth.needs_rehash(stored_hash):
+            try:
+                await db.update_employee(emp["id"], password_hash=_auth.hash_password(pwd_in))
+            except Exception as exc:
+                print(f"[auth] ⚠️ Employee hash upgrade failed: {exc}")
+        info = sm.get_store_info(store_id) or {}
+        return {
+            "token":      _auth.create_token(store_id, employee_id=emp["id"],
+                                             employee_name=emp["name"],
+                                             employee_role=emp.get("role", "agent")),
+            "store_id":   store_id,
+            "store_name": info.get("store_name", f"متجر {store_id}"),
+            "is_super":   False,
+            "employee":   {"id": emp["id"], "name": emp["name"], "role": emp.get("role", "agent")},
+        }
+
+    # 3. Store owner (by owner_email)
+    store_id = await db.find_store_by_owner_email(email_in)
+    if store_id:
+        stored_hash = sm.get_admin_password_hash(store_id)
+        if not stored_hash or not _auth.check_password(pwd_in, stored_hash):
+            return None
+        if _auth.needs_rehash(stored_hash):
+            try:
+                await sm.set_admin_password(store_id, _auth.hash_password(pwd_in))
+            except Exception as exc:
+                print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
+        info = sm.get_store_info(store_id) or {}
+        return {
+            "token":      _auth.create_token(store_id),
+            "store_id":   store_id,
+            "store_name": info.get("store_name", f"متجر {store_id}"),
+            "is_super":   False,
+            "employee":   None,
+        }
+
+    # 4. Store-id direct (raw input — store ids can be mixed-case)
+    cand = email_raw
+    if cand and sm.is_registered(cand):
+        stored_hash = sm.get_admin_password_hash(cand)
+        if not stored_hash or not _auth.check_password(pwd_in, stored_hash):
+            return None
+        if _auth.needs_rehash(stored_hash):
+            try:
+                await sm.set_admin_password(cand, _auth.hash_password(pwd_in))
+            except Exception as exc:
+                print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
+        info = sm.get_store_info(cand) or {}
+        return {
+            "token":      _auth.create_token(cand),
+            "store_id":   cand,
+            "store_name": info.get("store_name", f"متجر {cand}"),
+            "is_super":   False,
+            "employee":   None,
+        }
+
+    return None
+
+
+async def _begin_otp(email: str, purpose: str) -> dict:
+    """Generate a code, email it, and return the signed challenge for the client
+    to echo back at /auth/otp/verify. Raises 502 if the email can't be sent."""
+    code = _auth.generate_otp_code()
+    challenge = _auth.make_otp_challenge(email, purpose, code)
+    if not await _notif.send_otp_email(email, code, purpose):
+        raise HTTPException(502, "تعذّر إرسال رمز التحقق إلى بريدك الإلكتروني. حاول لاحقاً.")
+    return {"otp_required": True, "challenge": challenge}
+
+
 @router.post("/auth/login")
 async def unified_login(req: LoginRequest, request: Request):
     """
@@ -188,103 +300,24 @@ async def unified_login(req: LoginRequest, request: Request):
 
     generic_401 = HTTPException(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة")
 
-    # ── 1. Super admin ──────────────────────────────────────────────────
-    super_email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
-    super_pass  = os.getenv("SUPER_ADMIN_PASSWORD", "")
-    if hmac.compare_digest(email_in, super_email):
-        if not hmac.compare_digest(pwd_in, super_pass):
-            print(f"[auth] ❌ Super login bad password from {ip}")
-            raise generic_401
-        token = _auth.create_token("super", is_super=True)
-        print(f"[auth] ✅ Super login ({email_in}) from {ip}")
-        return {
-            "token":      token,
-            "store_id":   "super",
-            "store_name": "لوحة الإدارة العامة",
-            "is_super":   True,
-            "employee":   None,
-        }
+    resolved = await _resolve_login(email_raw, pwd_in)
+    if not resolved:
+        print(f"[auth] ❌ Failed unified login from {ip}")
+        raise generic_401
 
-    # ── 2. Employee (any store) ─────────────────────────────────────────
-    emp = await db.find_employee_by_email_any_store(email_in)
-    if emp:
-        stored_hash = emp.get("password_hash", "")
-        if not _auth.check_password(pwd_in, stored_hash):
-            print(f"[auth] ❌ Employee bad password for {email_in!r} from {ip}")
-            raise generic_401
-        store_id = emp["store_id"]
-        if _auth.needs_rehash(stored_hash):
-            try:
-                await db.update_employee(emp["id"], password_hash=_auth.hash_password(pwd_in))
-            except Exception as exc:
-                print(f"[auth] ⚠️ Employee hash upgrade failed: {exc}")
-        token = _auth.create_token(
-            store_id,
-            employee_id   = emp["id"],
-            employee_name = emp["name"],
-            employee_role = emp.get("role", "agent"),
-        )
-        info = sm.get_store_info(store_id) or {}
-        print(f"[auth] ✅ Employee login {email_in!r} for store {store_id!r}")
-        return {
-            "token":      token,
-            "store_id":   store_id,
-            "store_name": info.get("store_name", f"متجر {store_id}"),
-            "is_super":   False,
-            "employee":   {"id": emp["id"], "name": emp["name"], "role": emp.get("role", "agent")},
-        }
+    # Super admin uses env credentials only — never gated by email OTP.
+    if resolved.get("is_super"):
+        print(f"[auth] ✅ Super login from {ip}")
+        return resolved
 
-    # ── 3. Store owner ──────────────────────────────────────────────────
-    store_id = await db.find_store_by_owner_email(email_in)
-    if store_id:
-        stored_hash = sm.get_admin_password_hash(store_id)
-        if not stored_hash or not _auth.check_password(pwd_in, stored_hash):
-            print(f"[auth] ❌ Store owner bad password for {email_in!r} ({store_id!r}) from {ip}")
-            raise generic_401
-        if _auth.needs_rehash(stored_hash):
-            try:
-                await sm.set_admin_password(store_id, _auth.hash_password(pwd_in))
-            except Exception as exc:
-                print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
-        token = _auth.create_token(store_id)
-        info  = sm.get_store_info(store_id) or {}
-        print(f"[auth] ✅ Store owner login {email_in!r} ({store_id!r}) from {ip}")
-        return {
-            "token":      token,
-            "store_id":   store_id,
-            "store_name": info.get("store_name", f"متجر {store_id}"),
-            "is_super":   False,
-            "employee":   None,
-        }
+    # Email 2FA: require a one-time code unless this device already passed one
+    # within the 30-day trust window. Transparent no-op when OTP is disabled.
+    if _otp_enabled() and not _auth.device_trust_valid(req.device_token or "", email_in):
+        print(f"[auth] 🔐 OTP required for login from {ip}")
+        return await _begin_otp(email_in, "login")
 
-    # ── 4. Store ID direct lookup ───────────────────────────────────────
-    # Allows owners who don't remember their email to log in with store_id + password.
-    # Use raw (pre-lowercase) input so mixed-case store IDs are found correctly.
-    store_id_candidate = email_raw
-    if sm.is_registered(store_id_candidate):
-        stored_hash = sm.get_admin_password_hash(store_id_candidate)
-        if not stored_hash or not _auth.check_password(pwd_in, stored_hash):
-            print(f"[auth] ❌ Store ID bad password for {store_id_candidate!r} from {ip}")
-            raise generic_401
-        if _auth.needs_rehash(stored_hash):
-            try:
-                await sm.set_admin_password(store_id_candidate, _auth.hash_password(pwd_in))
-            except Exception as exc:
-                print(f"[auth] ⚠️ Owner hash upgrade failed: {exc}")
-        token = _auth.create_token(store_id_candidate)
-        info  = sm.get_store_info(store_id_candidate) or {}
-        print(f"[auth] ✅ Store ID login {store_id_candidate!r} from {ip}")
-        return {
-            "token":      token,
-            "store_id":   store_id_candidate,
-            "store_name": info.get("store_name", f"متجر {store_id_candidate}"),
-            "is_super":   False,
-            "employee":   None,
-        }
-
-    # No account matches — generic 401 (don't leak which side failed)
-    print(f"[auth] ❌ No account for {email_in!r} from {ip}")
-    raise generic_401
+    print(f"[auth] ✅ Unified login ({resolved['store_id']!r}) from {ip}")
+    return resolved
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -298,6 +331,57 @@ async def unified_login(req: LoginRequest, request: Request):
 # token immediately and links a platform afterwards from the Integrations page.
 #
 # Reuses the exact account-creation sequence as routers.integrations.zid_start_post.
+
+async def _create_signup_account(name: str, email: str, pwd: str) -> dict:
+    """Create a platform-less 7ayak account + return a session response. Re-checks
+    validation + uniqueness so it's safe to call after the OTP step (raises 409 if
+    the email got taken in the meantime)."""
+    name  = (name or "").strip()
+    email = (email or "").strip().lower()
+    pwd   = pwd or ""
+    if not name:
+        raise HTTPException(400, "الاسم الكامل مطلوب")
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(400, "البريد الإلكتروني غير صالح")
+    if len(pwd) < 8:
+        raise HTTPException(400, "كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+
+    taken = HTTPException(409, "هذا البريد مستخدم بالفعل. سجّل الدخول بدلاً من ذلك.")
+    super_email = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+    if super_email and hmac.compare_digest(email, super_email):
+        raise taken
+    if await db.find_store_by_owner_email(email):
+        raise taken
+    if await db.find_employee_by_email_any_store(email):
+        raise taken
+
+    slug = re.sub(r"[^a-z0-9]", "_", email.split("@")[0].lower())[:20] or "store"
+    store_id = slug
+    suffix = 2
+    while sm.is_registered(store_id):
+        store_id = f"{slug}_{suffix}"
+        suffix += 1
+
+    try:
+        await sm.register_store(store_id=store_id, access_token="",
+                                store_info={"name": name}, owner_email=email)
+        tokens = sm.get_store_info(store_id)
+        await db.save_store(store_id, tokens)
+        await db.set_store_owner_email(store_id, email)
+        await sm.set_admin_password(store_id, _auth.hash_password(pwd))
+        print(f"[auth] ✅ Self-service signup: store_id={store_id!r}")
+    except Exception as exc:
+        print(f"[auth] ❌ signup creation failed: {exc}")
+        raise HTTPException(500, "تعذّر إنشاء الحساب، يرجى المحاولة مرة أخرى")
+
+    return {
+        "token":      _auth.create_token(store_id),
+        "store_id":   store_id,
+        "store_name": name,
+        "is_super":   False,
+        "employee":   None,
+    }
+
 
 @router.post("/auth/signup")
 async def signup(req: SignupRequest, request: Request):
@@ -329,40 +413,50 @@ async def signup(req: SignupRequest, request: Request):
     if await db.find_employee_by_email_any_store(email):
         raise taken
 
-    # ── Generate a unique store_id from the email local-part ────────────
-    slug = re.sub(r"[^a-z0-9]", "_", email.split("@")[0].lower())[:20] or "store"
-    store_id = slug
-    suffix = 2
-    while sm.is_registered(store_id):
-        store_id = f"{slug}_{suffix}"
-        suffix += 1
+    # OTP gate — confirm the email owns this address before creating the account.
+    if _otp_enabled():
+        print(f"[auth] 🔐 OTP required for signup from {ip}")
+        return await _begin_otp(email, "signup")
 
-    # ── Create the account (mirrors zid_start_post register tab) ────────
-    try:
-        await sm.register_store(
-            store_id=store_id,
-            access_token="",
-            store_info={"name": name},
-            owner_email=email,
-        )
-        tokens = sm.get_store_info(store_id)
-        await db.save_store(store_id, tokens)
-        await db.set_store_owner_email(store_id, email)
-        await sm.set_admin_password(store_id, _auth.hash_password(pwd))
-        print(f"[auth] ✅ Self-service signup: store_id={store_id!r} email={email!r} from {ip}")
-    except Exception as exc:
-        print(f"[auth] ❌ signup failed for {email!r}: {exc}")
-        raise HTTPException(500, "تعذّر إنشاء الحساب، يرجى المحاولة مرة أخرى")
+    return await _create_signup_account(name, email, pwd)
 
-    # Auto-login: return the same shape as /auth/login so the SPA routes straight in.
-    token = _auth.create_token(store_id)
-    return {
-        "token":      token,
-        "store_id":   store_id,
-        "store_name": name,
-        "is_super":   False,
-        "employee":   None,
-    }
+
+@router.post("/auth/otp/verify")
+async def otp_verify(req: OtpVerifyRequest, request: Request):
+    """
+    Second step of OTP-gated signup/login: validate the emailed 6-digit code
+    against the signed challenge, then complete the original action and return a
+    session (plus a 30-day device-trust token when remember_device is set).
+    """
+    ip      = request.client.host if request.client else "unknown"
+    email   = (req.email or "").strip().lower()
+    purpose = (req.purpose or "").strip()
+    if purpose not in ("login", "signup"):
+        raise HTTPException(400, "نوع تحقق غير صالح")
+
+    # Brute-force cap on the verify endpoint. The challenge carries only an
+    # HMAC of the code (keyed by ADMIN_SECRET), so offline guessing is
+    # impossible; this bounds online attempts.
+    if await _is_rate_limited(f"otp_vrf:{email}", max_attempts=6, window=600):
+        raise HTTPException(429, "محاولات كثيرة. اطلب رمزاً جديداً وحاول لاحقاً.")
+
+    if not _auth.verify_otp_challenge(req.challenge or "", email, purpose, req.code or ""):
+        raise HTTPException(401, "رمز التحقق غير صحيح أو منتهي الصلاحية")
+
+    if purpose == "login":
+        # Re-resolve with the RAW email so store-id (mixed-case) login still works.
+        resolved = await _resolve_login(req.email or "", req.password or "")
+        if not resolved:
+            raise HTTPException(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة")
+        resp = dict(resolved)
+        print(f"[auth] ✅ OTP login verified ({resp['store_id']!r}) from {ip}")
+    else:  # signup
+        resp = await _create_signup_account(req.name or "", email, req.password or "")
+        print(f"[auth] ✅ OTP signup verified ({resp['store_id']!r}) from {ip}")
+
+    if req.remember_device:
+        resp["device_token"] = _auth.make_device_trust(email)
+    return resp
 
 
 @router.get("/admin/{store_id}/auth/verify")
