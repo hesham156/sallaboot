@@ -12,7 +12,7 @@ import database as db
 import conversation_store as cs
 from routers.deps import (
     UPLOAD_DIR, MAX_FILE_MB, ALLOWED_EXTENSIONS, CONTENT_TYPES,
-    is_internal_session_id, is_rate_limited,
+    is_internal_session_id, is_rate_limited, read_upload_bounded, _content_length,
 )
 
 router = APIRouter()
@@ -64,9 +64,10 @@ async def upload_file(
             f"نوع الملف غير مدعوم. الأنواع المسموحة: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
-    contents = await file.read()
-    if len(contents) > MAX_FILE_MB * 1024 * 1024:
-        raise HTTPException(413, f"حجم الملف يتجاوز الحد المسموح ({MAX_FILE_MB} MB)")
+    # M-4: stream with a hard cap instead of buffering the whole body into RAM.
+    contents = await read_upload_bounded(
+        file, MAX_FILE_MB * 1024 * 1024, content_length=_content_length(request),
+    )
 
     file_id      = str(uuid.uuid4())
     content_type = CONTENT_TYPES.get(suffix, "application/octet-stream")

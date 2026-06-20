@@ -1023,6 +1023,41 @@ def _clamp_float(value, default: float, *, lo: float, hi: float) -> float:
         return default
 
 
+# ── LLM tool authorization (trusted-identity architecture) ─────────────────────
+#
+# Customer-scoped tools (track_order / get_order_invoice / lookup_customer /
+# get_abandoned_carts) NEVER read an identifier from the prompt or the request
+# body. They receive an immutable, backend-signed `SessionIdentity` and fetch
+# through an identity-bound `OwnedResourceResolver` that enforces ownership in
+# one place. See the `identity/` package and its SI-1 invariant. The dispatcher
+# (`_run_tool`) translates the resolver's typed authorization signals into the
+# verification prompt / neutral denial below, so individual tools carry no
+# authorization logic of their own.
+from identity import (
+    OwnedResourceResolver,
+    SessionIdentity,
+    VerificationRequired,
+    Forbidden,
+    require_verified_customer,
+    order_owner_id as _order_customer_id,   # back-compat alias for existing imports
+    identity_service,
+)
+
+# Shown when a customer-scoped tool runs before identity has been verified. The
+# agent is expected to follow up with a step-up (OTP / login) prompt.
+_VERIFY_REQUIRED_MSG = (
+    "لحماية خصوصية العملاء، أحتاج إلى التحقق من هويتك قبل عرض بيانات الطلبات أو "
+    "الفواتير أو الحساب. سجّل الدخول من المتجر، أو زوّدني برقم جوالك لأرسل لك رمز "
+    "تحقق، أو تواصل مع فريق الدعم."
+)
+
+# Neutral message when a verified customer asks for a resource they don't own —
+# never an existence oracle.
+_NOT_YOURS_MSG = (
+    "لم أجد طلباً مرتبطاً بحسابك بهذا الرقم. تأكد من الرقم أو تواصل مع فريق الدعم."
+)
+
+
 # Salla shipment status → Arabic label (for track_shipment). Keys match the
 # `status` enum from GET /shipments.
 _SHIPMENT_STATUS_AR = {
@@ -1390,6 +1425,10 @@ class PrintingAgent:
         )
         return terms
 
+    # Order/invoice/cart ownership now lives in identity.OwnedResourceResolver —
+    # tools build a resolver bound to the verified SessionIdentity rather than
+    # touching the raw Salla client for customer-scoped reads.
+
     # ── Live inventory + shipping ───────────────────────────────────────────────
     async def _check_stock(self, inputs: dict) -> str:
         """Live per-variant (or product-level) stock + price straight from Salla."""
@@ -1589,7 +1628,14 @@ class PrintingAgent:
         return "\n".join(lines)
 
     # ── Tool runner ────────────────────────────────────────────────────────────
-    async def _run_tool(self, name: str, inputs: dict, session_id: str = "") -> str:
+    async def _run_tool(self, name: str, inputs: dict, session_id: str = "",
+                        identity: "SessionIdentity | None" = None) -> str:
+        # Identity is resolved by the chat handler and threaded in. Fall back to a
+        # safe resolution (channel sessions verify by their authenticated sender;
+        # everything else is anonymous) so a forgotten caller fails CLOSED, never
+        # open. Customer-scoped tools read identity ONLY from this object.
+        if identity is None:
+            identity = identity_service.resolve(self.store_id, session_id)
         try:
             # ── get_store_contact_info ──────────────────────────────────────
             if name == "get_store_contact_info":
@@ -2317,59 +2363,17 @@ class PrintingAgent:
                 if not self.salla:
                     return "⚠️ لم يتم ربط المتجر بعد."
 
-                cid_raw       = inputs.get("customer_id")
-                phone         = (inputs.get("phone") or "").strip()
-                search_name   = (inputs.get("name")  or "").strip()
+                # Identity-bound: returns ONLY the verified customer's own record.
+                # Anonymous → VerificationRequired (handled centrally). There is no
+                # arbitrary id/phone/name lookup here anymore.
+                require_verified_customer(identity)
                 include_stats = bool(inputs.get("include_stats", False))
-
-                if not cid_raw and not phone and not search_name:
-                    return "⚠️ يرجى تزويدي برقم الجوال أو اسم العميل للبحث."
-
-                customer: dict = {}
-
-                # 1. Direct lookup by Salla customer_id (fastest)
-                if cid_raw:
-                    try:
-                        fields = ["orders_count", "orders_amount", "wallet_balance"] \
-                                 if include_stats else []
-                        resp     = await self.salla.get_customer(int(cid_raw), fields=fields or None)
-                        customer = resp.get("data", {})
-                    except Exception:
-                        pass
-
-                # 2. Search by phone keyword
-                if not customer and phone:
-                    try:
-                        resp  = await self.salla.get_customer_by_phone(phone)
-                        found = resp.get("data", [])
-                        if isinstance(found, list) and found:
-                            customer = found[0]
-                        elif isinstance(found, dict) and found.get("id"):
-                            customer = found
-                        # If found, fetch full record with optional stats
-                        if customer.get("id") and include_stats:
-                            fields = ["orders_count", "orders_amount", "wallet_balance"]
-                            resp2    = await self.salla.get_customer(int(customer["id"]), fields=fields)
-                            customer = resp2.get("data", customer)
-                    except Exception:
-                        pass
-
-                # 3. Search by name keyword
-                if not customer and search_name:
-                    try:
-                        resp  = await self.salla.get_customer_by_phone(search_name)  # keyword
-                        found = resp.get("data", [])
-                        if isinstance(found, list) and found:
-                            customer = found[0]
-                        elif isinstance(found, dict) and found.get("id"):
-                            customer = found
-                    except Exception:
-                        pass
+                resolver = OwnedResourceResolver(self.salla, identity)
+                customer = await resolver.get_my_profile(include_stats=include_stats)
 
                 if not customer:
-                    hint = phone or search_name or str(cid_raw)
                     return (
-                        f"لم أجد عميلاً بـ {hint} في سلة. 😔\n"
+                        "لم أتمكن من جلب بيانات حسابك من سلة الآن. 😔\n"
                         "لعله عميل جديد — سأجمع بياناته وأنشئ له حساباً تلقائياً عند إتمام الطلب."
                     )
 
@@ -2438,85 +2442,20 @@ class PrintingAgent:
                 if not self.salla:
                     return "⚠️ لم يتم ربط المتجر بعد."
 
-                invoice_id_raw = inputs.get("invoice_id")
-                order_ref      = (inputs.get("order_reference") or "").strip()
-
-                invoice: dict = {}
-
-                # Step 1: direct invoice_id lookup
-                if invoice_id_raw:
-                    try:
-                        resp    = await self.salla.get_invoice(int(invoice_id_raw))
-                        invoice = resp.get("data", {})
-                    except Exception:
-                        pass
-
-                # Step 2: find invoice via order reference
-                if not invoice and order_ref:
-                    order: dict = {}
-                    # 2a. direct order ID
-                    try:
-                        d     = await self.salla.get_order(order_ref)
-                        order = d.get("data", {})
-                    except Exception:
-                        pass
-                    # 2b. search by reference string
-                    if not order:
-                        try:
-                            d      = await self.salla.get_orders(reference_id=order_ref, per_page=5)
-                            orders = d.get("data", [])
-                            order  = orders[0] if orders else {}
-                        except Exception:
-                            pass
-                    # 2c. keyword search
-                    if not order:
-                        try:
-                            d      = await self.salla.get_orders(keyword=order_ref, per_page=5)
-                            orders = d.get("data", [])
-                            order  = orders[0] if orders else {}
-                        except Exception:
-                            pass
-
-                    if order:
-                        oid = order.get("id")
-                        # Try to list invoices for the found order
-                        if oid:
-                            try:
-                                inv_list = await self.salla.list_order_invoices(int(oid))
-                                inv_data = inv_list.get("data", [])
-                                if isinstance(inv_data, list) and inv_data:
-                                    first_inv_id = inv_data[0].get("id")
-                                elif isinstance(inv_data, dict):
-                                    first_inv_id = inv_data.get("id")
-                                else:
-                                    first_inv_id = None
-                                if first_inv_id:
-                                    resp    = await self.salla.get_invoice(int(first_inv_id))
-                                    invoice = resp.get("data", {})
-                            except Exception:
-                                pass
-
-                        # Fallback: check if order itself carries invoice data
-                        if not invoice:
-                            raw_inv = order.get("invoice") or order.get("invoices")
-                            if isinstance(raw_inv, dict) and raw_inv.get("id"):
-                                try:
-                                    resp    = await self.salla.get_invoice(int(raw_inv["id"]))
-                                    invoice = resp.get("data", {})
-                                except Exception:
-                                    pass
-                            elif isinstance(raw_inv, list) and raw_inv:
-                                try:
-                                    resp    = await self.salla.get_invoice(int(raw_inv[0]["id"]))
-                                    invoice = resp.get("data", {})
-                                except Exception:
-                                    pass
+                # Identity-bound: the resolver returns an invoice only for an order
+                # owned by the verified customer (an invoice_id is resolved back to
+                # its order to check ownership first). Anonymous → VerificationRequired.
+                require_verified_customer(identity)
+                resolver = OwnedResourceResolver(self.salla, identity)
+                invoice = await resolver.get_invoice(
+                    order_reference=(inputs.get("order_reference") or "").strip(),
+                    invoice_id=inputs.get("invoice_id"),
+                )
 
                 if not invoice:
-                    hint = order_ref or str(invoice_id_raw or "")
                     return (
-                        f"لم أجد فاتورة للطلب {hint}. 😔\n"
-                        "تأكد من الرقم وحاول مرة أخرى، أو أفدني برقم الفاتورة مباشرةً."
+                        "لم أجد فاتورة مرتبطة بحسابك بهذا الرقم. 😔\n"
+                        "تأكد من رقم الطلب وحاول مرة أخرى، أو تواصل مع فريق الدعم."
                     )
 
                 # ── Format invoice for the customer ──────────────────────────
@@ -2594,46 +2533,20 @@ class PrintingAgent:
                 if not self.salla:
                     return "⚠️ لم يتم ربط المتجر بعد."
 
-                ref   = (inputs.get("order_reference") or "").strip()
-                phone = (inputs.get("customer_phone")  or "").strip()
+                # Identity-bound: the resolver returns an order only if it belongs
+                # to the verified customer; no keyword/phone search exists.
+                # Anonymous → VerificationRequired (handled centrally).
+                require_verified_customer(identity)
+                ref = (inputs.get("order_reference") or "").strip()
+                if not ref:
+                    return "⚠️ يرجى تزويدي برقم الطلب لعرض حالته."
 
-                if not ref and not phone:
-                    return "⚠️ يرجى تزويدي برقم الطلب أو رقم الجوال للبحث."
-
-                order = {}
-
-                # 1. Try direct order-ID lookup
-                if ref:
-                    try:
-                        data  = await self.salla.get_order(ref)
-                        order = data.get("data", {})
-                    except Exception:
-                        pass
-
-                # 2. Search by reference string
-                if not order and ref:
-                    try:
-                        data   = await self.salla.get_orders(reference_id=ref, per_page=5)
-                        orders = data.get("data", [])
-                        order  = orders[0] if orders else {}
-                    except Exception:
-                        pass
-
-                # 3. Search by keyword (catches phone, name, reference)
+                resolver = OwnedResourceResolver(self.salla, identity)
+                order = await resolver.get_order(ref)
                 if not order:
-                    keyword = phone or ref
-                    try:
-                        data   = await self.salla.get_orders(keyword=keyword, per_page=5)
-                        orders = data.get("data", [])
-                        order  = orders[0] if orders else {}
-                    except Exception:
-                        pass
-
-                if not order:
-                    hint = f"رقم الطلب: {ref}" if ref else f"الجوال: {phone}"
                     return (
-                        f"لم أجد طلباً بـ {hint}. 😔\n"
-                        "تأكد من الرقم وحاول مرة أخرى، أو تواصل مع فريق الدعم."
+                        "لم أجد طلباً مرتبطاً بحسابك بهذا الرقم. 😔\n"
+                        "تأكد من رقم الطلب وحاول مرة أخرى، أو تواصل مع فريق الدعم."
                     )
 
                 # ── Format the order nicely ────────────────────────────────
@@ -2734,24 +2647,15 @@ class PrintingAgent:
             elif name == "get_abandoned_carts":
                 if not self.salla:
                     return "⚠️ لم يتم ربط المتجر بعد."
-                try:
-                    data  = await self.salla.get_abandoned_carts(per_page=10)
-                    carts = data.get("data", [])
-                except Exception as e:
-                    return f"⚠️ تعذّر جلب السلات المتروكة: {type(e).__name__}: {e}"
 
+                # Identity-bound: the resolver returns ONLY the verified customer's
+                # own abandoned carts — never the store's. Anonymous →
+                # VerificationRequired (handled centrally).
+                require_verified_customer(identity)
+                resolver = OwnedResourceResolver(self.salla, identity)
+                carts = await resolver.get_my_abandoned_carts()
                 if not carts:
-                    return "لا توجد سلات متروكة حالياً."
-
-                # Optional phone filter
-                phone_filter = inputs.get("customer_phone", "").strip()
-                if phone_filter:
-                    carts = [
-                        c for c in carts
-                        if phone_filter in str((c.get("customer") or {}).get("mobile", ""))
-                    ]
-                    if not carts:
-                        return f"لا توجد سلة متروكة مرتبطة بالرقم {phone_filter}."
+                    return "لا توجد سلة متروكة مرتبطة بحسابك حالياً."
 
                 lines = [f"السلات المتروكة ({len(carts)}):"]
                 for c in carts[:5]:
@@ -3208,6 +3112,13 @@ class PrintingAgent:
                     "⚠️ هذا تقدير مبدئي. للحصول على عرض دقيق أرسل مواصفات التصميم."
                 )
 
+        # Centralised authorization signals (raised by require_verified_customer /
+        # the OwnedResourceResolver). Tools never format these themselves, so the
+        # invariant is enforced in exactly one place for every customer-scoped tool.
+        except VerificationRequired:
+            return _VERIFY_REQUIRED_MSG
+        except Forbidden:
+            return _NOT_YOURS_MSG
         except Exception as e:
             return f"حدث خطأ: {type(e).__name__}: {str(e)}"
 
@@ -3269,10 +3180,18 @@ class PrintingAgent:
         return "\n".join(lines)
 
     # ── Chat entry point ───────────────────────────────────────────────────────
-    async def chat(self, message: str, session_id: str) -> str:
+    async def chat(self, message: str, session_id: str,
+                   identity: "SessionIdentity | None" = None) -> str:
         # Zero the usage counter so the caller (chat handler) reads only the
         # tokens this turn consumed, even after fast-path or exception paths.
         self._reset_usage()
+
+        # Resolve the trusted identity once per turn and thread it into every
+        # tool call. The chat handler normally supplies it; if omitted we resolve
+        # a safe default (channel sessions verify by their authenticated sender,
+        # everything else is anonymous) so identity is NEVER read from a body field.
+        if identity is None:
+            identity = identity_service.resolve(self.store_id, session_id)
 
         # ── Pre-LLM fast path ────────────────────────────────────────────────
         # Try to answer greetings / stored FAQs / informational intents WITHOUT
@@ -3287,7 +3206,7 @@ class PrintingAgent:
 
         if fp:
             if fp["type"] == "tool":
-                reply = await self._run_tool(fp["tool"], {}, session_id)
+                reply = await self._run_tool(fp["tool"], {}, session_id, identity=identity)
             else:
                 reply = fp.get("text", "")
             # Persist user+assistant ONLY when we actually answer here, so an
@@ -3363,7 +3282,7 @@ class PrintingAgent:
                         args = json.loads(tc.function.arguments)
                     except Exception:
                         args = {}
-                    result = await self._run_tool(tc.function.name, args, session_id)
+                    result = await self._run_tool(tc.function.name, args, session_id, identity=identity)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -3444,7 +3363,7 @@ class PrintingAgent:
                         args = json.loads(tc.function.arguments)
                     except Exception:
                         args = {}
-                    result = await self._run_tool(tc.function.name, args, session_id)
+                    result = await self._run_tool(tc.function.name, args, session_id, identity=identity)
                     messages.append({
                         "role":         "tool",
                         "tool_call_id": tc.id,
@@ -3537,7 +3456,7 @@ class PrintingAgent:
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
-                        result = await self._run_tool(block.name, block.input, session_id)
+                        result = await self._run_tool(block.name, block.input, session_id, identity=identity)
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,

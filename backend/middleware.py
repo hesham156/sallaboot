@@ -253,7 +253,17 @@ def _apply_security_headers(response, path: str) -> None:
         "Permissions-Policy",
         "camera=(), microphone=(), geolocation=(), browsing-topics=()",
     )
-    if path == "/admin" or path.startswith("/admin/"):
+    # Anti-clickjacking on every authenticated dashboard surface (finding A-1):
+    # the SPA is served at /admin*, the per-merchant dashboard at /store/*, and
+    # the credential entry at /login. The storefront widget (/widget.js, /chat,
+    # /file, /upload) is intentionally excluded so it keeps embedding in
+    # merchant themes.
+    is_dashboard = (
+        path in ("/admin", "/store", "/login")
+        or path.startswith("/admin/")
+        or path.startswith("/store/")
+    )
+    if is_dashboard:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault(
             "Content-Security-Policy",

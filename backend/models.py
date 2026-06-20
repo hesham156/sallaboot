@@ -10,22 +10,28 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Chat (public widget surface) ─────────────────────────────────────────
 
 class ChatRequest(BaseModel):
+    # message length is enforced in the handler (>4000 → 413) to preserve that
+    # error contract; the auxiliary fields get schema-level upper bounds (#9) so
+    # an unauthenticated caller can't push unbounded strings into storage/lookup.
     message: str
-    session_id: Optional[str] = None
-    store_id: Optional[str] = "default"
+    session_id: Optional[str] = Field(default=None, max_length=200)
+    store_id: Optional[str] = Field(default="default", max_length=120)
     # Salla storefront SDK passes the logged-in customer's ID here. When
     # present, the backend looks up the customer's profile from Salla
     # (name, phone, email, city, gender) and links any future conversation
     # to it — so the same customer's chat history follows them across
     # devices and re-opens.
-    customer_id: Optional[str] = None
-    customer_name: Optional[str] = None   # widget hint when SDK has it
+    customer_id: Optional[str] = Field(default=None, max_length=64)
+    customer_name: Optional[str] = Field(default=None, max_length=200)   # widget hint when SDK has it
+    # Backend-issued signed session token from a previous turn. The ONLY trusted
+    # carrier of identity; `customer_id` above is a personalization hint only.
+    session_token: Optional[str] = Field(default=None, max_length=4096)
 
 
 class ChatResponse(BaseModel):
@@ -34,13 +40,15 @@ class ChatResponse(BaseModel):
     bot_enabled: bool = True
     components: Optional[list] = None   # rich UI components (product cards, cart, checkout…)
     cart_count: int = 0                 # current cart item count for badge
+    # Signed session token the widget should persist and echo back next turn.
+    session_token: Optional[str] = None
 
 
 class RateRequest(BaseModel):
-    session_id: str
-    store_id:   str = "default"
-    rating:     int          # 1 – 5
-    comment:    str = ""
+    session_id: str = Field(max_length=200)
+    store_id:   str = Field(default="default", max_length=120)
+    rating:     int          # 1 – 5 (range enforced in the handler → 400)
+    comment:    str = Field(default="", max_length=2000)
 
 
 # ── Admin (authenticated) ────────────────────────────────────────────────
@@ -60,37 +68,43 @@ class EndConversationRequest(BaseModel):
 
 # ── Auth ─────────────────────────────────────────────────────────────────
 
+# Upper bounds below are generous safety caps (#9): they sit far above any
+# legitimate value and exist only to stop unbounded-input abuse. Capping
+# `password` length in particular blocks an argon2-hashing CPU-DoS from a
+# multi-megabyte password. Semantic checks (email format, password >= 8) still
+# run in the handlers and keep their existing error messages.
+
 class LoginRequest(BaseModel):
-    password: str
-    email: Optional[str] = ""
+    password: str = Field(max_length=1024)
+    email: Optional[str] = Field(default="", max_length=320)
     # "Remember this device" token from a previous OTP-verified login. When valid
     # for this email, login skips the OTP step (finding: email 2FA, 30-day trust).
-    device_token: Optional[str] = ""
+    device_token: Optional[str] = Field(default="", max_length=4096)
 
 
 class OtpVerifyRequest(BaseModel):
     """Second step of OTP-gated signup/login: the user submits the emailed code
     plus the signed challenge and the original credentials (re-checked server-side)."""
-    email:           str
-    code:            str
-    challenge:       str
-    purpose:         str                    # "signup" | "login"
-    password:        str
-    name:            Optional[str] = ""     # signup only
+    email:           str = Field(max_length=320)
+    code:            str = Field(max_length=12)
+    challenge:       str = Field(max_length=4096)
+    purpose:         str = Field(max_length=16)   # "signup" | "login"
+    password:        str = Field(max_length=1024)
+    name:            Optional[str] = Field(default="", max_length=200)     # signup only
     remember_device: Optional[bool] = True  # issue a 30-day device-trust token
 
 
 class EmployeeLoginRequest(BaseModel):
-    email:    str
-    password: str
+    email:    str = Field(max_length=320)
+    password: str = Field(max_length=1024)
 
 
 class SignupRequest(BaseModel):
     """Self-service merchant signup — creates a platform-independent 7ayak
     account that can later link Salla / Shopify / Zid from the dashboard."""
-    name:     str
-    email:    str
-    password: str
+    name:     str = Field(max_length=200)
+    email:    str = Field(max_length=320)
+    password: str = Field(max_length=1024)
 
 
 class PasswordChangeRequest(BaseModel):

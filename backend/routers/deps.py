@@ -34,6 +34,48 @@ CONTENT_TYPES = {
     ".zip": "application/zip",
 }
 
+# Slack for the multipart envelope (boundaries + small form fields) when using
+# Content-Length as a coarse early-reject, so a file exactly at the limit isn't
+# falsely rejected. The streaming check below remains the authoritative bound.
+_UPLOAD_CL_SLACK = 64 * 1024
+
+
+async def read_upload_bounded(file, max_bytes: int, *, content_length: int | None = None) -> bytes:
+    """
+    Read an UploadFile in chunks, aborting the moment it exceeds ``max_bytes``
+    (finding M-4). Replaces ``await file.read()`` which buffers the ENTIRE body
+    into RAM before any size check — a memory-exhaustion DoS on a large upload.
+
+    Honours ``content_length`` (the request's Content-Length) as an early reject
+    so an oversized body isn't streamed at all. Memory is bounded to ~max_bytes.
+    Raises HTTPException(413) on overflow.
+    """
+    from fastapi import HTTPException
+    limit_mb = max(1, max_bytes // (1024 * 1024))
+    too_big  = HTTPException(413, f"حجم الملف يتجاوز الحد المسموح ({limit_mb} MB)")
+    if content_length is not None and content_length > max_bytes + _UPLOAD_CL_SLACK:
+        raise too_big
+    chunks: list[bytes] = []
+    total  = 0
+    while True:
+        part = await file.read(1024 * 1024)
+        if not part:
+            break
+        total += len(part)
+        if total > max_bytes:
+            raise too_big
+        chunks.append(part)
+    return b"".join(chunks)
+
+
+def _content_length(request) -> int | None:
+    """Best-effort parse of the request Content-Length header → int or None."""
+    try:
+        raw = request.headers.get("content-length") if request else None
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
 # ── Audit ─────────────────────────────────────────────────────────────────────
 _REASON_MIN_LENGTH = 5
 _REASON_MAX_LENGTH = 500

@@ -21,6 +21,7 @@ import notifications as _notif
 from models import ChatRequest, ChatResponse, RateRequest
 from salla_oauth import get_auth_url, exchange_code, get_user_info, save_tokens
 from routers.deps import chat_rate_limited, budget_exhausted, daily_token_budget, is_internal_session_id
+from identity import identity_service
 import log as _logmod
 
 log = _logmod.get_logger("backend.chat")
@@ -295,15 +296,21 @@ async def chat(req: ChatRequest, request: Request):
     if raw_cid in ("0", "null", "undefined") or "{{" in raw_cid:
         raw_cid = ""
 
-    if raw_cid and not req.session_id:
-        resumed = await cs.find_session_by_customer_db(store_id, raw_cid)
-        if resumed:
-            session_id = resumed
-            print(f"[chat] 🔄 Resumed session {session_id} for customer {raw_cid}")
-        else:
-            session_id = str(uuid.uuid4())
-    else:
-        session_id = req.session_id or str(uuid.uuid4())
+    # Session resume is by the client's OWN random-uuid session_id only. Resuming
+    # by customer_id is removed: customer_id is a client-supplied claim, and
+    # deriving a session from it let an attacker reopen another customer's
+    # transcript (conversation hijack). raw_cid below is used purely as a
+    # personalization hint — never for identity or session lookup.
+    session_id = req.session_id or str(uuid.uuid4())
+
+    # Trusted identity for this turn — resolved from the backend-signed session
+    # token (or the channel sender), NEVER from customer_id. Anonymous when the
+    # widget hasn't been verified yet. This is the sole authorization anchor the
+    # AI tools will see.
+    identity   = identity_service.resolve(store_id, session_id, token=(req.session_token or "").strip())
+    out_token  = ((req.session_token or "").strip()
+                  if identity.is_verified_customer and (req.session_token or "").strip()
+                  else identity_service.issue_anonymous(store_id, session_id))
 
     await cs.restore_to_memory(session_id)
 
@@ -346,14 +353,14 @@ async def chat(req: ChatRequest, request: Request):
                 "يرجى تثبيت التطبيق من سوق سلة أو التواصل مع الدعم."
             )
             await cs.add_message(session_id, "assistant", err_reply, requested_store_id)
-            return ChatResponse(reply=err_reply, session_id=session_id, bot_enabled=True)
+            return ChatResponse(reply=err_reply, session_id=session_id, bot_enabled=True, session_token=out_token)
 
         err_reply = (
             "عذراً، المتجر غير مُعدّ بعد. "
             "يرجى ربط المتجر من لوحة التحكم أو التواصل مع الدعم."
         )
         await cs.add_message(session_id, "assistant", err_reply, store_id)
-        return ChatResponse(reply=err_reply, session_id=session_id, bot_enabled=True)
+        return ChatResponse(reply=err_reply, session_id=session_id, bot_enabled=True, session_token=out_token)
 
     exhausted, used_today, budget = await budget_exhausted(store_id)
     if exhausted:
@@ -364,10 +371,10 @@ async def chat(req: ChatRequest, request: Request):
             "عذراً، المساعد غير متاح مؤقتاً. "
             "يمكنك ترك رسالتك وسيقوم الفريق بالرد عليك قريباً."
         )
-        return ChatResponse(reply=err_reply, session_id=session_id, bot_enabled=True)
+        return ChatResponse(reply=err_reply, session_id=session_id, bot_enabled=True, session_token=out_token)
 
     try:
-        reply = await agent.chat(message=req.message, session_id=session_id)
+        reply = await agent.chat(message=req.message, session_id=session_id, identity=identity)
     except Exception as e:
         err_msg  = str(e)
         err_type = type(e).__name__
@@ -392,7 +399,7 @@ async def chat(req: ChatRequest, request: Request):
             friendly = "عذراً، حدث خطأ مؤقت في معالجة طلبك. يرجى المحاولة مرة أخرى. 🙏"
 
         await cs.add_message(session_id, "assistant", friendly, store_id)
-        return ChatResponse(reply=friendly, session_id=session_id, bot_enabled=True)
+        return ChatResponse(reply=friendly, session_id=session_id, bot_enabled=True, session_token=out_token)
 
     _usage = getattr(agent, "last_usage", None) or {}
     _ti, _to = int(_usage.get("in", 0)), int(_usage.get("out", 0))

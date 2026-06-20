@@ -28,6 +28,21 @@ def _require_store(store_id: str):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
 
 
+# CSV/Excel formula-injection mitigation (finding M-2). Contact fields originate
+# from untrusted sources (a customer's WhatsApp profile name, Salla customer
+# data). A value starting with =, +, -, @, or a tab/CR is interpreted by Excel /
+# Sheets as a formula on open. Prefix those with a single apostrophe — the
+# standard mitigation; spreadsheets render it as plain text and hide the quote.
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value) -> str:
+    s = "" if value is None else str(value)
+    if s[:1] in _CSV_FORMULA_TRIGGERS:
+        return "'" + s
+    return s
+
+
 # ── List ───────────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/contacts")
@@ -216,13 +231,13 @@ async def export_contacts(store_id: str, request: Request, search: str = Query("
     for r in records:
         ls = r.get("last_seen")
         writer.writerow([
-            r.get("name") or "",
-            r.get("phone") or "",
-            r.get("email") or "",
-            r.get("company") or "",
-            r.get("city") or "",
-            r.get("country") or "",
-            r.get("source") or "",
+            _csv_safe(r.get("name")),
+            _csv_safe(r.get("phone")),
+            _csv_safe(r.get("email")),
+            _csv_safe(r.get("company")),
+            _csv_safe(r.get("city")),
+            _csv_safe(r.get("country")),
+            _csv_safe(r.get("source")),
             ls.strftime("%Y-%m-%d") if ls else "",
         ])
 

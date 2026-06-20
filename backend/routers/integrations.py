@@ -120,10 +120,15 @@ async def shopify_widget_script(store_id: str):
     store_id, then dynamically loads /widget.js.
     Shopify ScriptTag points here so the widget auto-appears on the storefront.
     """
+    # H-1: store_id is reflected into served JavaScript. Validate against a
+    # strict allowlist and json.dumps the value so a crafted path can't break
+    # out of the string literal into executable code.
+    if not re.match(r"^[A-Za-z0-9_-]{1,64}$", store_id or ""):
+        raise HTTPException(404, "store not found")
     widget_url = f"{BASE_URL}/widget.js"
     script = f"""(function(){{
   window.SallaChatConfig = window.SallaChatConfig || {{}};
-  window.SallaChatConfig.storeId  = "{store_id}";
+  window.SallaChatConfig.storeId  = {_json.dumps(store_id)};
   window.SallaChatConfig.apiUrl   = "{BASE_URL}";
   window.SallaChatConfig.platform = "shopify";
   var s = document.createElement('script');

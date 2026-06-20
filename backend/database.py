@@ -575,33 +575,44 @@ async def add_training(store_id: str, kind: str, title: str, content: str,
         return None
 
 
-async def update_training_enabled(training_id: int, enabled: bool) -> bool:
-    """Toggle whether a training entry is included in the prompt."""
+async def update_training_enabled(training_id: int, enabled: bool, store_id: str) -> bool:
+    """Toggle whether a training entry is included in the prompt.
+
+    Scoped by store_id (finding M-1): the row is only updated when it belongs to
+    the calling store, so a tenant can't toggle another tenant's training by
+    guessing the global integer id. Returns True only when a row was affected.
+    """
     if not _pool:
         return False
     try:
         async with _pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE bot_training SET enabled = $1 WHERE id = $2",
-                enabled, int(training_id),
+            result = await conn.execute(
+                "UPDATE bot_training SET enabled = $1 WHERE id = $2 AND store_id = $3",
+                enabled, int(training_id), store_id,
             )
-        return True
+        # asyncpg returns 'UPDATE <rowcount>'
+        return int(result.split()[-1]) > 0
     except Exception as e:
         print(f"[db] update_training_enabled error: {e}")
         return False
 
 
-async def delete_training(training_id: int) -> tuple[bool, str | None]:
-    """Delete a training row. Returns (ok, deleted_file_id)."""
+async def delete_training(training_id: int, store_id: str) -> tuple[bool, str | None]:
+    """Delete a training row. Returns (ok, deleted_file_id).
+
+    Scoped by store_id (finding M-1): only deletes the row when it belongs to the
+    calling store, so a tenant can't delete another tenant's training by guessing
+    the global integer id. (ok=False, None) when no owned row matched.
+    """
     if not _pool:
         return False, None
     try:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow(
-                "DELETE FROM bot_training WHERE id = $1 RETURNING file_id",
-                int(training_id),
+                "DELETE FROM bot_training WHERE id = $1 AND store_id = $2 RETURNING file_id",
+                int(training_id), store_id,
             )
-        return True, (row["file_id"] if row else None)
+        return (row is not None), (row["file_id"] if row else None)
     except Exception as e:
         print(f"[db] delete_training error: {e}")
         return False, None

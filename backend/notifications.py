@@ -221,12 +221,64 @@ async def send_otp_email(to: str, code: str, purpose: str = "login") -> bool:
     return await _send_email(to, f"رمز التحقق: {code} — حياك", html)
 
 
+# ── SSRF guard for outbound webhooks (finding M-3) ─────────────────────────────
+import ipaddress as _ipaddress
+import socket as _socket
+from urllib.parse import urlparse as _urlparse
+
+
+def _host_is_public(hostname: str) -> bool:
+    """True only when EVERY resolved IP for `hostname` is a public, routable
+    address. Blocks loopback / private / link-local / reserved ranges — including
+    the cloud metadata endpoint 169.254.169.254."""
+    try:
+        infos = _socket.getaddrinfo(hostname, None)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            addr = _ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return False
+    return True
+
+
+def is_webhook_url_allowed(url: str) -> bool:
+    """SSRF allow-check for a merchant-supplied notification webhook URL.
+
+    Requires HTTPS and a public hostname; rejects http, missing host, IP
+    literals in internal ranges, and hostnames that resolve to
+    localhost/private/link-local/reserved addresses. Returns False for anything
+    that isn't safe to POST to from the server.
+    """
+    try:
+        p = _urlparse((url or "").strip())
+    except Exception:
+        return False
+    if p.scheme != "https" or not p.hostname:
+        return False
+    return _host_is_public(p.hostname)
+
+
 async def _send_webhook(url: str, payload: dict) -> bool:
-    """POST a JSON payload to a custom webhook URL (Slack, Zapier, etc.)."""
+    """POST a JSON payload to a custom webhook URL (Slack, Zapier, etc.).
+
+    SSRF-guarded (M-3): HTTPS-only, public host required, redirects disabled —
+    so a merchant can't point this at internal infrastructure or the cloud
+    metadata service.
+    """
     if not url:
         return False
+    if not is_webhook_url_allowed(url):
+        print(f"[notifications] Webhook blocked by SSRF guard: {url[:80]!r}")
+        return False
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
             r = await client.post(url, json=payload)
         return r.status_code < 400
     except Exception as exc:

@@ -18,6 +18,33 @@ from routers.deps import audit, super_viewing_other_store, _REASON_MIN_LENGTH, _
 router = APIRouter()
 
 
+# ── Cross-tenant ownership guard (finding C-1) ─────────────────────────────────
+async def _load_owned_conv(session_id: str, store_id: str, request: Request) -> dict | None:
+    """
+    Restore + fetch a conversation, enforcing tenant ownership.
+
+    Conversations live in one global map keyed by session_id, and channel
+    session ids (wa:/msgr:/ig:) are enumerable. Without this guard a store could
+    read or mutate ANOTHER tenant's conversation by passing its session id to
+    this store's own (authorised) route. We reject with 404 — never 403, so the
+    response can't confirm the foreign session exists — when the conversation
+    belongs to a different store.
+
+    Returns the conv dict, or None when the session doesn't exist yet, so callers
+    keep their existing miss behaviour (detail returns an empty shell; end raises
+    404). Super admins viewing a foreign store pass through: their cross-store
+    access is already gated by the support-access grant enforced in
+    middleware.admin_auth_middleware.
+    """
+    await cs.restore_to_memory(session_id)
+    conv = cs.all_conversations().get(session_id)
+    if conv is not None:
+        owner = conv.get("store_id")
+        if owner and owner != store_id and not super_viewing_other_store(request, store_id):
+            raise HTTPException(404, "المحادثة غير موجودة")
+    return conv
+
+
 # ── Bot toggle ────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/bot/status")
@@ -85,8 +112,7 @@ async def store_conversation_detail(
             },
         )
 
-    await cs.restore_to_memory(session_id)
-    conv = cs.all_conversations().get(session_id)
+    conv = await _load_owned_conv(session_id, store_id, request)
     if not conv:
         return {"session_id": session_id, "messages": [], "bot_enabled": True}
     await cs.mark_admin_read(session_id)
@@ -113,7 +139,8 @@ async def store_admin_reply(
 ):
     if not req.message.strip():
         raise HTTPException(400, "الرسالة فارغة")
-    await cs.restore_to_memory(session_id)
+    # C-1: bind the session to this store before writing into it.
+    await _load_owned_conv(session_id, store_id, request)
     text = req.message.strip()
     msg = await cs.add_message(session_id, "admin", text, store_id)
 
@@ -154,8 +181,8 @@ async def store_admin_reply(
 # ── Takeover / handback ───────────────────────────────────────────────────────
 
 @router.post("/admin/{store_id}/conversations/{session_id}/takeover")
-async def store_takeover(store_id: str, session_id: str):
-    await cs.restore_to_memory(session_id)
+async def store_takeover(store_id: str, session_id: str, request: Request):
+    await _load_owned_conv(session_id, store_id, request)  # C-1
     await cs.set_session_bot(session_id, False)
     await cs.mark_admin_read(session_id)
     await cs.flush(session_id)
@@ -171,8 +198,8 @@ async def store_takeover(store_id: str, session_id: str):
 
 
 @router.post("/admin/{store_id}/conversations/{session_id}/handback")
-async def store_handback(store_id: str, session_id: str):
-    await cs.restore_to_memory(session_id)
+async def store_handback(store_id: str, session_id: str, request: Request):
+    await _load_owned_conv(session_id, store_id, request)  # C-1
     await cs.set_session_bot(session_id, True)
     await cs.add_message(session_id, "admin",
                    "✅ تم إعادة توصيلك بالمساعد الذكي. كيف يمكنني مساعدتك؟",
@@ -197,8 +224,7 @@ async def store_end_conversation(
     req: EndConversationRequest,
     request: Request,
 ):
-    await cs.restore_to_memory(session_id)
-    conv = cs.all_conversations().get(session_id)
+    conv = await _load_owned_conv(session_id, store_id, request)  # C-1
     if not conv:
         raise HTTPException(404, "المحادثة غير موجودة")
 

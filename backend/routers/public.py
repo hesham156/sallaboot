@@ -410,15 +410,28 @@ async def test_widget_page(store_id: str):
     developers can test the bot without going through Salla Snippets.
     Linked from the admin dashboard 'Test Bot' button.
     """
-    base  = os.getenv("BASE_URL", "http://localhost:8000")
-    info  = sm.get_store_info(store_id)
-    name  = info.get("store_name", f"متجر {store_id}")
+    import html as _html
+    import json as _json
+    import re as _re
+    # Reflected-XSS guard (finding H-1): this page echoes store_id into both an
+    # HTML and an inline-JS context. Validate against a strict allowlist, then
+    # encode per context — html.escape for markup, json.dumps for the script.
+    if not _re.match(r"^[A-Za-z0-9_-]{1,64}$", store_id or ""):
+        raise HTTPException(404, "store not found")
+    base   = os.getenv("BASE_URL", "http://localhost:8000")
+    info   = sm.get_store_info(store_id)
+    name   = info.get("store_name", f"متجر {store_id}")
+    e_sid  = _html.escape(store_id)
+    e_name = _html.escape(name)
+    j_sid  = _json.dumps(store_id)
+    j_name = _json.dumps(name)
+    j_base = _json.dumps(base)
     return HTMLResponse(f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>اختبار بوت — {name}</title>
+<title>اختبار بوت — {e_name}</title>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
@@ -436,18 +449,18 @@ async def test_widget_page(store_id: str):
   <h1>🧪 وضع الاختبار</h1>
   <p class="sub">البوت يعمل بـ store_id الحقيقي — اضغط أيقونة الدردشة أسفل الشاشة</p>
   <div class="info">
-    <div><b>المتجر:</b> {name}</div>
-    <div><b>Store ID:</b> {store_id}</div>
+    <div><b>المتجر:</b> {e_name}</div>
+    <div><b>Store ID:</b> {e_sid}</div>
   </div>
   <p class="hint">💡 هذه الصفحة للاختبار فقط — لا تشاركها مع العملاء</p>
 </div>
 <script>
 window.SallaChatConfig = {{
-  storeId:      "{store_id}",
-  storeName:    "{name}",
+  storeId:      {j_sid},
+  storeName:    {j_name},
   primaryColor: "#1a56db",
   position:     "left",
-  apiUrl:       "{base}",
+  apiUrl:       {j_base},
 }};
 </script>
 <script src="{base}/widget.js" defer></script>

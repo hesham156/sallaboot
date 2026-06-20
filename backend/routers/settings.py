@@ -19,7 +19,7 @@ from models import (
     AIConfigRequest, CustomKnowledgeRequest, TrainingTextRequest,
     NotificationSettingsRequest, PasswordChangeRequest,
 )
-from routers.deps import audit, CONTENT_TYPES, MAX_FILE_MB, UPLOAD_DIR
+from routers.deps import audit, CONTENT_TYPES, MAX_FILE_MB, UPLOAD_DIR, read_upload_bounded
 
 router = APIRouter()
 
@@ -633,9 +633,8 @@ async def upload_training_file(
     if suffix not in (".pdf", ".txt", ".md", ".csv", ".log"):
         raise HTTPException(400, "نوع الملف غير مدعوم. الأنواع المتاحة: PDF, TXT, MD, CSV")
 
-    contents = await file.read()
-    if len(contents) > MAX_FILE_MB * 1024 * 1024:
-        raise HTTPException(413, f"حجم الملف يتجاوز الحد ({MAX_FILE_MB} MB)")
+    # M-4: bounded streaming read instead of buffering the whole body into RAM.
+    contents = await read_upload_bounded(file, MAX_FILE_MB * 1024 * 1024)
 
     file_id      = str(uuid.uuid4())
     content_type = CONTENT_TYPES.get(suffix, "application/octet-stream")
@@ -679,9 +678,10 @@ async def upload_training_file(
 async def toggle_training(store_id: str, training_id: int, payload: dict):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    ok = await db.update_training_enabled(training_id, bool(payload.get("enabled", True)))
+    # M-1: scope by store_id so a tenant can't toggle another store's row by id.
+    ok = await db.update_training_enabled(training_id, bool(payload.get("enabled", True)), store_id)
     if not ok:
-        raise HTTPException(500, "تعذّر التحديث")
+        raise HTTPException(404, "عنصر التدريب غير موجود")
     sm.reset_agent(store_id)
     smart_router.invalidate_faq_cache(store_id)
     return {"status": "ok"}
@@ -691,9 +691,10 @@ async def toggle_training(store_id: str, training_id: int, payload: dict):
 async def delete_training_entry(store_id: str, training_id: int):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    ok, deleted_file_id = await db.delete_training(training_id)
+    # M-1: scope by store_id so a tenant can't delete another store's row by id.
+    ok, deleted_file_id = await db.delete_training(training_id, store_id)
     if not ok:
-        raise HTTPException(500, "تعذّر الحذف")
+        raise HTTPException(404, "عنصر التدريب غير موجود")
     sm.reset_agent(store_id)
     smart_router.invalidate_faq_cache(store_id)
     return {"status": "ok", "deleted_file_id": deleted_file_id}
