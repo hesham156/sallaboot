@@ -210,6 +210,11 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     tokens = sm.get_store_info(store_id)
     await db.save_store(store_id, tokens)
     await db.save_ai_config(store_id, config)
+    # If a WhatsApp phone_id was (re)assigned to this store, detach it from any
+    # OTHER store that still claims it so inbound messages route only here.
+    _new_phone = (config.get("whatsapp_phone_id") or "").strip()
+    if _new_phone:
+        await sm.claim_whatsapp_phone_id(_new_phone, store_id)
     # Rebuild the agent so permission / personality changes take effect immediately
     # without waiting for the next natural agent expiry or server restart.
     sm.reset_agent(store_id)
@@ -341,9 +346,13 @@ async def whatsapp_connect(store_id: str, request: Request):
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
 
+    # Enforce phone-number uniqueness: detach this number from any OTHER store
+    # that still claims it, so inbound messages route only to THIS store.
+    released = await sm.claim_whatsapp_phone_id(chosen_phone_id, store_id)
+
     await audit(request, "whatsapp_embedded_signup", target_store=store_id,
                 details={"waba_id": chosen_waba_id, "phone_id": chosen_phone_id,
-                         "subscribed": subscribed})
+                         "subscribed": subscribed, "released_from": released})
 
     return {
         "status":          "connected",

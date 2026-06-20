@@ -528,11 +528,55 @@ def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
     pid = str(phone_id or "").strip()
     if not pid:
         return ""
+    fallback = ""
     for sid, entry in _registry.items():
         cfg = (entry.get("tokens", {}) or {}).get("ai_config", {}) or {}
-        if str(cfg.get("whatsapp_phone_id", "")).strip() == pid:
+        if str(cfg.get("whatsapp_phone_id", "")).strip() != pid:
+            continue
+        # Prefer the store that still holds a token (the real, active owner).
+        # A stale/half-disconnected store (phone_id set but token wiped) must
+        # never steal messages from the store that actually owns the number now.
+        if str(cfg.get("whatsapp_token", "")).strip():
             return str(sid)
-    return ""
+        fallback = fallback or str(sid)
+    return fallback
+
+
+async def claim_whatsapp_phone_id(phone_id: str, owner_store_id: str) -> list[str]:
+    """
+    Enforce GLOBAL uniqueness of a WhatsApp phone_number_id across stores.
+
+    Inbound WhatsApp webhooks are routed by phone_id to the first store that
+    claims it (find_store_by_whatsapp_phone_id). If a merchant unlinks a number
+    from store A and links the SAME number to store B, but A still carries the
+    creds, A keeps receiving the messages. Calling this right after a store
+    links/saves a phone_id wipes that number's WhatsApp creds from every OTHER
+    store, so the latest store to link a number is its sole owner.
+
+    Returns the list of store_ids that were released (usually empty).
+    """
+    pid  = str(phone_id or "").strip()
+    keep = str(owner_store_id)
+    released: list[str] = []
+    if not pid:
+        return released
+    for sid in list(_registry.keys()):
+        if str(sid) == keep:
+            continue
+        cfg = (_registry[sid].get("tokens", {}) or {}).get("ai_config", {}) or {}
+        if str(cfg.get("whatsapp_phone_id", "")).strip() == pid:
+            newcfg = dict(cfg)
+            newcfg.update({
+                "whatsapp_token":    "",
+                "whatsapp_phone_id": "",
+                "whatsapp_waba_id":  "",
+                "whatsapp_enabled":  False,
+            })
+            await set_ai_config(sid, newcfg)   # persists to DB + resets agent
+            released.append(str(sid))
+            print(f"[store_manager] released WhatsApp phone_id {pid} from store "
+                  f"{sid!r} — re-claimed by {keep!r}")
+    return released
 
 
 def find_store_by_page_id(page_id: str) -> str:
