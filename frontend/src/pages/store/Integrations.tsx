@@ -208,27 +208,28 @@ function Toast({ msg, type }: { msg: string; type: 'success' | 'error' | 'info' 
   )
 }
 
-/* ── Salla App-Settings linking key panel ── */
-function SallaLinkPanel({ storeId, onToast }: {
+/* ── Salla connect modal (API-key / App-Settings linking — the ONLY Salla method) ── */
+function SallaConnectModal({ isOpen, onClose, storeId, onToast }: {
+  isOpen: boolean
+  onClose: () => void
   storeId: string
   onToast: (msg: string, type: 'success' | 'error' | 'info') => void
 }) {
-  const [open, setOpen]       = useState(false)
   const [apiKey, setApiKey]   = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function toggle() {
-    if (open) { setOpen(false); return }
-    if (apiKey) { setOpen(true); return }
+  // Fetch the linking key the first time the modal opens.
+  useEffect(() => {
+    if (!isOpen || apiKey) return
+    let cancelled = false
     setLoading(true)
-    try {
-      const res = await api.getApiKey(storeId)
-      setApiKey(res.api_key)
-      setOpen(true)
-    } catch {
-      onToast('تعذّر جلب مفتاح الربط', 'error')
-    } finally { setLoading(false) }
-  }
+    api.getApiKey(storeId)
+      .then(res => { if (!cancelled) setApiKey(res.api_key) })
+      .catch(() => onToast('تعذّر جلب مفتاح الربط', 'error'))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, storeId])
 
   function copyKey() {
     if (!apiKey) return
@@ -250,48 +251,54 @@ function SallaLinkPanel({ storeId, onToast }: {
   }
 
   return (
-    <div className="mb-8 bg-content1 border border-divider rounded-2xl overflow-hidden">
-      <button onClick={toggle}
-        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-right hover:bg-content2/50 transition-colors">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-            <Icon paths="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" size={15} className="text-violet-500" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-foreground">ربط سلة عبر سوق التطبيقات</p>
-            <p className="text-[11px] text-default-500">استخدم مفتاح الربط إذا ثبّتت التطبيق من متجر تطبيقات سلة</p>
-          </div>
-        </div>
-        <Icon paths={open ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} size={16} className="text-default-400 flex-shrink-0" />
-      </button>
+    <Modal isOpen={isOpen} onOpenChange={(o) => { if (!o) onClose() }} placement="center" backdrop="blur" size="md">
+      <ModalContent>
+        {(close) => (
+          <>
+            <ModalHeader dir="rtl">
+              <div className="flex items-center gap-3">
+                <SallaLogo size={30} />
+                <div>
+                  <p className="text-sm font-bold">ربط متجر سلّة</p>
+                  <p className="text-xs font-normal text-default-500">عبر سوق تطبيقات سلة باستخدام مفتاح الربط</p>
+                </div>
+              </div>
+            </ModalHeader>
+            <ModalBody dir="rtl">
+              <ol className="text-xs text-default-600 leading-relaxed list-decimal mr-4 space-y-1.5">
+                <li>ثبّت تطبيق حياك من <a href="https://apps.salla.sa" target="_blank" rel="noreferrer" className="text-violet-600 font-semibold hover:underline">متجر تطبيقات سلة</a>.</li>
+                <li>افتح <span className="font-semibold text-foreground">إعدادات ربط التطبيق</span> داخل لوحة سلة.</li>
+                <li>أدخل بريدك الإلكتروني في حياك، وانسخ <span className="font-semibold text-foreground">مفتاح الربط</span> أدناه في حقل API Key، ثم احفظ.</li>
+              </ol>
 
-      {open && (
-        <div className="px-5 pb-5 pt-1 space-y-4 border-t border-divider">
-          <ol className="text-xs text-default-600 leading-relaxed list-decimal mr-4 space-y-1 mt-3">
-            <li>ثبّت تطبيق حياك من متجر تطبيقات سلة.</li>
-            <li>افتح <span className="font-semibold text-foreground">إعدادات ربط التطبيق</span> داخل لوحة سلة.</li>
-            <li>أدخل بريدك الإلكتروني في حياك، وانسخ <span className="font-semibold text-foreground">مفتاح الربط</span> أدناه في حقل API Key، ثم احفظ.</li>
-          </ol>
+              <div>
+                <label className="block text-[11px] font-semibold text-default-500 mb-1.5">مفتاح الربط (API Key)</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2.5 bg-content2 border border-divider rounded-xl text-xs font-mono text-foreground break-all select-all">
+                    {loading && !apiKey ? '…' : (apiKey || '—')}
+                  </code>
+                  <button onClick={copyKey} disabled={!apiKey}
+                    className="px-3 py-2.5 text-xs font-bold rounded-xl border border-divider text-foreground hover:bg-content2 transition-colors flex-shrink-0 disabled:opacity-50">
+                    نسخ
+                  </button>
+                </div>
+                <button onClick={regen} disabled={loading}
+                  className="mt-2 text-[11px] font-semibold text-default-400 hover:text-red-500 transition-colors disabled:opacity-50">
+                  توليد مفتاح جديد (يُلغي القديم)
+                </button>
+              </div>
 
-          <div>
-            <label className="block text-[11px] font-semibold text-default-500 mb-1.5">مفتاح الربط (API Key)</label>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 px-3 py-2.5 bg-content2 border border-divider rounded-xl text-xs font-mono text-foreground break-all select-all">
-                {apiKey || '—'}
-              </code>
-              <button onClick={copyKey}
-                className="px-3 py-2.5 text-xs font-bold rounded-xl border border-divider text-foreground hover:bg-content2 transition-colors flex-shrink-0">
-                نسخ
-              </button>
-            </div>
-            <button onClick={regen} disabled={loading}
-              className="mt-2 text-[11px] font-semibold text-default-400 hover:text-red-500 transition-colors disabled:opacity-50">
-              توليد مفتاح جديد (يُلغي القديم)
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+              <div className="bg-content2 rounded-xl p-3 text-[11px] text-default-500 leading-relaxed">
+                بعد الحفظ في لوحة سلة سيظهر المتجر «متصل» خلال لحظات — حدّث الصفحة إذا لم يظهر فوراً.
+              </div>
+            </ModalBody>
+            <ModalFooter>
+              <button onClick={close} className="px-4 py-2 text-xs text-default-500 hover:text-foreground">إغلاق</button>
+            </ModalFooter>
+          </>
+        )}
+      </ModalContent>
+    </Modal>
   )
 }
 
@@ -311,6 +318,9 @@ export default function Integrations({ storeId }: Props) {
   const [installError, setInstallError] = useState('')
   const [syncing, setSyncing]           = useState<string | null>(null)
   const [connectingZid, setConnectingZid] = useState(false)
+
+  // Salla connect modal — Salla links ONLY via the App-Settings API key.
+  const [sallaModal, setSallaModal]     = useState(false)
 
   // Disconnect confirmation modal
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null)
@@ -394,7 +404,7 @@ export default function Integrations({ storeId }: Props) {
       }
     }
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
-    else if (id === 'salla') { window.location.href = '/auth/salla' }
+    else if (id === 'salla') { setSallaModal(true) }   // API-key linking is the only Salla method
     else if (id === 'zid') { handleZidConnect() }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
@@ -496,7 +506,6 @@ export default function Integrations({ storeId }: Props) {
           </div>
         ) : (
           <>
-            <SallaLinkPanel storeId={storeId} onToast={showToast} />
             {categories.map(cat => {
               const items = integrations.filter(i => i.category === cat.id)
               return (
@@ -543,6 +552,14 @@ export default function Integrations({ storeId }: Props) {
           </>
         )}
       </div>
+
+      {/* ── Salla connect modal (API-key linking — the only Salla method) ── */}
+      <SallaConnectModal
+        isOpen={sallaModal}
+        onClose={() => setSallaModal(false)}
+        storeId={storeId}
+        onToast={showToast}
+      />
 
       {/* ── Shopify install modal ── */}
       <Modal isOpen={shopifyModal} onOpenChange={setShopifyModal} placement="center" backdrop="blur" size="sm">

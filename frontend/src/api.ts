@@ -42,6 +42,37 @@ export function clearAuth() {
   localStorage.removeItem('admin_employee')
 }
 
+// "Remember this device" token from a previous OTP-verified login. Stored per
+// email so it's sent on the next login to skip the OTP step for 30 days.
+function _deviceKey(email: string) {
+  return `otp_device:${(email || '').trim().toLowerCase()}`
+}
+export function getDeviceToken(email: string): string {
+  return localStorage.getItem(_deviceKey(email)) || ''
+}
+export function setDeviceToken(email: string, token: string) {
+  if (token) localStorage.setItem(_deviceKey(email), token)
+}
+
+// ── Auth response shapes (OTP-aware) ───────────────────────────────────────────
+export interface SessionResponse {
+  token:        string
+  store_id:     string
+  store_name:   string
+  is_super:     boolean
+  employee:     SessionEmployee | null
+  device_token?: string
+}
+export interface OtpChallengeResponse {
+  otp_required: true
+  challenge:    string
+}
+export type AuthResponse = SessionResponse | OtpChallengeResponse
+
+export function isOtpChallenge(r: AuthResponse): r is OtpChallengeResponse {
+  return (r as OtpChallengeResponse).otp_required === true
+}
+
 // ── Core fetch wrapper ─────────────────────────────────────────────────────────
 
 /**
@@ -104,25 +135,23 @@ export const api = {
   // Unified email/password login. Backend figures out which kind of
   // account the email belongs to (super → employee → store owner) and
   // returns a uniform response.
-  login: (email: string, password: string) =>
-    post<{
-      token:      string
-      store_id:   string
-      store_name: string
-      is_super:   boolean
-      employee:   SessionEmployee | null
-    }>('/auth/login', { email, password }),
+  // Returns a session, OR {otp_required, challenge} when email 2FA is on and
+  // this device isn't trusted yet — caller then collects the code and calls
+  // otpVerify(). device_token (if present) skips OTP for a trusted device.
+  login: (email: string, password: string, device_token = '') =>
+    post<AuthResponse>('/auth/login', { email, password, device_token }),
 
-  // Self-service signup — creates a platform-independent account and returns
-  // a token (auto-login). Same response shape as login.
+  // Self-service signup — same OTP-aware response shape as login(). When OTP is
+  // off it returns a session directly (auto-login).
   signup: (name: string, email: string, password: string) =>
-    post<{
-      token:      string
-      store_id:   string
-      store_name: string
-      is_super:   boolean
-      employee:   SessionEmployee | null
-    }>('/auth/signup', { name, email, password }),
+    post<AuthResponse>('/auth/signup', { name, email, password }),
+
+  // Second OTP step: submit the emailed code + the challenge to complete
+  // signup/login. Returns a session (+ a device_token when remember_device).
+  otpVerify: (body: {
+    email: string; password: string; code: string; challenge: string
+    purpose: 'login' | 'signup'; name?: string; remember_device?: boolean
+  }) => post<SessionResponse>('/auth/otp/verify', body),
 
   // Legacy login endpoints — kept so older clients still work but the
   // SPA itself uses `login()` above.
