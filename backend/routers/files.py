@@ -5,17 +5,26 @@ from pathlib import Path
 from urllib.parse import quote
 
 import aiofiles
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, Response
 
 import database as db
 import conversation_store as cs
-from routers.deps import UPLOAD_DIR, MAX_FILE_MB, ALLOWED_EXTENSIONS, CONTENT_TYPES, is_internal_session_id
+from routers.deps import (
+    UPLOAD_DIR, MAX_FILE_MB, ALLOWED_EXTENSIONS, CONTENT_TYPES,
+    is_internal_session_id, is_rate_limited,
+)
 
 router = APIRouter()
 
+# Served-file CSP (M-9): uploads are attacker-supplied via the public widget.
+# Force a download disposition + a deny-all CSP so an .svg / .html can never
+# execute script on our origin (where admin tokens live). nosniff is already
+# applied globally by the security-headers middleware.
+_FILE_CSP = "default-src 'none'; sandbox"
 
-def _content_disposition(filename: str, disposition: str = "inline") -> str:
+
+def _content_disposition(filename: str, disposition: str = "attachment") -> str:
     name       = filename or "file"
     ascii_name = name.encode("ascii", "ignore").decode("ascii").strip() or "file"
     ascii_name = ascii_name.replace('"', "")
@@ -28,12 +37,23 @@ async def upload_file(
     file:       UploadFile = File(...),
     session_id: str        = Form(default=""),
     store_id:   str        = Form(default="default"),
+    request:    Request    = None,
 ):
     # H-1: refuse to attach a file to a channel-owned conversation (wa:/msgr:/ig:)
     # — that would inject a forged "customer sent a file" message into a real
     # WhatsApp/Messenger/Instagram thread. Widget uploads use random-uuid ids.
     if is_internal_session_id(session_id):
         raise HTTPException(404, "الجلسة غير موجودة")
+
+    # M-9: rate-limit the public, unauthenticated upload endpoint per IP and per
+    # session so it can't be abused to exhaust disk/DB storage. (Per-file size is
+    # capped below.) is_rate_limited is a no-op when the DB is unavailable.
+    ip = request.client.host if (request and request.client) else "unknown"
+    if await is_rate_limited(f"upload:i:{ip}", max_attempts=30, window=300):
+        raise HTTPException(429, "محاولات رفع كثيرة جداً. انتظر قليلاً وحاول مجدداً.")
+    if session_id and await is_rate_limited(f"upload:s:{session_id[:64]}", max_attempts=15, window=300):
+        raise HTTPException(429, "محاولات رفع كثيرة جداً. انتظر قليلاً وحاول مجدداً.")
+
     if "{{" in store_id or "}}" in store_id:
         store_id = "default"
 
@@ -98,6 +118,7 @@ async def get_uploaded_file(file_id: str):
                 media_type=record["content_type"],
                 headers={
                     "Content-Disposition": _content_disposition(record["filename"]),
+                    "Content-Security-Policy": _FILE_CSP,
                     "Cache-Control": "private, max-age=3600",
                 },
             )
@@ -106,7 +127,17 @@ async def get_uploaded_file(file_id: str):
         if UPLOAD_DIR.exists():
             for path in UPLOAD_DIR.iterdir():
                 if path.stem == file_id:
-                    return FileResponse(path)
+                    # Force download + deny-all CSP — a bare FileResponse would
+                    # serve an .svg inline (image/svg+xml) → stored XSS on our
+                    # origin. (<img> embedding still works regardless.)
+                    return FileResponse(
+                        path,
+                        headers={
+                            "Content-Disposition": "attachment",
+                            "Content-Security-Policy": _FILE_CSP,
+                            "Cache-Control": "private, max-age=3600",
+                        },
+                    )
     except Exception as e:
         print(f"[file] disk lookup failed for {file_id!r}: {e}")
 
