@@ -48,8 +48,11 @@ function MetaLogo() {
 /**
  * Self-service merchant signup.
  *
- * Two steps in one page:
+ * Steps in one page:
  *   1. Account details  → creates the 7ayak account + logs the merchant in.
+ *   1b. Email OTP (only when email 2FA is enabled, OTP_ENABLED) → /auth/signup
+ *      defers account creation and returns {otp_required, challenge}; the
+ *      merchant enters the emailed code and /auth/otp/verify finishes signup.
  *   2. Connect integrations (OPTIONAL) → cards for the store platform, WhatsApp,
  *      and Instagram/Messenger. "ربط الآن" routes to the existing, working
  *      connect UI (Integrations / Settings); the merchant can skip and link
@@ -58,19 +61,33 @@ function MetaLogo() {
 export default function Signup() {
   const navigate = useNavigate()
 
-  const [step, setStep]         = useState<'account' | 'integrations'>('account')
+  const [step, setStep]         = useState<'account' | 'otp' | 'integrations'>('account')
   const [newStoreId, setNewStoreId] = useState('')
 
   const [name, setName]         = useState('')
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm]   = useState('')
+  const [challenge, setChallenge] = useState('')  // signed OTP challenge from /auth/signup
+  const [code, setCode]         = useState('')    // 6-digit code the user types
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
 
   const inputCls = {
     inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-12 rounded-2xl transition-all',
     input: 'text-sm font-semibold text-slate-800 placeholder:text-slate-400',
+  }
+
+  // Account created + logged in. Persist the session and show the optional
+  // "connect integrations" step instead of dropping straight into the dashboard.
+  function finalizeSession(res: SessionResponse) {
+    if (res.device_token) setDeviceToken(email.trim(), res.device_token)
+    setToken(res.token)
+    setStoreId(res.store_id)
+    setIsSuper(res.is_super)
+    setEmployee(res.employee)
+    setNewStoreId(res.store_id)
+    setStep('integrations')
   }
 
   async function handleSubmit() {
@@ -83,14 +100,16 @@ export default function Signup() {
     setLoading(true)
     try {
       const res = await api.signup(name.trim(), email.trim(), password)
-      setToken(res.token)
-      setStoreId(res.store_id)
-      setIsSuper(res.is_super)
-      setEmployee(res.employee)
-      setNewStoreId(res.store_id)
-      // Account created + logged in. Show the optional "connect integrations"
-      // step instead of dropping straight into the dashboard.
-      setStep('integrations')
+      // With email 2FA on, the backend defers account creation until the code
+      // is verified and returns {otp_required, challenge}. Otherwise it returns
+      // a ready session (auto-login).
+      if (isOtpChallenge(res)) {
+        setChallenge(res.challenge)
+        setCode('')
+        setStep('otp')
+      } else {
+        finalizeSession(res)
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'تعذّر إنشاء الحساب، حاول مرة أخرى')
     } finally {
@@ -98,8 +117,38 @@ export default function Signup() {
     }
   }
 
+  async function handleVerify() {
+    if (loading) return
+    setError('')
+    if (code.trim().length < 6) { setError('أدخل الرمز المكوّن من ٦ أرقام'); return }
+    setLoading(true)
+    try {
+      // Completes the deferred account creation server-side, then logs in.
+      const res = await api.otpVerify({
+        email: email.trim(), password, code: code.trim(),
+        challenge, purpose: 'signup', name: name.trim(), remember_device: true,
+      })
+      finalizeSession(res)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'رمز التحقق غير صحيح أو منتهي')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleResend() {
+    setError(''); setLoading(true)
+    try {
+      const res = await api.signup(name.trim(), email.trim(), password)
+      if (isOtpChallenge(res)) { setChallenge(res.challenge); setCode('') }
+      else finalizeSession(res)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'تعذّر إعادة إرسال الرمز')
+    } finally { setLoading(false) }
+  }
+
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleSubmit()
+    if (e.key === 'Enter') (step === 'otp' ? handleVerify() : handleSubmit())
   }
 
   // replace:true so a browser "back" doesn't return to the half-finished
@@ -259,6 +308,58 @@ export default function Signup() {
                 {' '}
                 <a href="/login" className="text-teal-600 font-bold hover:underline">تسجيل الدخول</a>
               </p>
+            </div>
+          )}
+
+          {/* ── Step 1b: email OTP (only when 2FA is enabled) ── */}
+          {step === 'otp' && (
+            <div className="p-6 sm:p-8 space-y-5">
+
+              <div className="text-center space-y-1.5">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-teal-50 flex items-center justify-center">
+                  <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={22} className="text-teal-500" />
+                </div>
+                <h2 className="text-xl font-black text-slate-800">تأكيد بريدك الإلكتروني</h2>
+                <p className="text-xs text-slate-500">
+                  أرسلنا رمزاً من ٦ أرقام إلى <span className="font-bold text-slate-600">{email.trim()}</span>. أدخله لإكمال إنشاء الحساب.
+                </p>
+              </div>
+
+              <Input
+                placeholder="——————"
+                inputMode="numeric"
+                value={code}
+                onValueChange={v => { setCode(v.replace(/\D/g, '').slice(0, 6)); setError('') }}
+                variant="bordered"
+                autoFocus
+                classNames={{
+                  inputWrapper: 'border-slate-200 hover:border-teal-400 focus-within:!border-teal-500 bg-slate-50 hover:bg-white h-14 rounded-2xl transition-all',
+                  input: 'text-center text-2xl font-black tracking-[0.4em] text-slate-800 placeholder:text-slate-300',
+                }}
+                onKeyDown={handleKey}
+              />
+
+              {error && (
+                <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-xs font-bold text-red-600 animate-in fade-in duration-300">
+                  <Icon paths="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" size={16} className="flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <Button
+                className="w-full font-bold text-base h-12 text-white shadow-lg rounded-2xl hover:opacity-95 active:scale-[0.98] transition-all bg-gradient-to-r from-teal-500 to-cyan-500 shadow-teal-500/25"
+                isLoading={loading}
+                onPress={handleVerify}
+              >
+                {loading ? <Spinner size="sm" /> : 'تأكيد وإنشاء الحساب'}
+              </Button>
+
+              <div className="flex items-center justify-between text-[11px]">
+                <button onClick={() => { setStep('account'); setError(''); setCode('') }}
+                  className="text-slate-400 font-bold hover:text-slate-600">→ رجوع</button>
+                <button onClick={handleResend} disabled={loading}
+                  className="text-teal-600 font-bold hover:underline disabled:opacity-50">إعادة إرسال الرمز</button>
+              </div>
             </div>
           )}
 
