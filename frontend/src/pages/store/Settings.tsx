@@ -303,6 +303,7 @@ export default function Settings({ storeId }: Props) {
     try {
       await api.setAI(storeId, {
         whatsapp_enabled: waEnabled, whatsapp_phone_id: waPhoneId.trim(),
+        whatsapp_waba_id: waWabaId.trim(),
         ...(waToken.trim() ? { whatsapp_token: waToken.trim() } : {}),
       })
       setWaMsg('✅ تم حفظ إعدادات واتساب'); setWaToken(''); load()
@@ -1065,6 +1066,9 @@ export default function Settings({ storeId }: Props) {
                   <div className="space-y-3 border border-divider rounded-xl p-4 bg-content2">
                     <TextField label="Phone Number ID" value={waPhoneId} onChange={setWaPhoneId}
                       placeholder="123456789012345" dir="ltr" hint="من لوحة Meta Business" />
+                    <TextField label="WhatsApp Business Account ID (WABA)" value={waWabaId} onChange={setWaWabaId}
+                      placeholder="987654321098765" dir="ltr"
+                      hint="مطلوب لإدارة القوالب — من Meta › WhatsApp › API Setup بجانب الرقم" />
                     <TextField label="Access Token" type="password" value={waToken} onChange={setWaToken}
                       placeholder={cfg.whatsapp_token ? '•••••••• (محفوظ)' : 'EAAG...'} dir="ltr"
                       hint={cfg.whatsapp_token ? 'محفوظ — اتركه فارغاً للإبقاء' : 'من Meta'} />
