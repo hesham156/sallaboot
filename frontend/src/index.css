@@ -67,14 +67,16 @@ select:focus,
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15) !important;
 }
 
-/* ── Switch: make ON / OFF unmistakable ───────────────────────────────────
-   HeroUI's default off-track (bg-default-200 ≈ #e2e8f0) is nearly invisible
-   on the app's near-white cards, so toggling *looked* like nothing happened.
-   Target switches specifically via the thumb element (unique to Switch) and
-   the real checkbox state, so the selected colour is never touched. */
-label:has([data-slot="thumb"]):has(input:not(:checked)) [data-slot="wrapper"] {
+/* ── Switch: make the OFF state clearly visible ───────────────────────────
+   The real fix for the on-state colour is in tailwind.config.js (the content
+   glob now scans HeroUI so `group-data-[selected=true]:bg-*` is generated).
+   This adds a touch more contrast to the OFF track (default-200 is pale on
+   the app's near-white cards). HeroUI's switch DOM is `label > span` (the
+   track) with no data-slots, so target that directly; only the unchecked
+   state, so the selected colour is never overridden. */
+label:has(> input[role="switch"]:not(:checked)) > span {
   background-color: #94a3b8 !important;   /* slate-400 — clearly "off" */
 }
-.dark label:has([data-slot="thumb"]):has(input:not(:checked)) [data-slot="wrapper"] {
+.dark label:has(> input[role="switch"]:not(:checked)) > span {
   background-color: #475569 !important;   /* slate-600 reads better on dark */
 }

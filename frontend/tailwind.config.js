@@ -5,7 +5,13 @@ export default {
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
-    './node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}',
+    // HeroUI is installed NESTED (npm puts the theme under
+    // @heroui/react/node_modules/@heroui/theme), so the old top-level glob
+    // matched nothing and Tailwind never generated component state classes
+    // like `group-data-[selected=true]:bg-success` — switches showed no
+    // colour when ON. These globs catch the real (nested) theme dist.
+    './node_modules/@heroui/theme/dist/**/*.{js,mjs,cjs}',
+    './node_modules/@heroui/**/node_modules/@heroui/theme/dist/**/*.{js,mjs,cjs}',
   ],
   theme: {
     extend: {
