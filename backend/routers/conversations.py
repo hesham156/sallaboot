@@ -12,7 +12,7 @@ import database as db
 import store_manager as sm
 import conversation_store as cs
 import realtime
-from models import AdminReplyRequest, BotToggleRequest, EndConversationRequest
+from models import AddNoteRequest, AdminReplyRequest, BotToggleRequest, EndConversationRequest
 from routers.deps import audit, super_viewing_other_store, _REASON_MIN_LENGTH, _REASON_MAX_LENGTH
 
 router = APIRouter()
@@ -191,6 +191,52 @@ async def store_admin_reply(
             )
 
     return {"status": "sent", "message": msg}
+
+
+# ── Internal note (@mentions) ─────────────────────────────────────────────────
+# A note is staff-only: stored as role="note", never enqueued for the widget and
+# never delivered to any channel. chat_history filters to user/assistant/admin so
+# it can't leak to the customer. @mentions are resolved from the text against the
+# store's employees so a mentioned teammate finds the conversation in "Mentions".
+
+@router.post("/admin/{store_id}/conversations/{session_id}/note")
+async def store_add_note(
+    store_id: str,
+    session_id: str,
+    req: AddNoteRequest,
+    request: Request,
+):
+    text = req.message.strip()
+    if not text:
+        raise HTTPException(400, "الملاحظة فارغة")
+    await _load_owned_conv(session_id, store_id, request)  # C-1: bind to store
+
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    emp = _auth.token_employee(token)
+    author_name = (emp or {}).get("name", "") if emp else "المالك"
+    author_id   = (emp or {}).get("id") if emp else None
+
+    # Resolve @mentions: a teammate is mentioned when "@<their name>" appears in
+    # the note. Longest names first so "@محمد علي" wins over "@محمد".
+    employees = await db.list_employees(store_id)
+    mentions: list[dict] = []
+    for e in sorted(employees, key=lambda x: len(str(x.get("name") or "")), reverse=True):
+        nm = (e.get("name") or "").strip()
+        if nm and f"@{nm}" in text:
+            mentions.append({"id": e.get("id"), "name": nm})
+
+    msg = await cs.add_message(session_id, "note", text, store_id)
+    conv = cs.all_conversations().get(session_id)
+    if conv and conv.get("messages"):
+        last = conv["messages"][-1]
+        for target in (last, msg):
+            target["employee_name"] = author_name
+            target["employee_id"]   = author_id
+            target["mentions"]      = mentions
+        cs.mark_dirty(session_id)
+        await cs.flush(session_id)
+
+    return {"status": "ok", "message": msg, "mentions": mentions}
 
 
 # ── Takeover / handback ───────────────────────────────────────────────────────

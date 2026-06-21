@@ -57,6 +57,12 @@ class AdminReplyRequest(BaseModel):
     message: str
 
 
+class AddNoteRequest(BaseModel):
+    # Internal staff note (never sent to the customer). @mentions are resolved
+    # backend-side from the text against the store's employees.
+    message: str
+
+
 class BotToggleRequest(BaseModel):
     enabled: bool
 

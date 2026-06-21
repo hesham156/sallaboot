@@ -199,6 +199,11 @@ export const api = {
   },
   adminReply: (storeId: string, sessionId: string, message: string) =>
     post(`/admin/${storeId}/conversations/${sessionId}/reply`, { message }),
+
+  // Internal staff note with @mentions (never reaches the customer).
+  addNote: (storeId: string, sessionId: string, message: string) =>
+    post<{ status: string; message: Message; mentions: { id: number; name: string }[] }>(
+      `/admin/${storeId}/conversations/${sessionId}/note`, { message }),
   takeover: (storeId: string, sessionId: string) =>
     post(`/admin/${storeId}/conversations/${sessionId}/takeover`),
   handback: (storeId: string, sessionId: string) =>
@@ -651,6 +656,9 @@ export interface ConvSummary {
   // True when the bot handed off to a human (unresolved escalation) — e.g. the
   // customer sent an image. Drives the "needs support" queue.
   needs_support?: boolean
+  // Employee ids @mentioned in this conversation's internal notes. Drives the
+  // "Mentions" view (a teammate sees chats where they were tagged).
+  mentioned_ids?: number[]
   // Channel the conversation arrived on. Absent on legacy rows.
   channel?: 'widget' | 'whatsapp' | 'telegram' | 'messenger' | 'instagram'
 }
@@ -664,11 +672,12 @@ export interface MessageMeta {
   options?: CsatOption[]
 }
 export interface Message {
-  role: 'user' | 'assistant' | 'admin'
+  role: 'user' | 'assistant' | 'admin' | 'note'
   content: string
   ts: string
   employee_name?: string
   employee_id?: number
+  mentions?: { id: number; name: string }[]
   meta?: MessageMeta
 }
 

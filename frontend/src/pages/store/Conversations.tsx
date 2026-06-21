@@ -4,7 +4,7 @@ import {
   Button, Input, Spinner, Textarea, Avatar,
   Modal, ModalBody, ModalContent, ModalFooter, ModalHeader,
 } from '@heroui/react'
-import { api, ApiError, AIConfig, Employee, ConvSummary, Conversation, Message, openAdminStream } from '../../api'
+import { api, ApiError, AIConfig, Employee, ConvSummary, Conversation, Message, openAdminStream, getEmployee } from '../../api'
 
 interface Props { storeId: string }
 
@@ -169,6 +169,27 @@ function renderMessageBody(content: string): React.ReactNode {
   return parts.length > 0 ? parts : content
 }
 
+// Highlight @mentions inside an internal note (matched against the note's
+// resolved mentions, so only real teammates light up).
+function renderNoteContent(content: string, mentions?: { id: number; name: string }[]): React.ReactNode {
+  const names = (mentions || []).map(m => m.name).filter(Boolean).sort((a, b) => b.length - a.length)
+  if (names.length === 0) return content
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`@(?:${names.map(esc).join('|')})`, 'g')
+  const parts: React.ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) parts.push(content.slice(last, m.index))
+    parts.push(
+      <span key={last} className="font-bold text-amber-700 bg-amber-200/60 rounded px-1">{m[0]}</span>
+    )
+    last = m.index + m[0].length
+  }
+  if (last < content.length) parts.push(content.slice(last))
+  return parts.length ? parts : content
+}
+
 type ViewMode      = 'all' | 'mentions' | 'unattended' | 'chatbot' | 'needs_support'
 type ActiveTab     = 'mine' | 'unassigned' | 'all'
 type SortOrder     = 'last_activity' | 'newest' | 'oldest'
@@ -184,6 +205,11 @@ export default function Conversations({ storeId }: Props) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [replyText, setReplyText]   = useState('')
   const [sending, setSending]       = useState(false)
+  // Internal note composer (@mentions)
+  const [noteMode, setNoteMode]     = useState(false)
+  const [noteText, setNoteText]     = useState('')
+  const [sendingNote, setSendingNote] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)  // null = menu closed
   const [search, setSearch]         = useState('')
   const [actionError, setActionError] = useState('')
   const messagesRef = useRef<HTMLDivElement>(null)
@@ -337,6 +363,7 @@ export default function Conversations({ storeId }: Props) {
     setActionError('')
     setAssigningId(null)
     setSelectedId(c.session_id)
+    setReplyText(''); setNoteText(''); setMentionQuery(null)  // clear drafts per chat
     setDetailLoading(true)
     try {
       const detail = await fetchConv(c.session_id)
@@ -357,6 +384,34 @@ export default function Conversations({ storeId }: Props) {
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'تعذر إرسال الرد')
     } finally { setSending(false) }
+  }
+
+  // ── Internal-note composer with @mention autocomplete ──
+  // Detect an in-progress "@token" at the end of the text and open the picker.
+  const MENTION_RE = /@([^\s@]{0,30})$/u
+  function onNoteChange(value: string) {
+    setNoteText(value)
+    const m = value.match(MENTION_RE)
+    setMentionQuery(m ? m[1] : null)
+  }
+  const mentionMatches = mentionQuery !== null
+    ? employees.filter(e => e.name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 6)
+    : []
+  function pickMention(emp: Employee) {
+    setNoteText(t => t.replace(MENTION_RE, `@${emp.name} `))
+    setMentionQuery(null)
+  }
+  async function sendNote() {
+    if (!selected || !noteText.trim()) return
+    setSendingNote(true); setActionError('')
+    try {
+      await api.addNote(storeId, selected.session_id, noteText.trim())
+      setNoteText(''); setMentionQuery(null)
+      const updated = await fetchConv(selected.session_id)
+      setSelected(updated); loadConversations()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'تعذر حفظ الملاحظة')
+    } finally { setSendingNote(false) }
   }
 
   async function handleTakeover() {
@@ -393,13 +448,20 @@ export default function Conversations({ storeId }: Props) {
   const mineCount       = convs.filter(c => !c.bot_enabled).length
   const unassignedCount = convs.filter(c => c.bot_enabled).length
   const unreadCount     = convs.filter(c => c.unread).length
+  // "Mentions": chats where the current employee was @mentioned. The owner (no
+  // employee id) oversees every mentioned chat.
+  const myEmpId = getEmployee()?.id ?? null
+  const isMentionedToMe = (c: ConvSummary) => myEmpId == null
+    ? (c.mentioned_ids?.length ?? 0) > 0
+    : (c.mentioned_ids?.includes(myEmpId) ?? false)
+  const mentionsCount   = convs.filter(isMentionedToMe).length
 
   // 1. View-mode filter
   const viewFiltered: ConvSummary[] = (() => {
     if (viewMode === 'unattended')    return convs.filter(c => c.unread)
     if (viewMode === 'chatbot')       return convs.filter(c => c.bot_enabled)
     if (viewMode === 'needs_support') return convs.filter(c => c.needs_support)
-    if (viewMode === 'mentions')      return []
+    if (viewMode === 'mentions')      return convs.filter(isMentionedToMe)
     return convs
   })()
 
@@ -468,7 +530,7 @@ export default function Conversations({ storeId }: Props) {
   const navItems: { id: ViewMode; label: string; icon: string; count?: number }[] = [
     { id: 'all',        label: 'كل المحادثات',  count: total,
       icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
-    { id: 'mentions',   label: 'المذكورات',
+    { id: 'mentions',   label: 'المذكورات',  count: mentionsCount,
       icon: 'M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207' },
     { id: 'unattended', label: 'غير المتابعة',  count: unreadCount,
       icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
@@ -813,15 +875,6 @@ export default function Conversations({ storeId }: Props) {
             <div className="flex items-center justify-center py-12">
               <Spinner size="sm" color="primary" />
             </div>
-          ) : viewMode === 'mentions' ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-content2 flex items-center justify-center mb-3">
-                <Icon paths="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"
-                      size={22} className="text-slate-600" />
-              </div>
-              <p className="text-sm text-slate-400 font-semibold">المذكورات قريباً</p>
-              <p className="text-xs text-slate-600 mt-1">سيتم إضافة هذه الميزة في تحديث قادم</p>
-            </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
               <div className="w-12 h-12 rounded-2xl bg-content2 flex items-center justify-center mb-3">
@@ -1017,6 +1070,25 @@ export default function Conversations({ storeId }: Props) {
                   <p className="text-sm text-slate-500">لا توجد رسائل بعد</p>
                 </div>
               ) : selected.messages?.map((msg: Message, i: number) => {
+                if (msg.role === 'note') {
+                  return (
+                    <div key={i} className="flex justify-center my-1">
+                      <div className="max-w-[88%] w-full bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-[11px]">📌</span>
+                          <span className="text-[10px] font-bold text-amber-700">ملاحظة داخلية</span>
+                          {msg.employee_name && <span className="text-[10px] text-amber-600">· {msg.employee_name}</span>}
+                          <span className="text-[9px] text-amber-500/80 mr-auto">لا تظهر للعميل</span>
+                        </div>
+                        <div className="text-xs leading-relaxed text-amber-900"
+                          style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {renderNoteContent(msg.content, msg.mentions)}
+                        </div>
+                        <p className="text-[10px] mt-1 text-amber-500/80">{fmtTime(msg.ts)}</p>
+                      </div>
+                    </div>
+                  )
+                }
                 const isUser  = msg.role === 'user'
                 const isAdmin = msg.role === 'admin'
                 const isCsat  = msg.meta?.kind === 'csat'
@@ -1063,34 +1135,84 @@ export default function Conversations({ storeId }: Props) {
               })}
             </div>
 
-            {/* Reply input */}
-            {!selected.bot_enabled && (
-              <footer className="px-4 py-3 border-t border-divider bg-content1 flex-shrink-0">
-                <div className="flex gap-2">
-                  <Textarea
-                    placeholder="اكتب ردك كأدمن..."
-                    value={replyText} onValueChange={setReplyText}
-                    variant="bordered" minRows={1} maxRows={4}
-                    classNames={{ inputWrapper: 'border-divider bg-content2', input: 'text-sm' }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-                  />
-                  <Button color="primary" isLoading={sending} isIconOnly onPress={sendReply}
-                    isDisabled={!replyText.trim()}
-                    className="self-end h-10 w-10 min-w-10 bg-gradient-to-br from-teal-600 to-cyan-700">
-                    <Icon paths={['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7z']} size={15} />
-                  </Button>
-                </div>
-                <p className="text-[10px] text-slate-600 mt-1.5 px-1">Enter للإرسال · Shift+Enter لسطر جديد</p>
-              </footer>
-            )}
+            {/* ── Composer: reply to the customer OR an internal note (@mentions) ── */}
+            <footer className="px-4 py-3 border-t border-divider bg-content1 flex-shrink-0">
+              <div className="flex gap-1 mb-2">
+                <button onClick={() => setNoteMode(false)} disabled={selected.bot_enabled}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                    !noteMode ? 'bg-teal-500/15 text-teal-400'
+                              : 'text-slate-500 hover:text-slate-300 disabled:opacity-40'}`}>
+                  💬 رد للعميل
+                </button>
+                <button onClick={() => setNoteMode(true)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                    noteMode ? 'bg-amber-500/15 text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}>
+                  📌 ملاحظة داخلية
+                </button>
+              </div>
 
-            {selected.bot_enabled && (
-              <footer className="px-4 py-3 border-t border-divider bg-blue-500/5 flex-shrink-0">
-                <p className="text-xs text-blue-300/80 text-center">
-                  🤖 البوت يتولى هذه المحادثة. اضغط <span className="font-bold">تولي المحادثة</span> للرد كأدمن.
+              {noteMode ? (
+                <div className="relative">
+                  {mentionMatches.length > 0 && (
+                    <div className="absolute bottom-full mb-1 inset-x-0 bg-content1 border border-divider rounded-xl shadow-lg overflow-hidden z-20">
+                      {mentionMatches.map(emp => (
+                        <button key={emp.id} onClick={() => pickMention(emp)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-right text-xs hover:bg-content2">
+                          <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                            {emp.name.trim().charAt(0)}
+                          </span>
+                          <span className="font-semibold text-foreground truncate">{emp.name}</span>
+                          <span className="text-[10px] text-slate-500 mr-auto">{emp.role === 'manager' ? 'مدير' : 'موظف'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Textarea
+                      placeholder="ملاحظة داخلية للفريق… استخدم @ للإشارة لزميل"
+                      value={noteText} onValueChange={onNoteChange}
+                      variant="bordered" minRows={1} maxRows={4}
+                      classNames={{ inputWrapper: 'border-amber-300/40 bg-amber-50/40', input: 'text-sm' }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if (mentionMatches.length > 0) pickMention(mentionMatches[0])
+                          else sendNote()
+                        }
+                      }}
+                    />
+                    <Button isLoading={sendingNote} isIconOnly onPress={sendNote}
+                      isDisabled={!noteText.trim()}
+                      className="self-end h-10 w-10 min-w-10 bg-amber-500 text-white">
+                      <Icon paths={['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7z']} size={15} />
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-amber-600/70 mt-1.5 px-1">🔒 لا تظهر للعميل · @ للإشارة لزميل (يلاقيها في «المذكورات»)</p>
+                </div>
+              ) : selected.bot_enabled ? (
+                <p className="text-xs text-blue-300/80 text-center py-1">
+                  🤖 البوت يتولى هذه المحادثة. اضغط <span className="font-bold">تولي المحادثة</span> للرد، أو اترك ملاحظة داخلية.
                 </p>
-              </footer>
-            )}
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <Textarea
+                      placeholder="اكتب ردك كأدمن..."
+                      value={replyText} onValueChange={setReplyText}
+                      variant="bordered" minRows={1} maxRows={4}
+                      classNames={{ inputWrapper: 'border-divider bg-content2', input: 'text-sm' }}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
+                    />
+                    <Button color="primary" isLoading={sending} isIconOnly onPress={sendReply}
+                      isDisabled={!replyText.trim()}
+                      className="self-end h-10 w-10 min-w-10 bg-gradient-to-br from-teal-600 to-cyan-700">
+                      <Icon paths={['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7z']} size={15} />
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-slate-600 mt-1.5 px-1">Enter للإرسال · Shift+Enter لسطر جديد</p>
+                </>
+              )}
+            </footer>
           </>
         )}
       </main>

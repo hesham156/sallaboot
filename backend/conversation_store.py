@@ -767,6 +767,14 @@ def _summarise_row(sid: str, store_id: str, conv: dict) -> dict:
     cust = conv.get("customer_info") or {}
     esc  = conv.get("escalation")
     needs_support = bool(isinstance(esc, dict) and esc.get("reason") and not esc.get("resolved"))
+    # Employee ids @mentioned anywhere in this conversation's internal notes — lets
+    # the "Mentions" view show a teammate the chats where they were tagged.
+    mentioned_ids = sorted({
+        mid
+        for m in msgs if m.get("role") == "note"
+        for mid in ((x or {}).get("id") for x in (m.get("mentions") or []))
+        if mid is not None
+    })
     return {
         "session_id":          sid,
         # Prefer the conversations.store_id column (canonical), fall
@@ -777,6 +785,7 @@ def _summarise_row(sid: str, store_id: str, conv: dict) -> dict:
         "last_message":        last,
         "bot_enabled":         conv.get("bot_enabled", True),
         "needs_support":       needs_support,
+        "mentioned_ids":       mentioned_ids,
         "last_activity":       conv.get("last_activity", ""),
         "created_at":          conv.get("created_at", ""),
         "unread":              unread,
