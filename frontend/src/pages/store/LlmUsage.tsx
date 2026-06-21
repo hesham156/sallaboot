@@ -5,6 +5,7 @@ import {
   useDisclosure,
 } from '@heroui/react'
 import { api, ApiError, LlmUsageResponse, getIsSuper } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -21,7 +22,7 @@ function fmt(n: number): string {
 //   90-99 % → orange  (warning — 90% threshold alert fired)
 //   100 %   → red     (breaker tripped)
 function bandFor(pct: number | null): { ring: string; text: string; bg: string; label: string } {
-  if (pct === null) return { ring: 'stroke-slate-300',   text: 'text-slate-500',  bg: 'bg-slate-50',  label: 'غير محدد' }
+  if (pct === null) return { ring: 'stroke-slate-300',   text: 'text-default-500',  bg: 'bg-content2',  label: 'غير محدد' }
   if (pct >= 100)   return { ring: 'stroke-rose-500',    text: 'text-rose-600',   bg: 'bg-rose-50',   label: 'تجاوز الحد' }
   if (pct >= 90)    return { ring: 'stroke-orange-500',  text: 'text-orange-600', bg: 'bg-orange-50', label: 'تحذير عالي' }
   if (pct >= 80)    return { ring: 'stroke-amber-500',   text: 'text-amber-600',  bg: 'bg-amber-50',  label: 'تنبيه' }
@@ -51,7 +52,7 @@ function ProgressRing({ pct, band }: { pct: number; band: ReturnType<typeof band
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className={`text-3xl font-extrabold ${band.text}`}>{Math.round(pct)}%</span>
-        <span className="text-[10px] text-slate-400 mt-0.5">من الحد اليومي</span>
+        <span className="text-[10px] text-default-400 mt-0.5">من الحد اليومي</span>
       </div>
     </div>
   )
@@ -73,15 +74,15 @@ function HistoryChart({ history }: { history: LlmUsageResponse['history'] }) {
         const day  = date.toLocaleDateString('ar-EG', { weekday: 'short' })
         return (
           <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-            <div className="text-[10px] font-mono text-slate-400">{fmt(h.tokens_total)}</div>
-            <div className="w-full bg-slate-100 rounded-md h-24 flex items-end overflow-hidden">
+            <div className="text-[10px] font-mono text-default-400">{fmt(h.tokens_total)}</div>
+            <div className="w-full bg-content2 rounded-md h-24 flex items-end overflow-hidden">
               <div
                 className="w-full bg-gradient-to-t from-sky-400 to-sky-300 rounded-md transition-all duration-500"
                 style={{ height: `${Math.max(pct, 2)}%` }}
                 title={`${fmt(h.tokens_total)} توكن في ${h.date}`}
               />
             </div>
-            <div className="text-[10px] text-slate-500">{day}</div>
+            <div className="text-[10px] text-default-500">{day}</div>
           </div>
         )
       })}
@@ -166,18 +167,16 @@ export default function LlmUsage({ storeId }: Props) {
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4" dir="rtl">
       {/* ── Header ───────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-extrabold text-foreground">استهلاك الذكاء الاصطناعي</h1>
-          <p className="text-sm text-default-500 mt-1">
-            متابعة عدد التوكنز المستهلكة اليوم وضبط الحد اليومي للمتجر.
-            يُعاد التعيين كل يوم في الساعة 00:00 بتوقيت UTC.
-          </p>
-        </div>
-        <Button color="primary" radius="lg" onPress={openEdit}>
-          تعديل الحد اليومي
-        </Button>
-      </div>
+      <PageHeader
+        title="استهلاك الذكاء الاصطناعي"
+        subtitle="متابعة عدد التوكنز المستهلكة اليوم وضبط الحد اليومي للمتجر. يُعاد التعيين كل يوم في الساعة 00:00 بتوقيت UTC."
+        icon="M13 10V3L4 14h7v7l9-11h-7z"
+        actions={
+          <Button color="primary" radius="lg" onPress={openEdit}>
+            تعديل الحد اليومي
+          </Button>
+        }
+      />
 
       {/* ── Today's usage ─────────────────────────────────────────────── */}
       <Card>

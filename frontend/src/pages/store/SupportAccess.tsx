@@ -5,6 +5,7 @@ import {
   Spinner, Textarea, useDisclosure,
 } from '@heroui/react'
 import { api, ApiError, SupportAccessGrant } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -120,14 +121,15 @@ export default function SupportAccess({ storeId }: Props) {
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4" dir="rtl">
       {/* ── Intro ─────────────────────────────────────────────────────── */}
-      <div>
-        <h1 className="text-2xl font-extrabold text-foreground">وصول الدعم الفني</h1>
-        <p className="text-sm text-default-500 mt-1 leading-relaxed">
-          الفريق الفني للمنصة <b>لا يستطيع</b> الدخول على لوحة متجرك بدون إذن منك.
-          عند الحاجة، افتح نافذة وصول محدودة بوقت، وألغها متى شئت.
-          كل دخول مسجّل في سجل المراجعة.
-        </p>
-      </div>
+      <PageHeader
+        title="وصول الدعم الفني"
+        icon="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+      />
+      <p className="text-sm text-default-500 -mt-2 leading-relaxed">
+        الفريق الفني للمنصة <b>لا يستطيع</b> الدخول على لوحة متجرك بدون إذن منك.
+        عند الحاجة، افتح نافذة وصول محدودة بوقت، وألغها متى شئت.
+        كل دخول مسجّل في سجل المراجعة.
+      </p>
 
       {error && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-sm">

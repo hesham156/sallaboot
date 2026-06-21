@@ -7,6 +7,7 @@ import {
 import {
   api, PricingConfig, PaperType, SheetSize, AddonItem, DiscountRule, TierRule,
 } from '../../api'
+import { PageHeader } from '../../components/ui'
 import { Field } from '../../components/ui'
 
 interface Props { storeId: string }
@@ -70,20 +71,16 @@ export default function Pricing({ storeId }: Props) {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-5" dir="rtl">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">حاسبة أسعار الطباعة</h1>
-          <p className="text-sm text-default-500 mt-1">
-            الأسعار اللي تضبطها هنا الـ AI هيستخدمها لما يحسب للعميل من الشات
-          </p>
-        </div>
-        <Button
-          color="primary" isLoading={saving} onPress={save}
-          className="font-bold h-11 bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/20"
-        >
-          {saving ? '' : 'حفظ الإعدادات'}
-        </Button>
-      </header>
+      <PageHeader
+        title="حاسبة أسعار الطباعة"
+        subtitle="الأسعار اللي تضبطها هنا الـ AI هيستخدمها لما يحسب للعميل من الشات"
+        icon="M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
+        actions={
+          <Button color="primary" isLoading={saving} onPress={save} className="font-bold h-11">
+            {saving ? '' : 'حفظ الإعدادات'}
+          </Button>
+        }
+      />
 
       {msg && (
         <div className={`rounded-lg p-3 text-sm border ${
@@ -152,7 +149,7 @@ export default function Pricing({ storeId }: Props) {
                       className={`p-4 rounded-xl border text-center transition-colors ${
                         enabled
                           ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-                          : 'bg-content2 border-divider text-default-500 hover:border-slate-500'
+                          : 'bg-content2 border-divider text-default-500 hover:border-default-400'
                       }`}
                     >
                       <div className="text-sm font-bold mb-1">{PRINTING_TYPE_LABELS[t]}</div>

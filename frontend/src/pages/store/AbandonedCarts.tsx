@@ -5,6 +5,7 @@ import {
   Button, Chip, Spinner,
 } from '@heroui/react'
 import { api, AbandonedCart } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -34,15 +35,12 @@ export default function AbandonedCarts({ storeId }: Props) {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">السلات المتروكة</h1>
-          <p className="text-sm text-default-400 mt-1">
-            {carts.length} سلة — {carts.filter(c => !c.recovered).length} قيد الانتظار
-          </p>
-        </div>
-        <Button size="sm" variant="flat" onPress={loadCarts}>تحديث</Button>
-      </div>
+      <PageHeader
+        title="السلات المتروكة"
+        subtitle={`${carts.length} سلة — ${carts.filter(c => !c.recovered).length} قيد الانتظار`}
+        icon="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+        actions={<Button size="sm" variant="flat" onPress={loadCarts}>تحديث</Button>}
+      />
 
       <Card className="bg-content1 border border-divider">
         {loading ? (

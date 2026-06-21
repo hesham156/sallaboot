@@ -7,6 +7,7 @@ import {
   api, Employee, EmployeeCreateInput, EmployeeRatingStats,
   UnattributedRatings, getEmployee,
 } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -53,7 +54,7 @@ function ratingColor(avg: number): string {
   if (avg >= 3.5) return 'text-teal-500'
   if (avg >= 2.5) return 'text-amber-500'
   if (avg > 0)    return 'text-red-500'
-  return 'text-slate-400'
+  return 'text-default-400'
 }
 
 export default function Employees({ storeId }: Props) {
@@ -174,30 +175,24 @@ export default function Employees({ storeId }: Props) {
     <div className="p-4 md:p-6 max-w-5xl mx-auto" dir="rtl">
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
-        <div>
-          <h1 className="text-xl md:text-2xl font-black text-foreground flex items-center gap-2">
-            <span className="w-9 h-9 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center">
-              <Icon paths={['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']} size={18} />
-            </span>
-            الموظفون
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            أضف موظفين برّد على المحادثات باسمهم، وسيظهر اسمهم في صندوق الدردشة وفي تقييم العميل.
-          </p>
-        </div>
-
-        {isOwner && (
-          <Button
-            color="warning"
-            variant="solid"
-            onPress={openCreate}
-            startContent={<Icon paths="M12 4v16m8-8H4" size={14} />}
-            className="bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold"
-          >
-            موظف جديد
-          </Button>
-        )}
+      <div className="mb-6">
+        <PageHeader
+          title="الموظفون"
+          subtitle="أضف موظفين برّد على المحادثات باسمهم، وسيظهر اسمهم في صندوق الدردشة وفي تقييم العميل."
+          icon={['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']}
+          iconTone="warning"
+          actions={isOwner && (
+            <Button
+              color="warning"
+              variant="solid"
+              onPress={openCreate}
+              startContent={<Icon paths="M12 4v16m8-8H4" size={14} />}
+              className="text-white font-bold"
+            >
+              موظف جديد
+            </Button>
+          )}
+        />
       </div>
 
       {!isOwner && (
@@ -218,10 +213,10 @@ export default function Employees({ storeId }: Props) {
       ) : items.length === 0 ? (
         <div className="border border-dashed border-divider rounded-3xl p-12 text-center bg-content2/40">
           <div className="w-16 h-16 mx-auto rounded-3xl bg-content1 border border-divider flex items-center justify-center mb-4">
-            <Icon paths={['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']} size={28} className="text-slate-500" />
+            <Icon paths={['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']} size={28} className="text-default-500" />
           </div>
           <p className="text-base font-semibold text-foreground">لا يوجد موظفون بعد</p>
-          <p className="text-xs text-slate-500 mt-1 mb-4">
+          <p className="text-xs text-default-500 mt-1 mb-4">
             أضف أول موظف ليتمكّن من الرد على المحادثات باسمه.
           </p>
           {isOwner && (
@@ -261,13 +256,13 @@ export default function Employees({ storeId }: Props) {
                         {emp.role === 'manager' ? 'مدير' : 'موظف'}
                       </span>
                       {!emp.active && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-slate-500/15 text-slate-500">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-default-500/15 text-default-500">
                           موقوف
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-500 truncate" dir="ltr">{emp.email}</p>
-                    <p className="text-[10px] text-slate-600 mt-1">أُضيف {relTime(emp.created_at)}</p>
+                    <p className="text-xs text-default-500 truncate" dir="ltr">{emp.email}</p>
+                    <p className="text-[10px] text-default-600 mt-1">أُضيف {relTime(emp.created_at)}</p>
                   </div>
                 </div>
 
@@ -280,8 +275,8 @@ export default function Employees({ storeId }: Props) {
                           <span className={`text-2xl font-black ${ratingColor(stats.avg)}`}>
                             {stats.avg.toFixed(1)}
                           </span>
-                          <span className="text-xs text-slate-500">/ 5</span>
-                          <span className="text-[11px] text-slate-500 mr-2">
+                          <span className="text-xs text-default-500">/ 5</span>
+                          <span className="text-[11px] text-default-500 mr-2">
                             ({stats.count} تقييم)
                           </span>
                         </div>
@@ -314,7 +309,7 @@ export default function Employees({ storeId }: Props) {
                                   style={{ width: `${pct}%` }}
                                 />
                               </div>
-                              <span className="text-[9px] text-slate-500">{star}★</span>
+                              <span className="text-[9px] text-default-500">{star}★</span>
                             </div>
                           )
                         })}
@@ -332,10 +327,10 @@ export default function Employees({ storeId }: Props) {
                                 <span className="font-bold text-amber-500">
                                   {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
                                 </span>
-                                <span className="text-[10px] text-slate-500">{formatRatedAt(r.rated_at)}</span>
+                                <span className="text-[10px] text-default-500">{formatRatedAt(r.rated_at)}</span>
                               </div>
                               {r.customer_name && (
-                                <p className="text-[11px] text-slate-500">من: {r.customer_name}</p>
+                                <p className="text-[11px] text-default-500">من: {r.customer_name}</p>
                               )}
                               {r.comment && r.comment !== `CSAT: ${stats.name}` && r.comment !== 'CSAT' && (
                                 <p className="text-[11px] text-foreground mt-1">{r.comment}</p>
@@ -346,7 +341,7 @@ export default function Employees({ storeId }: Props) {
                       )}
                     </>
                   ) : (
-                    <p className="text-[11px] text-slate-500">لا توجد تقييمات لهذا الموظف بعد.</p>
+                    <p className="text-[11px] text-default-500">لا توجد تقييمات لهذا الموظف بعد.</p>
                   )}
                 </div>
 
@@ -389,11 +384,11 @@ export default function Employees({ storeId }: Props) {
               <p className="text-sm font-bold text-foreground">
                 تقييمات غير منسوبة لموظف
               </p>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-default-500">
                 {unattributed.count} تقييم · متوسط {unattributed.avg.toFixed(1)}
               </span>
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-default-500">
               هذه تقييمات وصلت قبل إضافة نظام الموظفين أو من شريط التقييم العام في الويدجت.
             </p>
           </div>
@@ -410,7 +405,7 @@ export default function Employees({ storeId }: Props) {
                 <span className="text-base font-bold">
                   {editing ? `تعديل: ${editing.name}` : 'موظف جديد'}
                 </span>
-                <span className="text-xs text-slate-500 font-normal">
+                <span className="text-xs text-default-500 font-normal">
                   {editing ? 'اترك كلمة المرور فارغة إذا لم ترد تغييرها' : 'سيستخدم البريد وكلمة المرور لتسجيل الدخول'}
                 </span>
               </ModalHeader>
@@ -422,7 +417,7 @@ export default function Employees({ storeId }: Props) {
                   value={form.name}
                   onValueChange={v => setForm({ ...form, name: v })}
                   variant="bordered"
-                  classNames={{ label: 'text-xs font-semibold text-slate-600' }}
+                  classNames={{ label: 'text-xs font-semibold text-default-600' }}
                 />
                 <Input
                   label="البريد الإلكتروني"
@@ -432,7 +427,7 @@ export default function Employees({ storeId }: Props) {
                   value={form.email}
                   onValueChange={v => setForm({ ...form, email: v })}
                   variant="bordered"
-                  classNames={{ label: 'text-xs font-semibold text-slate-600', input: 'text-left', inputWrapper: 'text-left' }}
+                  classNames={{ label: 'text-xs font-semibold text-default-600', input: 'text-left', inputWrapper: 'text-left' }}
                 />
                 <Input
                   label={editing ? 'كلمة مرور جديدة (اختياري)' : 'كلمة المرور'}
@@ -442,7 +437,7 @@ export default function Employees({ storeId }: Props) {
                   value={form.password}
                   onValueChange={v => setForm({ ...form, password: v })}
                   variant="bordered"
-                  classNames={{ label: 'text-xs font-semibold text-slate-600' }}
+                  classNames={{ label: 'text-xs font-semibold text-default-600' }}
                 />
                 <Select
                   label="الدور"
@@ -454,14 +449,14 @@ export default function Employees({ storeId }: Props) {
                     setForm({ ...form, role: v })
                   }}
                   variant="bordered"
-                  classNames={{ label: 'text-xs font-semibold text-slate-600' }}
+                  classNames={{ label: 'text-xs font-semibold text-default-600' }}
                 >
                   {ROLE_OPTIONS.map(opt => (
                     <SelectItem key={opt.key}>{opt.label}</SelectItem>
                   ))}
                 </Select>
                 <div className="flex items-center justify-between px-1 pt-1">
-                  <span className="text-sm font-semibold text-slate-700">حساب مفعّل</span>
+                  <span className="text-sm font-semibold text-default-700">حساب مفعّل</span>
                   <Switch
                     isSelected={form.active !== false}
                     onValueChange={v => setForm({ ...form, active: v })}

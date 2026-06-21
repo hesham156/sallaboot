@@ -110,12 +110,12 @@ export default function AuditLog() {
   }, [actionFilter, storeFilter])
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-6" dir="rtl">
+    <div className="min-h-screen bg-content2 p-4 md:p-6" dir="rtl">
       <div className="max-w-7xl mx-auto space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">سجل الإجراءات الحساسة</h1>
+            <h1 className="text-2xl md:text-3xl font-extrabold text-foreground">سجل الإجراءات الحساسة</h1>
             <p className="text-sm text-default-500 mt-1">
               كل تغيير في الميزانية، المفاتيح، كلمات المرور، أو الموظفين — مع المنفّذ ووقت الإجراء.
               لا يحتوي السجل على القيم الحساسة نفسها (لا مفاتيح، لا كلمات مرور).

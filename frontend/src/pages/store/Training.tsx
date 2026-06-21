@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Input, Textarea, Spinner, Switch } from '@heroui/react'
 import { api, TrainingEntry } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -134,11 +135,12 @@ export default function Training({ storeId }: Props) {
     <div className="h-full flex flex-col" dir="rtl">
 
       {/* ── Header ── */}
-      <div className="px-6 pt-6 pb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-black text-foreground">🎓 تدريب البوت</h1>
-          <p className="text-xs text-default-500 mt-0.5">علّم البوت توجيهات، أسئلة شائعة، وملفات مرجعية</p>
-        </div>
+      <div className="px-6 pt-6 pb-4 flex items-center justify-between flex-wrap gap-3">
+        <PageHeader
+          title="تدريب البوت"
+          subtitle="علّم البوت توجيهات، أسئلة شائعة، وملفات مرجعية"
+          icon="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.42A12 12 0 0112 21a12 12 0 01-6.16-10.42L12 14z"
+        />
         {/* Counters */}
         <div className="flex gap-2 text-xs">
           {Object.entries(counts).filter(([,v]) => v > 0).map(([k, v]) => {

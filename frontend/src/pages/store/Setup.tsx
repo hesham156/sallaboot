@@ -172,7 +172,7 @@ export default function Setup({ storeId, store }: Props) {
             <h3 className="font-bold text-foreground text-sm">
               {allDone ? '🎉 البوت جاهز تماماً!' : 'إعداد البوت — ابدأ في دقائق'}
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-default-500 mt-0.5">
               {allDone
                 ? 'أكملت كل خطوات الإعداد بنجاح'
                 : `${doneCount} من ${steps.length} خطوات مكتملة`
@@ -198,7 +198,7 @@ export default function Setup({ storeId, store }: Props) {
           </div>
 
           {!allDone && (
-            <button onClick={dismiss} className="text-slate-600 hover:text-slate-400 transition-colors p-1" title="إخفاء">
+            <button onClick={dismiss} className="text-default-600 hover:text-default-400 transition-colors p-1" title="إخفاء">
               <Icon paths="M6 18L18 6M6 6l12 12" size={14} />
             </button>
           )}
@@ -229,11 +229,11 @@ export default function Setup({ storeId, store }: Props) {
             </div>
 
             <div className="flex-1 min-w-0">
-              <p className={`text-sm font-bold mb-0.5 ${step.done ? 'line-through text-slate-500' : 'text-foreground'}`}>
+              <p className={`text-sm font-bold mb-0.5 ${step.done ? 'line-through text-default-500' : 'text-foreground'}`}>
                 {step.title}
               </p>
               {!step.done && (
-                <p className="text-xs text-slate-500 leading-relaxed mb-3">{step.desc}</p>
+                <p className="text-xs text-default-500 leading-relaxed mb-3">{step.desc}</p>
               )}
               {!step.done && (
                 <Button size="sm" variant="flat"

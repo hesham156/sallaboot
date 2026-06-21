@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Input, Spinner, Chip } from '@heroui/react'
 import { api, ChannelData } from '../../api'
+import { PageHeader, StatusPill } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -103,7 +104,7 @@ function ChannelCard({ channel, onConnect, onDisconnect, onToggle, busy }: {
             startContent={<span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-emerald-500 animate-pulse' : 'bg-default-400'}`} />}
             className="text-[10px] font-bold">{enabled ? 'متصل' : 'متوقف مؤقتاً'}</Chip>
         ) : comingSoon ? (
-          <Chip size="sm" color="default" variant="flat" className="text-[10px] font-bold text-slate-500">قريباً</Chip>
+          <Chip size="sm" color="default" variant="flat" className="text-[10px] font-bold text-default-500">قريباً</Chip>
         ) : (
           <Chip size="sm" color="default" variant="flat" className="text-[10px]">غير متصل</Chip>
         )}
@@ -111,7 +112,7 @@ function ChannelCard({ channel, onConnect, onDisconnect, onToggle, busy }: {
       <div className="flex-1">
         <p className="text-sm font-bold text-foreground mb-1">
           {channel.name}
-          {channel.nameEn && <span className="text-[10px] font-normal text-slate-500 mr-1.5">{channel.nameEn}</span>}
+          {channel.nameEn && <span className="text-[10px] font-normal text-default-500 mr-1.5">{channel.nameEn}</span>}
         </p>
         <p className="text-xs text-default-500 leading-relaxed">{channel.description}</p>
         {connected && channel.data?.bot_username && (
@@ -124,7 +125,7 @@ function ChannelCard({ channel, onConnect, onDisconnect, onToggle, busy }: {
             يُدار من إعدادات ميتا
           </div>
         ) : comingSoon ? (
-          <button disabled className="flex-1 py-2 text-xs font-semibold rounded-xl border border-divider text-slate-500 cursor-not-allowed opacity-60">
+          <button disabled className="flex-1 py-2 text-xs font-semibold rounded-xl border border-divider text-default-500 cursor-not-allowed opacity-60">
             قريباً
           </button>
         ) : connected ? (
@@ -311,16 +312,13 @@ export default function Channels({ storeId }: Props) {
       <div className="max-w-5xl mx-auto">
 
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-extrabold text-foreground mb-1">القنوات</h1>
-            <p className="text-sm text-default-500">اربط منصات المراسلة ليرد المساعد الذكي على عملائك تلقائياً</p>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-content1 border border-divider rounded-2xl flex-shrink-0">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-bold text-foreground">{connectedCount}</span>
-            <span className="text-xs text-default-500">متصل</span>
-          </div>
+        <div className="mb-8">
+          <PageHeader
+            title="القنوات"
+            subtitle="اربط منصات المراسلة ليرد المساعد الذكي على عملائك تلقائياً"
+            icon="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"
+            actions={<StatusPill tone="success" pulse label={`${connectedCount} متصل`} />}
+          />
         </div>
 
         {loading ? (
@@ -362,7 +360,7 @@ export default function Channels({ storeId }: Props) {
             {/* Request new */}
             <div className="mt-4 border-2 border-dashed border-divider rounded-2xl p-8 text-center">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-content2 flex items-center justify-center mb-3">
-                <Icon paths={['M12 5v14', 'M5 12h14']} size={20} className="text-slate-500" />
+                <Icon paths={['M12 5v14', 'M5 12h14']} size={20} className="text-default-500" />
               </div>
               <p className="text-sm font-bold text-foreground mb-1">تريد قناة أخرى؟</p>
               <p className="text-xs text-default-500 mb-4">أخبرنا وسنضيفها في التحديثات القادمة</p>

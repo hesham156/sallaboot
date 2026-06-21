@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Textarea, Spinner } from '@heroui/react'
 import { api, BrainData } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -93,16 +94,19 @@ export default function Brain({ storeId }: Props) {
     <div className="h-full flex flex-col" dir="rtl">
 
       {/* ── Header ── */}
-      <div className="px-6 pt-6 pb-4 flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-lg font-black text-foreground">🧠 ذاكرة الـ AI</h1>
-          <p className="text-xs text-default-500 mt-0.5">ماذا يعرف البوت عن متجرك — وكيف تعلّمه أكثر</p>
-        </div>
-        <Button variant="flat" color="warning" isLoading={retraining} onPress={retrain}
-          className="font-bold h-9 text-xs"
-          startContent={!retraining && <Icon d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />}>
-          {retraining ? '' : 'ذاكر المتجر (مزامنة)'}
-        </Button>
+      <div className="px-6 pt-6 pb-4">
+        <PageHeader
+          title="ذاكرة الـ AI"
+          subtitle="ماذا يعرف البوت عن متجرك — وكيف تعلّمه أكثر"
+          icon="M9.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 01-4.96.44 2.5 2.5 0 01-2.96-3.08 3 3 0 01-.34-5.58 2.5 2.5 0 011.32-4.24A2.5 2.5 0 019.5 2zm5 0A2.5 2.5 0 0012 4.5v15a2.5 2.5 0 004.96.44 2.5 2.5 0 002.96-3.08 3 3 0 00.34-5.58 2.5 2.5 0 00-1.32-4.24A2.5 2.5 0 0014.5 2z"
+          actions={
+            <Button variant="flat" color="warning" isLoading={retraining} onPress={retrain}
+              className="font-bold h-9 text-xs"
+              startContent={!retraining && <Icon d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />}>
+              {retraining ? '' : 'ذاكر المتجر (مزامنة)'}
+            </Button>
+          }
+        />
       </div>
 
       {/* ── Toast msg ── */}

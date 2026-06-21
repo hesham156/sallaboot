@@ -5,6 +5,7 @@ import {
   Button, Chip, Input, Spinner, Pagination,
 } from '@heroui/react'
 import { api, Order } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -46,10 +47,13 @@ export default function Orders({ storeId }: Props) {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-foreground">الطلبات</h1>
-        <Button size="sm" variant="flat" onPress={loadOrders}>تحديث</Button>
-      </div>
+      <PageHeader
+        title="الطلبات"
+        subtitle="طلبات المتجر مع حالتها وتفاصيل العميل"
+        icon="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+        actions={<Button size="sm" variant="flat" onPress={loadOrders}>تحديث</Button>}
+      />
+
 
       <Input
         placeholder="بحث برقم الطلب أو المرجع..."

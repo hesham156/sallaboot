@@ -221,7 +221,7 @@ export default function StoresList() {
           />
           <div>
             <h1 className="text-xl font-black text-foreground leading-tight">لوحة التحكم</h1>
-            <p className="text-xs text-slate-500 mt-0.5">إدارة جميع المتاجر</p>
+            <p className="text-xs text-default-500 mt-0.5">إدارة جميع المتاجر</p>
           </div>
         </div>
 
@@ -250,7 +250,7 @@ export default function StoresList() {
 
           <button
             onClick={onOpen}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-content1 border-divider text-default-600 hover:text-foreground hover:border-slate-500 hover:bg-content2"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-content1 border-divider text-default-600 hover:text-foreground hover:border-default-400 hover:bg-content2"
           >
             <Icon paths="M12 4v16m8-8H4" size={13} />
             تسجيل متجر
@@ -389,7 +389,7 @@ export default function StoresList() {
             <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} pointer-events-none`} />
             <div className="relative flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs text-slate-500 font-medium mb-3 truncate">{s.label}</p>
+                <p className="text-xs text-default-500 font-medium mb-3 truncate">{s.label}</p>
                 <p className={`text-4xl font-black tracking-tight leading-none ${s.numColor}`}>
                   {s.getValue(stores)}
                 </p>
@@ -411,7 +411,7 @@ export default function StoresList() {
             <span className="w-1 h-5 bg-gradient-to-b from-blue-400 to-indigo-500 rounded-full" />
             المتاجر المسجلة
           </h2>
-          <span className="text-xs text-slate-500 bg-content2 px-2.5 py-1 rounded-lg border border-divider">
+          <span className="text-xs text-default-500 bg-content2 px-2.5 py-1 rounded-lg border border-divider">
             {stores.length} متجر
           </span>
         </div>
@@ -425,7 +425,7 @@ export default function StoresList() {
             aria-label="stores-table"
             classNames={{
               wrapper: 'bg-transparent shadow-none p-0 rounded-none',
-              th: 'bg-content2 text-slate-500 text-xs font-semibold uppercase tracking-wide border-0 first:rounded-none last:rounded-none',
+              th: 'bg-content2 text-default-500 text-xs font-semibold uppercase tracking-wide border-0 first:rounded-none last:rounded-none',
               td: 'py-3.5 border-b border-divider/60 last-of-type:border-0',
               tr: 'hover:bg-content2 transition-colors',
             }}
@@ -441,10 +441,10 @@ export default function StoresList() {
             <TableBody emptyContent={
               <div className="py-20 text-center">
                 <div className="w-16 h-16 bg-content2 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={26} className="text-slate-600" />
+                  <Icon paths={['M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', 'M9 22V12h6v10']} size={26} className="text-default-600" />
                 </div>
-                <p className="text-slate-400 text-sm font-semibold">لا يوجد متاجر مسجلة</p>
-                <p className="text-slate-600 text-xs mt-1">أضف متجراً جديداً للبدء</p>
+                <p className="text-default-400 text-sm font-semibold">لا يوجد متاجر مسجلة</p>
+                <p className="text-default-600 text-xs mt-1">أضف متجراً جديداً للبدء</p>
               </div>
             }>
               {stores.map(s => (
@@ -461,12 +461,12 @@ export default function StoresList() {
                         <p className="font-semibold text-sm text-foreground truncate">
                           {s.store_name}
                         </p>
-                        <p className="text-xs text-slate-600 font-mono truncate">{s.store_id}</p>
+                        <p className="text-xs text-default-600 font-mono truncate">{s.store_id}</p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm text-slate-400">{s.store_domain || '—'}</span>
+                    <span className="text-sm text-default-400">{s.store_domain || '—'}</span>
                   </TableCell>
                   <TableCell>
                     <span className="inline-flex items-center text-sm font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded-lg">
@@ -484,7 +484,7 @@ export default function StoresList() {
                     </Chip>
                   </TableCell>
                   <TableCell>
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-default-500">
                       {s.last_sync === 'never'
                         ? 'لم تتم بعد'
                         : new Date(s.last_sync).toLocaleString('ar-SA')}
@@ -574,7 +574,7 @@ export default function StoresList() {
             )}
           </ModalBody>
           <ModalFooter className="border-t border-divider pt-4">
-            <Button variant="flat" onPress={onClose} className="text-slate-400 bg-content2">
+            <Button variant="flat" onPress={onClose} className="text-default-400 bg-content2">
               إلغاء
             </Button>
             <Button color="primary" isLoading={regLoading} onPress={handleRegister} className="font-bold">

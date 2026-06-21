@@ -250,9 +250,9 @@ const NAV_ITEMS: Array<{
     key: 'settings',
     label: 'الإعدادات',
     icon: ['M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', 'M15 12a3 3 0 11-6 0 3 3 0 016 0z'],
-    activeColor: 'text-slate-600',
-    activeBg: 'bg-slate-500/10',
-    activeBorder: 'border-r-slate-400',
+    activeColor: 'text-default-700',
+    activeBg: 'bg-default-200',
+    activeBorder: 'border-r-default-400',
     roles: ['owner'],
   },
 ]
@@ -276,7 +276,7 @@ function Forbidden() {
         </svg>
       </div>
       <p className="text-base font-semibold text-foreground">صلاحيتك لا تسمح بفتح هذه الصفحة</p>
-      <p className="text-xs text-slate-500 mt-1">تواصل مع مالك المتجر لو احتجت وصولاً إضافياً.</p>
+      <p className="text-xs text-default-500 mt-1">تواصل مع مالك المتجر لو احتجت وصولاً إضافياً.</p>
     </div>
   )
 }
@@ -366,7 +366,7 @@ export default function StoreDashboard() {
 
   if (needsSupportAccess) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4" dir="rtl">
+      <div className="min-h-screen flex items-center justify-center bg-content2 px-4" dir="rtl">
         <div className="max-w-lg w-full bg-white rounded-3xl shadow-xl border border-amber-100 p-10 text-center">
           <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-5">
             <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -375,12 +375,12 @@ export default function StoreDashboard() {
               <path d="M5 11h14v10H5z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-extrabold text-slate-900">يلزم إذن من مالك المتجر</h1>
-          <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+          <h1 className="text-2xl font-extrabold text-foreground">يلزم إذن من مالك المتجر</h1>
+          <p className="mt-3 text-sm text-default-600 leading-relaxed">
             لا يمكنك الدخول على لوحة هذا المتجر إلا بعد أن يفتح المالك نافذة وصول محدودة بالوقت.
             تواصل معه ليفتح <span className="font-bold">"وصول الدعم"</span> من إعدادات متجره.
           </p>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-default-400">
             القرار في يد المالك. كل وصول مسجَّل ومحدّد بوقت.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">

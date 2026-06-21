@@ -33,13 +33,13 @@ function StatCard({ label, value, hint, tone = 'neutral' }: {
   tone?: 'neutral' | 'good' | 'warning' | 'danger'
 }) {
   const toneClass = {
-    neutral: 'border-slate-200 bg-white',
+    neutral: 'border-divider bg-white',
     good:    'border-emerald-200 bg-emerald-50/40',
     warning: 'border-amber-200  bg-amber-50/40',
     danger:  'border-rose-200   bg-rose-50/40',
   }[tone]
   const valueClass = {
-    neutral: 'text-slate-900',
+    neutral: 'text-foreground',
     good:    'text-emerald-700',
     warning: 'text-amber-700',
     danger:  'text-rose-700',
@@ -59,7 +59,7 @@ function StatCard({ label, value, hint, tone = 'neutral' }: {
 // and dead get red colour because they need operator attention.
 function QueueCard({ title, counts }: { title: string; counts: Record<string, number> }) {
   const rows = [
-    { key: 'pending',    label: 'انتظار',     color: 'text-slate-700' },
+    { key: 'pending',    label: 'انتظار',     color: 'text-default-700' },
     { key: 'processing', label: 'قيد المعالجة', color: 'text-sky-600'  },
     { key: 'done',       label: 'مكتمل',       color: 'text-emerald-600' },
     { key: 'failed',     label: 'فشل',        color: 'text-amber-600' },
@@ -146,12 +146,12 @@ export default function PlatformOps() {
   const hasErrors = e.webhook_errors_24h > 0 || e.login_failures_24h > 0
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-6" dir="rtl">
+    <div className="min-h-screen bg-content2 p-4 md:p-6" dir="rtl">
       {/* ── Header ───────────────────────────────────────────────── */}
       <div className="max-w-7xl mx-auto space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900">عمليات المنصة</h1>
+            <h1 className="text-2xl md:text-3xl font-extrabold text-foreground">عمليات المنصة</h1>
             <p className="text-sm text-default-500 mt-1">
               لقطة تشغيلية لكل المتاجر، الطوابير، والأخطاء — يُحدّث كل دقيقة تلقائياً.
             </p>
@@ -361,7 +361,7 @@ export default function PlatformOps() {
         </Card>
 
         {/* ── Privacy note ─────────────────────────────────────── */}
-        <Card className="bg-slate-50 border-slate-200">
+        <Card className="bg-content2 border-divider">
           <CardBody className="text-xs text-default-500 leading-relaxed">
             🔒 هذه اللوحة تعرض مؤشرات تشغيلية فقط. المفاتيح والـ tokens مشفّرة على القرص ولا تُكشف هنا.
             للوصول لمحادثات عميل بعينه، استخدم الصلاحية المخصصة (في الإصدار القادم — مع تسجيل سبب الوصول).

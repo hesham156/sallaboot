@@ -5,6 +5,7 @@ import {
   Button, Chip, Input, Spinner, Pagination, Divider,
 } from '@heroui/react'
 import { api, Product } from '../../api'
+import { PageHeader } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -55,18 +56,16 @@ export default function Products({ storeId }: Props) {
 
   return (
     <div className="p-6 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">المنتجات</h1>
-          <p className="text-sm text-default-400 mt-1">
-            {total} منتج — آخر مزامنة: {lastSync === 'never' ? 'لم تتم' : new Date(lastSync).toLocaleString('ar-SA')}
-          </p>
-        </div>
-        <Button color="primary" variant="flat" isLoading={syncing} onPress={handleSync}>
-          مزامنة المنتجات
-        </Button>
-      </div>
+      <PageHeader
+        title="المنتجات"
+        subtitle={`${total} منتج — آخر مزامنة: ${lastSync === 'never' ? 'لم تتم' : new Date(lastSync).toLocaleString('ar-SA')}`}
+        icon="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+        actions={
+          <Button color="primary" variant="flat" isLoading={syncing} onPress={handleSync}>
+            مزامنة المنتجات
+          </Button>
+        }
+      />
 
       {syncMsg && (
         <div className={`rounded-lg p-3 text-sm border ${

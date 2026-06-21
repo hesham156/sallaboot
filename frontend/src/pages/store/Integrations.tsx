@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Chip, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Input, Spinner } from '@heroui/react'
 import { api, IntegrationData } from '../../api'
+import { PageHeader, StatusPill } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -150,7 +151,7 @@ function IntegrationCard({
             startContent={<span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />}
             className="text-[10px] font-bold">متصل</Chip>
         ) : comingSoon ? (
-          <Chip size="sm" color="default" variant="flat" className="text-[10px] font-bold text-slate-500">قريباً</Chip>
+          <Chip size="sm" color="default" variant="flat" className="text-[10px] font-bold text-default-500">قريباً</Chip>
         ) : (
           <Chip size="sm" color="default" variant="flat" className="text-[10px]">غير متصل</Chip>
         )}
@@ -158,7 +159,7 @@ function IntegrationCard({
       <div className="flex-1">
         <p className="text-sm font-bold text-foreground mb-1">
           {integration.name}
-          {integration.nameEn && <span className="text-[10px] font-normal text-slate-500 mr-1.5">{integration.nameEn}</span>}
+          {integration.nameEn && <span className="text-[10px] font-normal text-default-500 mr-1.5">{integration.nameEn}</span>}
         </p>
         <p className="text-xs text-default-500 leading-relaxed">{integration.description}</p>
         {connected && integration.data?.shop_name && (
@@ -167,7 +168,7 @@ function IntegrationCard({
       </div>
       <div className="flex gap-2">
         {comingSoon ? (
-          <button disabled className="flex-1 py-2 text-xs font-semibold rounded-xl border border-divider text-slate-500 cursor-not-allowed opacity-60">
+          <button disabled className="flex-1 py-2 text-xs font-semibold rounded-xl border border-divider text-default-500 cursor-not-allowed opacity-60">
             قريباً
           </button>
         ) : connected ? (
@@ -488,16 +489,13 @@ export default function Integrations({ storeId }: Props) {
       <div className="max-w-5xl mx-auto">
 
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-extrabold text-foreground mb-1">التكاملات</h1>
-            <p className="text-sm text-default-500">اربط متجرك بالمنصات والأدوات الخارجية</p>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-content1 border border-divider rounded-2xl flex-shrink-0">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-bold text-foreground">{connectedCount}</span>
-            <span className="text-xs text-default-500">متصل</span>
-          </div>
+        <div className="mb-8">
+          <PageHeader
+            title="التكاملات"
+            subtitle="اربط متجرك بالمنصات والأدوات الخارجية"
+            icon="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 10-5.656-5.656l-1.1 1.1"
+            actions={<StatusPill tone="success" pulse label={`${connectedCount} متصل`} />}
+          />
         </div>
 
         {loading ? (
@@ -539,7 +537,7 @@ export default function Integrations({ storeId }: Props) {
             {/* Request new */}
             <div className="mt-4 border-2 border-dashed border-divider rounded-2xl p-8 text-center">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-content2 flex items-center justify-center mb-3">
-                <Icon paths={['M12 5v14', 'M5 12h14']} size={20} className="text-slate-500" />
+                <Icon paths={['M12 5v14', 'M5 12h14']} size={20} className="text-default-500" />
               </div>
               <p className="text-sm font-bold text-foreground mb-1">تريد تكاملاً آخر؟</p>
               <p className="text-xs text-default-500 mb-4">أخبرنا وسنضيفه في التحديثات القادمة</p>
@@ -600,7 +598,7 @@ export default function Integrations({ storeId }: Props) {
                     <li>المنتجات والمخزون</li>
                     <li>بيانات العملاء</li>
                   </ul>
-                  <p className="mt-2 text-[10px] text-slate-600">لن نكتب أي بيانات في متجرك.</p>
+                  <p className="mt-2 text-[10px] text-default-600">لن نكتب أي بيانات في متجرك.</p>
                 </div>
               </ModalBody>
               <ModalFooter>
