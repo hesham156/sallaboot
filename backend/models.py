@@ -118,6 +118,10 @@ class PasswordChangeRequest(BaseModel):
     new_password:     str
 
 
+class AccountEmailRequest(BaseModel):
+    email: str
+
+
 # ── Settings ─────────────────────────────────────────────────────────────
 
 class AIConfigRequest(BaseModel):

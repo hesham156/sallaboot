@@ -156,6 +156,11 @@ export default function Settings({ storeId }: Props) {
   const [refreshing, setRefreshing]   = useState(false)
   const [tokenMsg, setTokenMsg]       = useState('')
 
+  /* Account email (signup email — also the default notifications address) */
+  const [accountEmail, setAccountEmail] = useState('')
+  const [emailSaving, setEmailSaving]   = useState(false)
+  const [emailMsg, setEmailMsg]         = useState('')
+
   /* ── load ── */
   useEffect(() => { load() }, [storeId])
 
@@ -196,6 +201,7 @@ export default function Settings({ storeId }: Props) {
       setAccessDeliveryPromises(ai.access_delivery_promises !== false)
       setTokenStatus(tok)
       setNotif(n)
+      setAccountEmail(n.account_email || '')
     } catch { /* ignore */ }
     finally { setAiLoading(false) }
   }
@@ -468,6 +474,17 @@ export default function Settings({ storeId }: Props) {
     try { const r = await api.refreshToken(storeId); setTokenStatus(r); setTokenMsg('✅ تم التجديد') }
     catch (e: unknown) { setTokenMsg(e instanceof Error ? e.message : 'فشل التجديد') }
     finally { setRefreshing(false) }
+  }
+
+  async function saveAccountEmail() {
+    setEmailSaving(true); setEmailMsg('')
+    try {
+      const r = await api.setAccountEmail(storeId, accountEmail.trim())
+      setEmailMsg(r.message || '✅ تم التحديث')
+      await load()   // refresh so the notifications tab picks up the new default
+    } catch (e: unknown) {
+      setEmailMsg(e instanceof Error ? e.message : 'خطأ')
+    } finally { setEmailSaving(false) }
   }
 
   /* ── derived ── */
@@ -1182,7 +1199,9 @@ export default function Settings({ storeId }: Props) {
             {notif.email_enabled && (
               <TextField label="البريد الإلكتروني" value={notif.email_address}
                 onChange={v => setNotif(n => ({ ...n, email_address: v }))}
-                placeholder="owner@mystore.com" type="email" />
+                placeholder="owner@mystore.com" type="email" dir="ltr"
+                hint="افتراضيًا بريد حسابك"
+                description="يمكنك تغييره من تبويب «الأمان ← بريد الحساب»" />
             )}
 
             {/* Triggers */}
@@ -1249,6 +1268,30 @@ export default function Settings({ storeId }: Props) {
         {/* ══ Security ══ */}
         {tab === 'security' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+
+            {/* Account email */}
+            <section className="lg:col-span-2">
+              <label className="text-xs font-bold text-default-500 block mb-2">بريد الحساب</label>
+              <div className="bg-content2 rounded-xl border border-divider p-4 space-y-3">
+                <p className="text-xs text-default-400 leading-relaxed">
+                  هذا هو البريد الذي سجّلت به، ويُستخدم لتسجيل الدخول وكعنوان افتراضي
+                  لإشعارات البريد. تغييره يوجّه الإشعارات إلى البريد الجديد.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                  <div className="flex-1">
+                    <TextField label="" type="email" dir="ltr"
+                      value={accountEmail} onChange={setAccountEmail}
+                      placeholder="owner@store.com" />
+                  </div>
+                  <Button color="primary" isLoading={emailSaving} onPress={saveAccountEmail}
+                    isDisabled={!accountEmail.trim() || accountEmail.trim() === (notif.account_email || '')}
+                    className="font-semibold h-12 sm:w-32">
+                    {emailSaving ? '' : 'حفظ البريد'}
+                  </Button>
+                </div>
+                <InlineAlert text={emailMsg} />
+              </div>
+            </section>
 
             {/* Token status */}
             {tokenStatus && (

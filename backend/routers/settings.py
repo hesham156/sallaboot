@@ -17,9 +17,12 @@ from store_sync import sync_store
 import notifications as _notif
 from models import (
     AIConfigRequest, CustomKnowledgeRequest, TrainingTextRequest,
-    NotificationSettingsRequest, PasswordChangeRequest,
+    NotificationSettingsRequest, PasswordChangeRequest, AccountEmailRequest,
 )
-from routers.deps import audit, CONTENT_TYPES, MAX_FILE_MB, UPLOAD_DIR, read_upload_bounded
+from routers.deps import (
+    audit, CONTENT_TYPES, MAX_FILE_MB, UPLOAD_DIR, read_upload_bounded,
+    require_store_owner,
+)
 
 router = APIRouter()
 
@@ -718,9 +721,11 @@ async def get_notification_settings(store_id: str):
     """
     cfg = sm.get_ai_config(store_id) or {}
     nested = cfg.get("notifications") or {}
+    account_email = sm.get_owner_email(store_id)
 
     # ── Canonical values ────────────────────────────────────────────────
-    email_addr   = cfg.get("notify_email", "") or nested.get("email_address", "")
+    # Default the notification email to the account email when unset.
+    email_addr   = cfg.get("notify_email", "") or nested.get("email_address", "") or account_email
     new_conv     = bool(cfg.get("notify_new_conv", nested.get("on_new_conversation", True)))
     low_rating   = bool(cfg.get("notify_low_rating", nested.get("on_low_rating", True)))
     abandoned    = bool(cfg.get("notify_abandoned_cart", nested.get("on_abandoned_cart", True)))
@@ -748,6 +753,9 @@ async def get_notification_settings(store_id: str):
         "quiet_hours_enabled":   qh_enabled,
         "quiet_hours_start":     qh_start,
         "quiet_hours_end":       qh_end,
+        # ── Account email (signup email) — source/default for notifications,
+        # editable from the Security tab. ──
+        "account_email":         account_email,
     }
 
 
@@ -1080,6 +1088,42 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest, reque
     await sm.mark_password_changed(store_id)
     await audit(request, "change_store_password", target_store=store_id)
     return {"status": "ok", "message": "تم تغيير كلمة المرور بنجاح"}
+
+
+import re as _re
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@router.put("/admin/{store_id}/settings/account-email")
+async def change_account_email(store_id: str, req: AccountEmailRequest, request: Request):
+    """Change the store's account email (the signup email). Owner-only.
+
+    This is the email used for login and the default notification address,
+    so changing it routes future notifications to the new address.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    require_store_owner(request, store_id)
+
+    email = (req.email or "").strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(400, "صيغة البريد الإلكتروني غير صحيحة")
+    if len(email) > 254:
+        raise HTTPException(400, "البريد الإلكتروني طويل جداً")
+
+    # Uniqueness: an email must resolve to exactly one account.
+    other = await db.find_store_by_owner_email(email)
+    if other and other != store_id:
+        raise HTTPException(409, "هذا البريد مستخدم في حساب آخر")
+
+    ok = await sm.set_owner_email(store_id, email)
+    if not ok:
+        raise HTTPException(503, "تعذّر حفظ البريد — تحقق من اتصال قاعدة البيانات")
+
+    await audit(request, "change_account_email", target_store=store_id, details={
+        "email": email,
+    })
+    return {"status": "ok", "email": email, "message": "تم تحديث بريد الحساب"}
 
 
 # ── Token status / refresh ────────────────────────────────────────────────────

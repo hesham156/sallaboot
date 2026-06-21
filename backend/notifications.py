@@ -297,12 +297,18 @@ def _in_quiet_hours(start: int, end: int) -> bool:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def get_settings(store_id: str) -> dict:
-    """Return notification settings for a store (with defaults)."""
+    """Return notification settings for a store (with defaults).
+
+    The notification email defaults to the owner's ACCOUNT email (the one
+    they signed up with) when no custom address is set — so notifications
+    "just work" out of the box and follow an account-email change.
+    """
     cfg = sm.get_ai_config(store_id)
     n   = cfg.get("notifications") or {}
+    account_email = sm.get_owner_email(store_id)
     return {
         "email_enabled":        bool(n.get("email_enabled", False)),
-        "email_address":        n.get("email_address", "") or "",
+        "email_address":        n.get("email_address", "") or account_email or "",
         "webhook_url":          n.get("webhook_url",   "") or "",
         "on_new_conversation":  bool(n.get("on_new_conversation", True)),
         "on_abandoned_cart":    bool(n.get("on_abandoned_cart",   True)),

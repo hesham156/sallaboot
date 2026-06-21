@@ -75,7 +75,7 @@ _MANAGER_ONLY_RE = re.compile(
 # because raising/lowering the daily token cap is a financial-risk knob —
 # managers can VIEW usage (above) but only the owner can change the cap.
 _OWNER_ONLY_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)[^/]+/(employees|settings/password|llm-budget)"
+    r"^/admin/(?!stores$|auth/)[^/]+/(employees|settings/password|settings/account-email|llm-budget)"
 )
 
 

@@ -345,6 +345,9 @@ export const api = {
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
+  setAccountEmail: (storeId: string, email: string) =>
+    put<{ status: string; email: string; message: string }>(
+      `/admin/${storeId}/settings/account-email`, { email }),
 
   // Token status
   tokenStatus: (storeId: string) =>
@@ -925,6 +928,8 @@ export interface NotificationSettings {
   quiet_hours_enabled:  boolean
   quiet_hours_start:    number
   quiet_hours_end:      number
+  /** Signup/account email — default for notifications, editable in Security. */
+  account_email?:       string
 }
 
 export interface WeeklyReport {
