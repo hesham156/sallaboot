@@ -75,19 +75,39 @@ def test_extract_photo_surfaces_largest_file_id_and_caption():
     }
     out = tg.extract_messages(update)
     assert len(out) == 1
-    assert out[0]["photo_file_id"] == "big"            # picks the largest size
+    assert out[0]["media"]["kind"] == "image"
+    assert out[0]["media"]["file_id"] == "big"         # picks the largest size
     assert out[0]["text"] == "تصميمي"                  # caption carried as text
     assert out[0]["chat_id"] == "7"
 
 
-def test_extract_other_media_gets_placeholder_not_dropped():
+@pytest.mark.parametrize("key,field,expected_kind", [
+    ("voice",    {"file_id": "v", "mime_type": "audio/ogg"}, "audio"),
+    ("audio",    {"file_id": "a", "mime_type": "audio/mp3"}, "audio"),
+    ("video",    {"file_id": "m", "mime_type": "video/mp4"}, "video"),
+    ("video_note", {"file_id": "n"},                          "video"),
+    ("animation",  {"file_id": "g"},                          "video"),
+    ("sticker",  {"file_id": "s"},                            "image"),
+    ("document", {"file_id": "d", "mime_type": "application/pdf",
+                  "file_name": "spec.pdf"},                   "file"),
+])
+def test_extract_all_media_kinds_downloaded_not_dropped(key, field, expected_kind):
     import telegram as tg
-    for media_key in ("document", "voice", "video", "sticker"):
-        update = {"update_id": 1, "message": {
-            "from": {"id": 3}, "chat": {"id": 3}, media_key: {"file_id": "x"}}}
-        out = tg.extract_messages(update)
-        assert out and out[0]["text"]                  # placeholder text, not empty
-        assert out[0]["photo_file_id"] == ""
+    update = {"update_id": 1, "message": {
+        "from": {"id": 3}, "chat": {"id": 3}, key: field}}
+    out = tg.extract_messages(update)
+    assert out, f"{key} was dropped"
+    assert out[0]["media"]["kind"] == expected_kind
+    assert out[0]["media"]["file_id"] == field["file_id"]
+
+
+def test_extract_image_document_classified_as_image():
+    import telegram as tg
+    update = {"update_id": 1, "message": {
+        "from": {"id": 3}, "chat": {"id": 3},
+        "document": {"file_id": "d", "mime_type": "image/png", "file_name": "p.png"}}}
+    out = tg.extract_messages(update)
+    assert out[0]["media"]["kind"] == "image"          # documents classified by mime
 
 
 async def test_fetch_media_returns_none_on_empty_inputs():

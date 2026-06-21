@@ -98,6 +98,20 @@ function customerDisplayName(c: { customer_info?: { name?: string; phone?: strin
   return `جلسة ${bare.slice(0, 8)}`
 }
 
+// Decide how to render a linked attachment. Channel media is served from /file/
+// (no extension), so the backend appends a #audio / #video / #file hint to the
+// URL; legacy widget uploads (/file/ with no hint) stay images.
+function mediaKind(url: string): 'image' | 'audio' | 'video' | 'file' {
+  const hash = (url.split('#')[1] || '').toLowerCase()
+  if (hash.startsWith('audio')) return 'audio'
+  if (hash.startsWith('video')) return 'video'
+  if (hash.startsWith('file'))  return 'file'
+  if (hash.startsWith('image')) return 'image'
+  if (/\.(png|jpe?g|gif|webp|svg|bmp)(\?|$)/i.test(url)) return 'image'
+  if (url.includes('/file/')) return 'image'
+  return 'file'
+}
+
 function renderMessageBody(content: string): React.ReactNode {
   if (!content) return '(رسالة فارغة)'
   const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g
@@ -107,11 +121,12 @@ function renderMessageBody(content: string): React.ReactNode {
   while ((match = linkRegex.exec(content)) !== null) {
     if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index))
     const [, text, url] = match
-    const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)(\?|$)/i.test(url) || url.includes('/file/')
-    if (isImage) {
+    const src  = url.split('#')[0]
+    const kind = mediaKind(url)
+    if (kind === 'image') {
       parts.push(
-        <a key={`l${parts.length}`} href={url} target="_blank" rel="noopener noreferrer" className="block mt-2 group">
-          <img src={url} alt={text}
+        <a key={`l${parts.length}`} href={src} target="_blank" rel="noopener noreferrer" className="block mt-2 group">
+          <img src={src} alt={text}
             className="max-w-[240px] max-h-[200px] rounded-lg border border-white/20 object-cover group-hover:border-white/40 transition-colors"
             onError={(e) => {
               const img = e.currentTarget; img.style.display = 'none'
@@ -125,9 +140,24 @@ function renderMessageBody(content: string): React.ReactNode {
           <span className="block text-[10px] opacity-70 mt-1 truncate max-w-[240px]">{text}</span>
         </a>
       )
+    } else if (kind === 'audio') {
+      parts.push(
+        <span key={`l${parts.length}`} className="block mt-2">
+          <span className="block text-[10px] opacity-70 mb-1">{text}</span>
+          <audio controls src={src} className="max-w-[240px] h-9" />
+        </span>
+      )
+    } else if (kind === 'video') {
+      parts.push(
+        <span key={`l${parts.length}`} className="block mt-2">
+          <video controls src={src}
+            className="max-w-[240px] max-h-[200px] rounded-lg border border-white/20" />
+          <span className="block text-[10px] opacity-70 mt-1 truncate max-w-[240px]">{text}</span>
+        </span>
+      )
     } else {
       parts.push(
-        <a key={`l${parts.length}`} href={url} target="_blank" rel="noopener noreferrer"
+        <a key={`l${parts.length}`} href={src} target="_blank" rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/10 hover:bg-white/15 rounded-md mt-1 text-xs underline-offset-2 hover:underline">
           📄 {text}
         </a>

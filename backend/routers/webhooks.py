@@ -1814,36 +1814,56 @@ async def telegram_webhook(store_id: str, request: Request):
     return {"status": "ok", "queued": queued}
 
 
-async def _telegram_store_photo(token: str, file_id: str, store_id: str,
+# Label + URL fragment hint per media kind. The frontend renderer reads the
+# fragment (/file/<id>#audio) to pick <img> / <audio> / <video> / download.
+_TG_MEDIA_RENDER = {
+    "image": ("صورة",         ""),
+    "audio": ("🎤 تسجيل صوتي", "#audio"),
+    "video": ("🎬 فيديو",      "#video"),
+    "file":  ("📎 ملف",        "#file"),
+}
+
+
+async def _telegram_store_media(token: str, media: dict, store_id: str,
                                 session_id: str, caption: str) -> str:
-    """Download an inbound Telegram photo, persist it via the upload store, and
-    return the message text with an inline image link folded in (renders in the
-    inbox; the bot sees it too). Falls back to a placeholder on any failure so the
-    customer's message never disappears."""
+    """Download ANY inbound Telegram attachment (image/audio/video/file), persist
+    it via the upload store, and return the message text with an inline link
+    (carrying a #kind hint) folded in so it renders correctly in the inbox. Falls
+    back to a placeholder on any failure so the customer's message never vanishes."""
     import os as _os
     import uuid as _uuid
     import telegram as tg
 
-    def _placeholder() -> str:
-        return f"{caption}\n📎 (أرسل العميل صورة)".strip() if caption else "📎 (أرسل العميل صورة)"
+    kind     = media.get("kind", "file")
+    file_id  = media.get("file_id", "")
+    filename = (media.get("filename") or "").strip()
+    label, frag = _TG_MEDIA_RENDER.get(kind, _TG_MEDIA_RENDER["file"])
+    if kind == "file" and filename:
+        label = f"📎 {filename}"
 
-    media = await tg.fetch_media(token, file_id)
-    if not media or not db.available():
+    def _placeholder() -> str:
+        noun = {"image": "صورة", "audio": "تسجيلاً صوتياً",
+                "video": "فيديو"}.get(kind, "مرفقاً")
+        ph = f"📎 (أرسل العميل {noun})"
+        return f"{caption}\n{ph}".strip() if caption else ph
+
+    fetched = await tg.fetch_media(token, file_id)
+    if not fetched or not db.available():
         return _placeholder()
-    raw, ctype = media
-    ext   = ".png" if "png" in ctype else ".webp" if "webp" in ctype else ".jpg"
+    raw, ctype = fetched
+    ctype = media.get("mime") or ctype        # Telegram's declared mime is more reliable
     fid   = str(_uuid.uuid4())
-    fname = f"telegram_{fid}{ext}"
+    fname = filename or f"telegram_{fid}"
     try:
         await db.save_upload(file_id=fid, filename=fname, content_type=ctype,
                              data=raw, store_id=store_id, session_id=session_id)
     except Exception as exc:
-        print(f"[telegram] save photo failed: {exc}")
+        print(f"[telegram] save media failed: {exc}")
         return _placeholder()
     base_url = _os.getenv("BASE_URL", "").rstrip("/")
-    url = f"{base_url}/file/{fid}" if base_url else f"/file/{fid}"
-    image_md = f"[صورة]({url})"
-    return f"{caption}\n{image_md}".strip() if caption else image_md
+    url = f"{base_url}/file/{fid}{frag}" if base_url else f"/file/{fid}{frag}"
+    md = f"[{label}]({url})"
+    return f"{caption}\n{md}".strip() if caption else md
 
 
 async def handle_telegram_message(msg: dict):
@@ -1862,11 +1882,11 @@ async def handle_telegram_message(msg: dict):
         chat_id  = str(msg.get("chat_id", "") or "")
         sender   = str(msg.get("from", "") or "")
         text     = msg.get("text", "")
-        photo_file_id = str(msg.get("photo_file_id", "") or "")
+        media    = msg.get("media") if isinstance(msg.get("media"), dict) else None
 
         # Log metadata only — never the message body (PII / message content, M-17).
         print(f"[telegram] 📨 incoming: store={store_id!r} chat={chat_id!r} "
-              f"chars={len(text)} photo={'y' if photo_file_id else 'n'}")
+              f"chars={len(text)} media={media.get('kind') if media else 'n'}")
         if not (store_id and chat_id):
             return
 
@@ -1880,12 +1900,12 @@ async def handle_telegram_message(msg: dict):
         # admin inbox just like a widget / WhatsApp / Messenger chat.
         session_id = f"tg:{sender}"
 
-        # A photo becomes an inline image link so it renders in the inbox; the bot
-        # can't see image content, so it's handled (acknowledge + escalate) below.
-        image_text = ""
-        if photo_file_id:
-            image_text = await _telegram_store_photo(token, photo_file_id, store_id, session_id, text)
-        if not (text or image_text):
+        # Any attachment becomes an inline link so it renders in the inbox; the bot
+        # can't read media content, so it's handled (acknowledge + escalate) below.
+        media_text = ""
+        if media:
+            media_text = await _telegram_store_media(token, media, store_id, session_id, text)
+        if not (text or media_text):
             return
 
         await cs.restore_to_memory(session_id)
@@ -1897,26 +1917,26 @@ async def handle_telegram_message(msg: dict):
                 "channel": "telegram",
             })
 
-        # Inbound photo → the bot can't see image content. Record it so it shows in
-        # the inbox, acknowledge gracefully, and ESCALATE to support (handoff) so a
-        # human reviews it — it surfaces in the "needs support" queue. Never the
-        # rude "don't share files here" the text model would otherwise produce.
-        if photo_file_id:
-            await cs.add_message(session_id, "user", image_text, store_id)
+        # Inbound attachment → the bot can't read media content. Record it so it
+        # shows in the inbox, acknowledge gracefully, and ESCALATE to support
+        # (handoff) so a human reviews it — surfaces in the "needs support" queue.
+        # Never the rude "don't share files here" the text model would produce.
+        if media:
+            await cs.add_message(session_id, "user", media_text, store_id)
             if cs.is_bot_enabled(session_id):
                 ack = (
-                    "شكراً لإرسال الصورة 📷 لا أستطيع الاطّلاع على محتوى الصور مباشرةً، "
-                    "لكن أحد ممثلي خدمة العملاء سيراجعها ويساعدك. "
+                    "شكراً، استلمت المرفق 📎 لا أستطيع الاطّلاع على محتواه مباشرةً، "
+                    "لكن أحد ممثلي خدمة العملاء سيراجعه ويساعدك. "
                     "أو اكتب لي اسم المنتج أو تفاصيل طلبك وأساعدك فوراً 🌷"
                 )
                 await cs.add_message(session_id, "assistant", ack, store_id)
                 await cs.escalate_session(
-                    session_id, reason="customer_image",
-                    details="أرسل العميل صورة تحتاج مراجعة بشرية.",
-                    customer_summary="📷 صورة من العميل",
+                    session_id, reason="customer_attachment",
+                    details=f"أرسل العميل مرفقاً ({media.get('kind', 'file')}) يحتاج مراجعة بشرية.",
+                    customer_summary="📎 مرفق من العميل",
                 )
                 await tg.send_text(token, chat_id, ack)
-                print(f"[telegram] 📷 photo → escalated to support (store {store_id})")
+                print(f"[telegram] 📎 {media.get('kind')} → escalated to support (store {store_id})")
             return
 
         # CSAT reply intercept — if the most-recent bot message was a CSAT survey

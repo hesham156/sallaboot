@@ -99,6 +99,49 @@ def _sender_name(frm: dict) -> str:
     return name or str(frm.get("username") or "").strip()
 
 
+def _media_from_message(msg: dict) -> dict | None:
+    """Detect ANY attachment in a Telegram message → a normalized descriptor
+    {kind, file_id, mime, filename}, or None for a plain-text message.
+    kind ∈ {image, audio, video, file} so every type (photo, voice, audio,
+    video, video_note, animation, sticker, document) is downloaded and shown."""
+    photo = msg.get("photo")
+    if isinstance(photo, list) and photo:
+        # PhotoSize array is ordered small→large; take the largest.
+        fid = str((photo[-1] or {}).get("file_id") or "")
+        if fid:
+            return {"kind": "image", "file_id": fid, "mime": "image/jpeg", "filename": ""}
+
+    st = msg.get("sticker")
+    if isinstance(st, dict) and st.get("file_id"):
+        return {"kind": "image", "file_id": str(st["file_id"]), "mime": "image/webp", "filename": ""}
+
+    for key in ("voice", "audio"):
+        a = msg.get(key)
+        if isinstance(a, dict) and a.get("file_id"):
+            return {"kind": "audio", "file_id": str(a["file_id"]),
+                    "mime": str(a.get("mime_type") or "audio/ogg"),
+                    "filename": str(a.get("file_name") or "")}
+
+    for key in ("video", "video_note", "animation"):
+        v = msg.get(key)
+        if isinstance(v, dict) and v.get("file_id"):
+            return {"kind": "video", "file_id": str(v["file_id"]),
+                    "mime": str(v.get("mime_type") or "video/mp4"),
+                    "filename": str(v.get("file_name") or "")}
+
+    d = msg.get("document")
+    if isinstance(d, dict) and d.get("file_id"):
+        mime = str(d.get("mime_type") or "")
+        kind = ("image" if mime.startswith("image/")
+                else "audio" if mime.startswith("audio/")
+                else "video" if mime.startswith("video/")
+                else "file")
+        return {"kind": kind, "file_id": str(d["file_id"]),
+                "mime": mime or "application/octet-stream",
+                "filename": str(d.get("file_name") or "")}
+    return None
+
+
 def extract_messages(payload: dict) -> list[dict]:
     """
     Normalise one Telegram update into our channel-agnostic message shape.
@@ -106,18 +149,14 @@ def extract_messages(payload: dict) -> list[dict]:
     whatsapp.extract_messages / messenger.extract_messages.
 
     Emitted dict keys:
-      msg_id        : str  — "<update_id>" (unique per bot → dedup key)
-      chat_id       : str  — Telegram chat id (the send target)
-      from          : str  — same chat id (sender identity for the session)
-      text          : str  — message body (caption for media)
-      name          : str  — sender display name
-      photo_file_id : str  — set when the message carries a photo; the handler
-                             resolves it to a stored image (else "").
-
-    A photo is surfaced with its largest file_id so the handler can download +
-    store it. Other media (documents, voice, video, stickers …) get a placeholder
-    text so the message still appears and the bot responds rather than going
-    silent — mirrors whatsapp.extract_messages.
+      msg_id   : str  — "<update_id>" (unique per bot → dedup key)
+      chat_id  : str  — Telegram chat id (the send target)
+      from     : str  — same chat id (sender identity for the session)
+      text     : str  — message body (caption for media)
+      name     : str  — sender display name
+      media    : dict | None — {kind, file_id, mime, filename} for an attachment;
+                 the handler downloads + stores it so EVERY type (image/audio/
+                 video/file) reaches the dashboard.
     """
     if not isinstance(payload, dict):
         return []
@@ -135,19 +174,13 @@ def extract_messages(payload: dict) -> list[dict]:
         "chat_id": chat_id,
         "from":    chat_id,
         "name":    _sender_name(msg.get("from") or {}),
-        "photo_file_id": "",
+        "media":   None,
     }
     caption = str(msg.get("caption") or "").strip()
 
-    photo = msg.get("photo")
-    if isinstance(photo, list) and photo:
-        # PhotoSize array is ordered small→large; take the largest.
-        file_id = str((photo[-1] or {}).get("file_id") or "")
-        if file_id:
-            return [{**base, "text": caption, "photo_file_id": file_id}]
-
-    if any(k in msg for k in ("document", "video", "voice", "audio", "sticker", "animation")):
-        return [{**base, "text": caption or "📎 (أرسل العميل مرفقاً عبر تيليجرام)"}]
+    media = _media_from_message(msg)
+    if media:
+        return [{**base, "text": caption, "media": media}]
 
     body = str(msg.get("text") or "").strip() or caption
     if not body:

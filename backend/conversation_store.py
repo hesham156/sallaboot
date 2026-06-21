@@ -487,7 +487,8 @@ VALID_ESCALATION_REASONS = {
     "box_oversize",          # علب بمقاس فرد أكبر من 99×69
     "custom_finishing",      # تشطيب/مواصفة غير مسعّرة
     "vip_or_complaint",      # عميل VIP أو شكوى
-    "customer_image",        # العميل أرسل صورة/مرفقاً يحتاج مراجعة بشرية
+    "customer_image",        # العميل أرسل صورة (متوافق مع الإصدار السابق)
+    "customer_attachment",   # العميل أرسل مرفقاً (صورة/صوت/فيديو/ملف) يحتاج مراجعة بشرية
     "other",                 # غير ذلك
 }
 
