@@ -1755,3 +1755,115 @@ async def handle_messenger_message(msg: dict):
         print(f"[{channel}] ↩ replied to {sender} (store {store_id})")
     except Exception as exc:
         print(f"[messenger] handle error: {exc}")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Telegram Bot API webhook
+# ─────────────────────────────────────────────────────────────────────────
+# setWebhook (routers.channels) points each bot at
+#   {BASE_URL}/telegram/webhook/{store_id}
+# Telegram echoes the per-store secret in the X-Telegram-Bot-Api-Secret-Token
+# header — that's what proves an inbound call really came from Telegram for
+# THIS store (Telegram has no body HMAC).
+# ─────────────────────────────────────────────────────────────────────────
+
+@router.post("/telegram/webhook/{store_id}")
+async def telegram_webhook(store_id: str, request: Request):
+    """
+    Telegram per-store webhook receiver — insert-then-ack (mirrors Meta).
+    Verifies the secret-token header against the store's saved secret, then
+    queues each message to webhook_inbox for out-of-band processing. Always
+    returns 200 fast so Telegram doesn't retry.
+    """
+    import telegram as tg
+
+    cfg    = sm.get_ai_config(store_id) or {}
+    secret = (cfg.get("telegram_secret") or "").strip()
+    sent   = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    # No secret on file → this store has no Telegram connection. Unknown/forged.
+    if not secret:
+        raise HTTPException(404, "No active Telegram channel for this store")
+    if not hmac.compare_digest(secret, sent):
+        _log_event(store_id, "telegram.message", "rejected", "secret token mismatch")
+        raise HTTPException(403, "invalid telegram secret token")
+
+    body = await request.body()
+    try:
+        payload = _json.loads(body)
+    except Exception:
+        return {"status": "ignored"}
+
+    queued = 0
+    for msg in tg.extract_messages(payload):
+        msg["store_id"] = store_id          # carry routing target for the handler
+        msg_id = (msg.get("msg_id") or "").strip()
+        if not db.available():
+            print(f"[telegram] ⛔ DB down — processing synchronously store={store_id!r}")
+            asyncio.create_task(handle_telegram_message(msg))
+            continue
+        result = await db.inbox_insert(
+            source     = "telegram",
+            event_type = "telegram.message",
+            dedup_key  = f"tg:{store_id}:{msg_id}" if msg_id else "",
+            store_id   = store_id,
+            payload    = msg,
+            meta       = {},
+        )
+        if result["inserted"]:
+            queued += 1
+    return {"status": "ok", "queued": queued}
+
+
+async def handle_telegram_message(msg: dict):
+    """
+    Route one inbound Telegram message → bot → reply. Channel-agnostic mirror of
+    handle_messenger_message: the same agent answers, and the thread shows in the
+    admin inbox tagged by channel. Never raises — the inbox drainer logs failures
+    and applies backoff.
+
+    Public (no leading underscore) because the drainer reaches it via
+    main._process_inbox_row.
+    """
+    import telegram as tg
+    try:
+        store_id = str(msg.get("store_id", "") or "")
+        chat_id  = str(msg.get("chat_id", "") or "")
+        sender   = str(msg.get("from", "") or "")
+        text     = msg.get("text", "")
+
+        # Log metadata only — never the message body (PII / message content, M-17).
+        print(f"[telegram] 📨 incoming: store={store_id!r} chat={chat_id!r} chars={len(text)}")
+        if not (store_id and chat_id and text):
+            return
+
+        cfg   = sm.get_ai_config(store_id) or {}
+        token = (cfg.get("telegram_bot_token") or "").strip()
+        if not (cfg.get("telegram_enabled") and token):
+            print(f"[telegram] ⛔ disabled or no token for store {store_id!r}")
+            return
+
+        # Stable per-customer session keyed by chat id — persists and shows in the
+        # admin inbox just like a widget / WhatsApp / Messenger chat.
+        session_id = f"tg:{sender}"
+        await cs.restore_to_memory(session_id)
+        cs.get_or_create(session_id, store_id)
+        info = cs.get_customer_info(session_id) or {}
+        if not info.get("channel"):
+            await cs.set_customer_info(session_id, {
+                "name":    msg.get("name", "") or info.get("name", ""),
+                "channel": "telegram",
+            })
+
+        if not cs.is_bot_enabled(session_id):
+            # Admin took this thread over — just record the message.
+            await cs.add_message(session_id, "user", text, store_id)
+            return
+
+        agent = sm.get_agent(store_id)
+        if agent is None:
+            return
+        reply = await agent.chat(message=text, session_id=session_id)
+        await tg.send_text(token, chat_id, reply)
+        print(f"[telegram] ↩ replied to {chat_id} (store {store_id})")
+    except Exception as exc:
+        print(f"[telegram] handle error: {exc}")

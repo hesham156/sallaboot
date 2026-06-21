@@ -597,6 +597,21 @@ export const api = {
   zidSync: (storeId: string) =>
     req<{ message: string; products: number; errors: string[] }>('POST', `/admin/${storeId}/integrations/zid/sync`),
 
+  // ── Channels (messaging surfaces the AI auto-replies on) ───────────────────
+  listChannels: (storeId: string) =>
+    get<{ channels: Record<string, ChannelData> }>(`/admin/${storeId}/channels`),
+
+  telegramConnect: (storeId: string, botToken: string) =>
+    post<{ connected: boolean; bot_username: string; message: string }>(
+      `/admin/${storeId}/channels/telegram/connect`, { bot_token: botToken }
+    ),
+
+  telegramToggle: (storeId: string, enabled: boolean) =>
+    post<{ enabled: boolean }>(`/admin/${storeId}/channels/telegram/toggle`, { enabled }),
+
+  telegramDisconnect: (storeId: string) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/channels/telegram`),
+
   // Linking key for the Salla App Settings flow
   getApiKey: (storeId: string) =>
     get<{ api_key: string }>(`/admin/${storeId}/api-key`),
@@ -1170,6 +1185,14 @@ export interface IntegrationData {
   plan_name?:    string
   currency?:     string
   access_token?: string
+}
+
+// Per-channel status returned by GET /admin/:storeId/channels. Token-free —
+// the backend never echoes the bot/page send credentials.
+export interface ChannelData {
+  connected:     boolean
+  enabled?:      boolean
+  bot_username?: string
 }
 
 export interface SupportAccessGrant {

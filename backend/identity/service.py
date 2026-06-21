@@ -27,7 +27,10 @@ from .models import IdentityLevel, LifecycleState, SessionIdentity
 # Channel sessions are platform-authenticated at the webhook boundary.
 _WHATSAPP_PREFIX = "wa:"
 _VERIFIED_CHANNEL_PREFIXES = ("wa:",)
-_ALL_CHANNEL_PREFIXES = ("wa:", "msgr:", "ig:")
+# Messenger / Instagram / Telegram authenticate the sender at the webhook but
+# carry no Salla-resolvable identity → anonymous for data reads (they can still
+# chat/shop and may OTP-verify). Only WhatsApp carries a matchable phone.
+_ALL_CHANNEL_PREFIXES = ("wa:", "msgr:", "ig:", "tg:")
 
 
 def _now() -> int:
