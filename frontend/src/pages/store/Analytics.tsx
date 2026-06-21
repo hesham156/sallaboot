@@ -1,24 +1,41 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Button, Card, CardBody, CardHeader, Spinner, Divider, Chip, Tooltip,
+  Button, Card, CardBody, CardHeader, Divider, Chip, Tooltip,
 } from '@heroui/react'
 import {
   api,
   Analytics as AnalyticsData,
+  AnalyticsChannel,
   ChannelStats,
   ConversationInsights,
+  OperationsStats,
   TopicItem,
   NonPurchaseItem,
   AtRiskCustomer,
 } from '../../api'
+import { PageHeader, StatCard, StatSkeleton } from '../../components/ui'
 
-type Channel = 'total' | 'widget' | 'whatsapp'
+type Channel = AnalyticsChannel
 
-const CHANNEL_LABELS: Record<Channel, { label: string; emoji: string; color: string }> = {
-  total:    { label: 'الإجمالي',  emoji: '📊', color: 'text-foreground' },
-  widget:   { label: 'متجر (ويدجت)', emoji: '🛍️', color: 'text-teal-500' },
-  whatsapp: { label: 'واتساب',     emoji: '🟢', color: 'text-emerald-500' },
+const CHANNEL_LABELS: Record<Channel, { label: string; emoji: string; color: string; bar: string }> = {
+  total:     { label: 'الإجمالي',     emoji: '📊', color: 'text-foreground',    bar: '#6366f1' },
+  widget:    { label: 'متجر (ويدجت)', emoji: '🛍️', color: 'text-teal-500',      bar: '#14b8a6' },
+  whatsapp:  { label: 'واتساب',       emoji: '🟢', color: 'text-emerald-500',   bar: '#22c55e' },
+  telegram:  { label: 'تيليجرام',     emoji: '✈️', color: 'text-sky-500',       bar: '#0ea5e9' },
+  messenger: { label: 'ماسنجر',       emoji: '💬', color: 'text-blue-500',      bar: '#3b82f6' },
+  instagram: { label: 'إنستجرام',     emoji: '📸', color: 'text-pink-500',      bar: '#ec4899' },
+}
+
+// Order channels are displayed in (total handled separately).
+const CHANNEL_ORDER: Channel[] = ['widget', 'whatsapp', 'telegram', 'messenger', 'instagram']
+
+// Format a seconds value as a compact human label (ثانية / دقيقة / ساعة).
+function fmtDuration(sec: number): string {
+  if (!sec || sec < 0) return '—'
+  if (sec < 60)   return `${Math.round(sec)} ث`
+  if (sec < 3600) return `${Math.round(sec / 60)} د`
+  return `${(sec / 3600).toFixed(1)} س`
 }
 
 interface Props { storeId: string }
@@ -100,6 +117,7 @@ export default function Analytics({ storeId }: Props) {
   const navigate = useNavigate()
   const [data,     setData]     = useState<AnalyticsData | null>(null)
   const [insights, setInsights] = useState<ConversationInsights | null>(null)
+  const [ops,      setOps]      = useState<OperationsStats | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [channel,  setChannel]  = useState<Channel>('total')
 
@@ -111,11 +129,20 @@ export default function Analytics({ storeId }: Props) {
     Promise.all([
       api.analytics(storeId),
       api.insights(storeId),
+      api.operations(storeId).catch(() => null),  // tolerate old backend
     ])
-      .then(([a, ins]) => { setData(a); setInsights(ins) })
+      .then(([a, ins, op]) => { setData(a); setInsights(ins); setOps(op) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [storeId])
+
+  // Channels that actually carry traffic — drives the switcher + split view
+  // so we never show an empty "تيليجرام 0" chip for a channel nobody uses.
+  const activeChannels: Channel[] = useMemo(() => {
+    const bc = data?.by_channel
+    if (!bc) return []
+    return CHANNEL_ORDER.filter(ch => (bc[ch]?.conversations.total ?? 0) > 0)
+  }, [data])
 
   // Pick the slice for the chosen channel. Falls back to the top-level
   // legacy fields if the backend hasn't been redeployed yet.
@@ -132,8 +159,10 @@ export default function Analytics({ storeId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Spinner size="lg" color="primary" />
+      <div className="p-6 space-y-6" dir="rtl">
+        <div className="h-8 w-32 bg-content2 rounded-lg animate-pulse" />
+        <StatSkeleton count={4} />
+        <StatSkeleton count={4} />
       </div>
     )
   }
@@ -146,7 +175,6 @@ export default function Analytics({ storeId }: Props) {
   const r  = slice.ratings
   const bc = data.by_channel
 
-  const HOURS  = Array.from({ length: 24 }, (_, i) => `${i}:00`)
   const maxHour = Math.max(...c.hourly_distribution, 1)
   const maxDay  = Math.max(...c.daily_counts.map(d => d.count), 1)
 
@@ -161,13 +189,15 @@ export default function Analytics({ storeId }: Props) {
 
   return (
     <div className="p-6 space-y-6" dir="rtl">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-bold text-foreground">التحليلات</h1>
-
-        {/* Channel switcher — shown only when the backend supports by_channel */}
-        {bc && (
-          <div className="flex items-center gap-1.5 bg-content2 p-1 rounded-2xl">
-            {(['total', 'widget', 'whatsapp'] as Channel[]).map(ch => {
+      <PageHeader
+        title="التحليلات"
+        subtitle="أداء البوت والمحادثات والمبيعات عبر كل القنوات"
+        icon="M9 17V7m4 10V11m4 6V9M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"
+        actions={
+        /* Channel switcher — shown only when 2+ channels carry traffic */
+        bc && activeChannels.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-1.5 bg-content2 p-1 rounded-2xl">
+            {(['total', ...activeChannels] as Channel[]).map(ch => {
               const cfg    = CHANNEL_LABELS[ch]
               const slice2 = bc[ch]
               const count  = slice2?.conversations.total ?? 0
@@ -191,11 +221,12 @@ export default function Analytics({ storeId }: Props) {
               )
             })}
           </div>
-        )}
-      </div>
+        ) : null
+        }
+      />
 
       {/* Channel split overview — at-a-glance per-channel summary */}
-      {bc && channel === 'total' && (bc.whatsapp.conversations.total > 0 || bc.widget.conversations.total > 0) && (
+      {bc && channel === 'total' && activeChannels.length > 0 && (
         <Card className="bg-content1 border border-divider">
           <CardHeader className="px-5 py-4">
             <h2 className="font-bold text-sm">التوزيع حسب القناة</h2>
@@ -203,10 +234,11 @@ export default function Analytics({ storeId }: Props) {
           <Divider />
           <CardBody className="px-5 py-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {(['widget', 'whatsapp'] as const).map(ch => {
-                const s    = bc[ch]
+              {activeChannels.map(ch => {
+                const s = bc[ch]
+                if (!s) return null
                 const cfg  = CHANNEL_LABELS[ch]
-                const all  = bc.total.conversations.total
+                const all  = bc.total?.conversations.total ?? 0
                 const pct  = all ? Math.round((s.conversations.total / all) * 100) : 0
                 return (
                   <button
@@ -226,10 +258,8 @@ export default function Analytics({ storeId }: Props) {
                     </div>
                     <div className="h-2 bg-content1 rounded-full overflow-hidden mb-2">
                       <div
-                        className={`h-full rounded-full ${
-                          ch === 'whatsapp' ? 'bg-emerald-500' : 'bg-teal-500'
-                        }`}
-                        style={{ width: `${pct}%` }}
+                        className="h-full rounded-full"
+                        style={{ width: `${pct}%`, background: cfg.bar }}
                       />
                     </div>
                     <div className="flex items-center gap-3 text-[11px] text-default-500">
@@ -248,20 +278,81 @@ export default function Analytics({ storeId }: Props) {
 
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'إجمالي المحادثات', value: c.total,          color: 'text-primary' },
-          { label: 'هذا الأسبوع',      value: c.this_week,      color: 'text-success' },
-          { label: 'معدل الرسائل',     value: c.avg_messages,   color: 'text-warning' },
-          { label: 'تولي الإدارة',     value: c.admin_takeover, color: 'text-danger' },
-        ].map(s => (
-          <Card key={s.label} className="bg-content1 border border-divider">
-            <CardBody className="py-4 px-5">
-              <p className="text-xs text-default-400 font-medium">{s.label}</p>
-              <p className={`text-3xl font-black mt-2 ${s.color}`}>{s.value}</p>
+        <StatCard tone="primary" accent label="إجمالي المحادثات" value={c.total}
+          sub={`${c.today} اليوم · ${c.this_week} هذا الأسبوع`}
+          icon="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        <StatCard tone="success" accent label="هذا الأسبوع" value={c.this_week}
+          sub={`معدل ${c.avg_messages} رسالة/جلسة`}
+          icon="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+        <StatCard tone="warning" accent label="معدل الرسائل" value={c.avg_messages}
+          sub="رسالة لكل محادثة"
+          icon="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+        <StatCard tone="danger" accent label="تولّي الإدارة" value={c.admin_takeover}
+          sub="محادثة تدخّل فيها موظف"
+          icon="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      </div>
+
+      {/* ── Service quality row: deflection + response times + needs-support ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {(() => {
+          const deflection = c.deflection_rate ??
+            (c.total ? Math.round((c.bot_handled / c.total) * 100) : 0)
+          const tone = deflection >= 70 ? 'success' : deflection >= 40 ? 'warning' : 'danger'
+          return (
+            <StatCard tone={tone} accent label="معدل حلّ البوت" value={`${deflection}%`}
+              sub={`${c.bot_handled} بدون تدخل بشري`}
+              icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          )
+        })()}
+        <StatCard tone="primary" accent label="متوسط أول رد"
+          value={ops ? fmtDuration(ops.response_time.avg_first_response_sec) : '—'}
+          sub="سرعة الاستجابة للعميل"
+          icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <StatCard tone="default" label="متوسط مدة المحادثة"
+          value={ops ? fmtDuration(ops.response_time.avg_resolution_sec) : '—'}
+          sub="من أول رسالة لآخرها"
+          icon="M3 12a9 9 0 1018 0 9 9 0 00-18 0zm9-5v5l3 2" />
+        <StatCard tone={ops && ops.needs_support > 0 ? 'danger' : 'default'}
+          accent={!!(ops && ops.needs_support > 0)}
+          label="بانتظار الدعم"
+          value={ops ? ops.needs_support : '—'}
+          sub="محادثات محوّلة لم تُحل"
+          icon="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.16 16.25A2 2 0 005 19z" />
+      </div>
+
+      {/* ── Knowledge gaps: where the bot hands off (most→least) ── */}
+      {ops && ops.knowledge_gaps.length > 0 && (() => {
+        const maxGap = Math.max(...ops.knowledge_gaps.map(g => g.count), 1)
+        return (
+          <Card className="bg-content1 border border-divider">
+            <CardHeader className="px-5 py-4 flex items-center gap-3">
+              <h2 className="font-bold text-sm">أين يتوقف البوت؟ (فرص تحسين)</h2>
+              <Chip size="sm" variant="flat" color="secondary">{ops.escalated_total} تحويل</Chip>
+            </CardHeader>
+            <Divider />
+            <CardBody className="px-5 py-4 space-y-1">
+              {ops.knowledge_gaps.map((g, idx) => (
+                <div key={g.reason} className="flex items-center gap-3 py-1.5">
+                  <span className="text-xs text-default-500 w-40 shrink-0 truncate">{g.label}</span>
+                  <div className="flex-1 h-2.5 bg-content2 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{
+                        width: `${Math.round((g.count / maxGap) * 100)}%`,
+                        background: ['#8b5cf6','#ec4899','#f59e0b','#ef4444','#3b82f6','#10b981','#14b8a6'][idx % 7],
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs font-bold w-10 text-right text-default-500">{g.count}</span>
+                </div>
+              ))}
+              <p className="text-xs text-default-400 pt-2">
+                💡 هذه أكثر الحالات التي حوّل فيها البوت للموظف — عالجها لرفع معدل الحلّ الآلي
+              </p>
             </CardBody>
           </Card>
-        ))}
-      </div>
+        )
+      })()}
 
       {/* ── Conversion + Sentiment row ── */}
       {insights && (
@@ -318,7 +409,14 @@ export default function Analytics({ storeId }: Props) {
 
       {/* ── Hourly heatmap ── */}
       <Card className="bg-content1 border border-divider">
-        <CardHeader className="px-5 py-4"><h2 className="font-bold text-sm">توزيع الساعات</h2></CardHeader>
+        <CardHeader className="px-5 py-4 flex items-center gap-3">
+          <h2 className="font-bold text-sm">توزيع الساعات</h2>
+          {(c.peak_hour ?? -1) >= 0 && (
+            <Chip size="sm" variant="flat" color="primary">
+              ⏰ الذروة {c.peak_hour}:00
+            </Chip>
+          )}
+        </CardHeader>
         <Divider />
         <CardBody className="px-5 py-4">
           <div className="flex items-end gap-0.5 h-24">

@@ -1,51 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Spinner, Progress, Avatar, Chip } from '@heroui/react'
+import { Progress, Avatar, Chip } from '@heroui/react'
 import { api, Analytics, ROIData, WeeklyReport, StoreInfo } from '../../api'
+import {
+  Icon, StatCard, DataCard, EmptyState, StatSkeleton, DeltaBadge, StatusPill,
+} from '../../components/ui'
 import Setup from './Setup'
 
 interface Props { storeId: string; store: StoreInfo }
-
-function Icon({ paths, size = 16, className = '' }: {
-  paths: string | string[]; size?: number; className?: string
-}) {
-  const arr = Array.isArray(paths) ? paths : [paths]
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24"
-      fill="none" stroke="currentColor" strokeWidth={2}
-      strokeLinecap="round" strokeLinejoin="round" className={className}>
-      {arr.map((d, i) => <path key={i} d={d} />)}
-    </svg>
-  )
-}
-
-/* ── Stat card ── */
-function StatCard({ label, value, sub, icon, color }: {
-  label: string
-  value: string | number
-  sub?: string
-  icon: string | string[]
-  color: { gradient: string; border: string; iconBg: string; iconColor: string; numColor: string; glow: string }
-}) {
-  return (
-    <div className={`group relative overflow-hidden rounded-3xl bg-content1/60 backdrop-blur-xl border ${color.border} p-6 ${color.glow} hover:-translate-y-1 transition-all duration-300 shadow-xl`}>
-      <div className={`absolute inset-0 bg-gradient-to-br ${color.gradient} opacity-40 group-hover:opacity-65 transition-opacity duration-300 pointer-events-none`} />
-      
-      {/* Glowing card border overlay */}
-      <div className="absolute inset-0 border border-white/5 rounded-3xl pointer-events-none" />
-      
-      <div className="relative flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-slate-400 font-bold mb-3 uppercase tracking-wider">{label}</p>
-          <p className={`text-4xl font-black tracking-tight leading-none ${color.numColor} transition-transform duration-300 group-hover:scale-[1.03] origin-right`}>{value}</p>
-          {sub && <p className="text-xs text-slate-500 font-semibold mt-3.5 flex items-center gap-1.5"><span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-blue-400 transition-colors" />{sub}</p>}
-        </div>
-        <div className={`w-12 h-12 ${color.iconBg} rounded-2xl flex items-center justify-center flex-shrink-0 ${color.iconColor} shadow-inner group-hover:scale-110 transition-transform duration-300`}>
-          <Icon paths={icon} size={20} />
-        </div>
-      </div>
-    </div>
-  )
-}
 
 export default function Overview({ storeId, store }: Props) {
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
@@ -104,6 +65,7 @@ export default function Overview({ storeId, store }: Props) {
   const c = analytics?.conversations
   const m = analytics?.messages
   const r = analytics?.ratings
+  const cur = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 0 })
 
   return (
     <div className="p-6 space-y-6" dir="rtl">
@@ -111,104 +73,94 @@ export default function Overview({ storeId, store }: Props) {
       {/* ── Onboarding setup wizard (hides when dismissed or complete) ── */}
       <Setup storeId={storeId} store={store} />
 
-      {/* ── Premium Greeting Banner (Purity teal) ── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-teal-500 to-cyan-500 p-6 sm:p-8 shadow-soft-lg">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-white/5 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
-        
-        <div className="relative flex flex-col sm:flex-row items-center gap-6 justify-between">
+      {/* ── Greeting banner (brand teal — white text passes contrast on teal) ── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-teal-500 to-cyan-500 p-6 sm:p-7 shadow-sm">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-white/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+        <div className="relative flex flex-col sm:flex-row items-center gap-5 justify-between">
           <div className="flex items-center gap-4 text-center sm:text-right flex-col sm:flex-row">
-            <div className="relative p-1 bg-white/25 rounded-2xl shadow-lg">
-              <Avatar
-                src={store.store_avatar || undefined}
-                name={store.store_name[0]}
-                size="lg"
-                className="bg-white/20 text-white font-black text-xl border-2 border-transparent w-16 h-16"
-              />
-            </div>
+            <Avatar
+              src={store.store_avatar || undefined}
+              name={store.store_name[0]}
+              size="lg"
+              className="bg-white/20 text-white font-black text-xl w-16 h-16 ring-2 ring-white/30"
+            />
             <div>
               <div className="flex items-center justify-center sm:justify-start gap-2.5 flex-wrap">
                 <h1 className="text-2xl font-black text-white tracking-tight">{store.store_name}</h1>
-                <Chip size="sm" color={store.has_ai_config ? "success" : "warning"} variant="flat" className="font-bold">
-                  {store.has_ai_config ? "✓ المساعد الذكي نشط" : "⚠️ وضع البيئة الافتراضية"}
+                <Chip size="sm" color={store.has_ai_config ? 'success' : 'warning'} variant="solid" className="font-bold">
+                  {store.has_ai_config ? '✓ المساعد الذكي نشط' : '⚠️ الوضع الافتراضي'}
                 </Chip>
               </div>
-              <p className="text-sm text-white/80 mt-1.5 flex items-center gap-2 justify-center sm:justify-start">
-                <span className="opacity-80">🔗</span>
-                <span className="font-mono">{store.store_domain || store.store_id}</span>
+              <p className="text-sm text-white/85 mt-1.5 flex items-center gap-2 justify-center sm:justify-start font-mono">
+                <Icon paths={['M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101', 'M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1']} size={14} />
+                {store.store_domain || store.store_id}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex items-center gap-2.5 px-5 py-3 rounded-2xl text-xs font-bold border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 active:scale-95 transition-all shadow-lg shadow-blue-500/5 disabled:opacity-60"
-            >
-              {syncing
-                ? <Spinner size="sm" color="primary" />
-                : <Icon paths="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" size={14} />
-              }
-              مزامنة مستودع المنتجات
-            </button>
-          </div>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="flex items-center gap-2.5 px-5 py-3 rounded-xl text-xs font-bold bg-white/15 text-white hover:bg-white/25 active:scale-95 transition-all disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <Icon paths="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              size={14} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'جاري المزامنة…' : 'مزامنة المنتجات'}
+          </button>
         </div>
       </div>
 
       {/* ── Sync message ── */}
       {syncMsg && (
-        <div className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-sm border ${
+        <div className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm border ${
           !syncMsg.includes('خطأ')
-            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
-            : 'bg-red-500/10 border-red-500/25 text-red-400'
+            ? 'bg-success-50 border-success-200 text-success-700'
+            : 'bg-danger-50 border-danger-200 text-danger-700'
         }`}>
           <Icon
-            paths={!syncMsg.includes('خطأ') ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' : 'M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z'}
-            size={16}
-            className="flex-shrink-0"
+            paths={!syncMsg.includes('خطأ') ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' : 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}
+            size={16} className="flex-shrink-0"
           />
           <span className="font-semibold">{syncMsg}</span>
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-24">
-          <Spinner size="lg" color="primary" label="جاري تحميل البيانات..." />
+        <div className="space-y-6">
+          <div className="h-32 rounded-2xl bg-content1 border border-divider animate-pulse" />
+          <StatSkeleton count={4} />
         </div>
       ) : (
         <>
           {/* ── ROI hero: "how much did the bot make you" ── */}
           {roi && (
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-500 to-cyan-500 text-white p-6 sm:p-8 shadow-soft-lg">
-              <div className="absolute top-[-5rem] left-[-3rem] w-72 h-72 bg-white/15 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute bottom-[-6rem] right-[-3rem] w-72 h-72 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-500 text-white p-6 sm:p-8 shadow-sm">
+              <div className="absolute top-[-5rem] left-[-3rem] w-72 h-72 bg-white/10 rounded-full blur-3xl pointer-events-none" />
               <div className="relative flex flex-col lg:flex-row lg:items-center gap-6 justify-between">
                 <div>
                   <div className="inline-flex items-center gap-2 bg-white/15 rounded-full px-3 py-1 text-xs font-bold mb-3">
                     <Icon paths="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" size={13} /> آخر 30 يوم
                   </div>
                   <p className="text-sm font-semibold text-teal-50">حياك جابلك</p>
-                  <p className="text-4xl sm:text-5xl font-black tracking-tight mt-1">
-                    {roi.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  <p className="text-4xl sm:text-5xl font-black tracking-tight mt-1 tabular-nums">
+                    {cur(roi.revenue)}
                     <span className="text-2xl font-bold mr-2">{roi.currency === 'SAR' ? 'ريال' : roi.currency}</span>
                   </p>
                   <p className="text-sm text-teal-50/90 mt-2">
                     من <b>{roi.orders}</b> طلب أتمّه البوت
                     {roi.revenue_all > roi.revenue && (
-                      <span className="opacity-80"> — وإجمالي <b>{roi.revenue_all.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b> منذ البداية</span>
+                      <span className="opacity-80"> — وإجمالي <b>{cur(roi.revenue_all)}</b> منذ البداية</span>
                     )}
                   </p>
                 </div>
-                {/* breakdown chips */}
                 <div className="grid grid-cols-3 gap-3 lg:gap-4">
                   {[
                     { v: roi.conversations, l: 'محادثة', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
                     { v: `${roi.hours_saved}س`, l: 'وقت موفّر', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
                     { v: roi.carts_recovered, l: 'سلة مسترجعة', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z' },
                   ].map((s) => (
-                    <div key={s.l} className="bg-white/15 backdrop-blur-sm rounded-2xl px-4 py-3.5 text-center min-w-[5.5rem]">
+                    <div key={s.l} className="bg-white/15 rounded-xl px-4 py-3.5 text-center min-w-[5.5rem]">
                       <Icon paths={s.icon} size={18} className="mx-auto mb-1.5 opacity-90" />
-                      <p className="text-xl font-black leading-none">{s.v}</p>
+                      <p className="text-xl font-black leading-none tabular-nums">{s.v}</p>
                       <p className="text-[11px] font-semibold text-teal-50/90 mt-1">{s.l}</p>
                     </div>
                   ))}
@@ -219,105 +171,95 @@ export default function Overview({ storeId, store }: Props) {
 
           {/* ── Weekly report (week-over-week) ── */}
           {weekly && (
-            <div className="rounded-3xl bg-content1 border border-divider p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-                    <Icon paths="M9 17V7m4 10V11m4 6V9M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" size={18} />
-                  </span>
-                  <div>
-                    <h2 className="font-bold text-base text-foreground">تقرير الأسبوع</h2>
-                    <p className="text-xs text-default-500">مقارنة بالأسبوع اللي فات</p>
-                  </div>
-                </div>
+            <DataCard
+              title="تقرير الأسبوع"
+              icon="M9 17V7m4 10V11m4 6V9M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"
+              action={
                 <button onClick={copyWeekly}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-600 bg-teal-50 border border-teal-200 rounded-full px-4 py-2 hover:bg-teal-100 transition-colors">
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 rounded-full px-4 py-1.5 hover:bg-primary/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
                   <Icon paths={['M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2', 'M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3']} size={14} />
                   {copied ? 'تم النسخ ✓' : 'نسخ للمشاركة'}
                 </button>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              }
+            >
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { l: 'المبيعات', v: `${weekly.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}`, sub: weekly.currency === 'SAR' ? 'ريال' : weekly.currency, d: weekly.revenue_delta },
+                  { l: 'المبيعات', v: cur(weekly.revenue), sub: weekly.currency === 'SAR' ? 'ريال' : weekly.currency, d: weekly.revenue_delta },
                   { l: 'الطلبات', v: weekly.orders, sub: 'طلب', d: weekly.orders_delta },
                   { l: 'المحادثات', v: weekly.conversations, sub: 'محادثة', d: weekly.conv_delta },
                   { l: 'رضا العملاء', v: weekly.avg_rating || '—', sub: weekly.avg_rating ? 'من 5 ⭐' : 'لا تقييمات', d: null as number | null },
                 ].map((s) => (
-                  <div key={s.l} className="bg-content2 rounded-2xl p-4 border border-divider">
+                  <div key={s.l} className="bg-content2 rounded-xl p-4 border border-divider">
                     <p className="text-xs font-semibold text-default-500 mb-1.5">{s.l}</p>
-                    <p className="text-2xl font-black text-foreground leading-none">{s.v}<span className="text-xs font-semibold text-default-400 mr-1">{s.sub}</span></p>
-                    {s.d !== null && (
-                      <p className={`text-xs font-bold mt-2 ${s.d > 0 ? 'text-emerald-600' : s.d < 0 ? 'text-red-500' : 'text-default-400'}`}>
-                        {s.d > 0 ? `▲ ${s.d}%` : s.d < 0 ? `▼ ${Math.abs(s.d)}%` : '— ثابت'}
-                      </p>
-                    )}
+                    <p className="text-2xl font-black text-foreground leading-none tabular-nums">
+                      {s.v}<span className="text-xs font-semibold text-default-400 mr-1">{s.sub}</span>
+                    </p>
+                    {s.d !== null && <div className="mt-2"><DeltaBadge value={s.d} /></div>}
                   </div>
                 ))}
               </div>
               {weekly.top_topic && (
-                <p className="text-xs text-default-500 mt-4">🔎 أكثر موضوع سأل عنه العملاء هذا الأسبوع: <b className="text-foreground">{weekly.top_topic}</b></p>
+                <p className="text-xs text-default-500 mt-4 flex items-center gap-1.5">
+                  <Icon paths={['M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z']} size={13} className="text-default-400" />
+                  أكثر موضوع سأل عنه العملاء هذا الأسبوع: <b className="text-foreground">{weekly.top_topic}</b>
+                </p>
               )}
-            </div>
+            </DataCard>
           )}
 
-          {/* ── Stats grid ── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* ── Stats grid (shared StatCard — theme-aware) ── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
+              tone="primary" accent
               label="إجمالي المحادثات"
               value={c?.total ?? 0}
               sub={`${c?.today ?? 0} محادثة اليوم`}
               icon="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-              color={{ gradient: 'from-blue-500/10 via-blue-500/5 to-transparent', border: 'border-blue-500/20 hover:border-blue-500/35', iconBg: 'bg-blue-500/15', iconColor: 'text-blue-400', numColor: 'text-blue-400', glow: 'card-blue' }}
             />
             <StatCard
+              tone="success" accent
               label="هذا الأسبوع"
               value={c?.this_week ?? 0}
               sub={`معدل ${c?.avg_messages ?? 0} رسالة/جلسة`}
               icon="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-              color={{ gradient: 'from-emerald-500/10 via-emerald-500/5 to-transparent', border: 'border-emerald-500/20 hover:border-emerald-500/35', iconBg: 'bg-emerald-500/15', iconColor: 'text-emerald-400', numColor: 'text-emerald-400', glow: 'card-green' }}
             />
             <StatCard
+              tone="secondary" accent
               label="المنتجات"
               value={store.products_count}
               sub={`آخر مزامنة: ${store.last_sync === 'never' ? 'لم تتم بعد' : 'نشطة'}`}
               icon="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-              color={{ gradient: 'from-violet-500/10 via-violet-500/5 to-transparent', border: 'border-violet-500/20 hover:border-violet-500/35', iconBg: 'bg-violet-500/15', iconColor: 'text-violet-400', numColor: 'text-violet-400', glow: 'card-purple' }}
             />
             <StatCard
+              tone="warning" accent
               label="متوسط التقييم"
               value={r?.avg ? `${r.avg} ★` : '—'}
               sub={`${r?.count ?? 0} تقييم إجمالاً`}
               icon="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-              color={{ gradient: 'from-amber-500/10 via-amber-500/5 to-transparent', border: 'border-amber-500/20 hover:border-amber-500/35', iconBg: 'bg-amber-500/15', iconColor: 'text-amber-400', numColor: 'text-amber-400', glow: 'card-amber' }}
             />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* ── Messages breakdown ── */}
             {m && m.total > 0 && (
-              <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-                <div className="flex items-center gap-2.5 px-6 py-5 border-b border-divider">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-violet-500/20">
-                    <Icon paths="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" size={14} />
-                  </div>
-                  <h2 className="font-bold text-foreground text-base">توزيع وتحليل الرسائل</h2>
-                  <Chip size="sm" variant="flat" color="secondary" className="mr-auto font-bold">
-                    {m.total} رسالة نشطة
-                  </Chip>
-                </div>
-                <div className="p-6 space-y-6">
+              <DataCard
+                title="توزيع الرسائل"
+                icon="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                iconTone="secondary"
+                chip={<Chip size="sm" variant="flat" color="secondary" className="font-bold">{m.total} رسالة</Chip>}
+              >
+                <div className="space-y-5">
                   {[
-                    { label: 'رسائل العملاء 👤', value: m.user,  color: 'primary'  as const, hex: '#3b82f6', bg: 'bg-blue-500/10' },
-                    { label: 'ردود البوت الذكي 🤖',    value: m.bot,   color: 'success'  as const, hex: '#22c55e', bg: 'bg-emerald-500/10' },
-                    { label: 'تدخل وتوجيه الإدارة 👨‍💼',  value: m.admin, color: 'warning'  as const, hex: '#f59e0b', bg: 'bg-amber-500/10' },
+                    { label: 'رسائل العملاء', value: m.user,  color: 'primary' as const, pctClass: 'text-primary' },
+                    { label: 'ردود البوت',    value: m.bot,   color: 'success' as const, pctClass: 'text-success' },
+                    { label: 'تدخّل الإدارة',  value: m.admin, color: 'warning' as const, pctClass: 'text-warning' },
                   ].map(item => (
                     <div key={item.label} className="space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-default-600 font-semibold">{item.label}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-slate-400 font-medium">{item.value} رسالة</span>
-                          <span className="text-sm font-black px-2 py-0.5 rounded-lg text-white" style={{ background: `${item.hex}15`, color: item.hex }}>
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xs text-default-400 font-medium tabular-nums">{item.value} رسالة</span>
+                          <span className={`text-sm font-black tabular-nums ${item.pctClass}`}>
                             {m.total ? Math.round(item.value / m.total * 100) : 0}%
                           </span>
                         </div>
@@ -325,114 +267,92 @@ export default function Overview({ storeId, store }: Props) {
                       <Progress
                         value={m.total ? (item.value / m.total) * 100 : 0}
                         color={item.color}
-                        size="md"
-                        className="max-w-full"
-                        classNames={{
-                          track: 'bg-content2/60 border border-white/5',
-                          indicator: 'rounded-full bg-gradient-to-r',
-                        }}
+                        size="sm"
+                        aria-label={item.label}
+                        classNames={{ track: 'bg-content2', indicator: 'rounded-full' }}
                       />
                     </div>
                   ))}
                 </div>
-              </div>
+              </DataCard>
             )}
 
             {/* ── Ratings ── */}
             {r && r.count > 0 && (
-              <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-                <div className="flex items-center gap-2.5 px-6 py-5 border-b border-divider">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-lg shadow-amber-500/20">
-                    <Icon paths="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" size={14} />
-                  </div>
-                  <h2 className="font-bold text-foreground text-base">تقييمات ومراجعات العملاء</h2>
-                  <Chip size="sm" variant="flat" color="warning" className="mr-auto font-black">
-                    ★ {r.avg} متوسط التقييم
-                  </Chip>
-                </div>
-                <div className="p-6 space-y-4">
+              <DataCard
+                title="تقييمات العملاء"
+                icon="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                iconTone="warning"
+                chip={<Chip size="sm" variant="flat" color="warning" className="font-black">★ {r.avg} متوسط</Chip>}
+              >
+                <div className="space-y-3">
                   {[5, 4, 3, 2, 1].map(star => {
                     const count = r.distribution[star - 1] ?? 0
                     const pct   = r.count ? (count / r.count) * 100 : 0
                     return (
-                      <div key={star} className="flex items-center gap-4 group/row">
-                        <span className="text-xs text-amber-400 font-black w-8 shrink-0 flex items-center gap-0.5">
-                          {star}★
-                        </span>
-                        <div className="flex-1">
-                          <Progress
-                            value={pct}
-                            size="md"
-                            color="warning"
-                            classNames={{
-                              track: 'bg-content2/60 border border-white/5',
-                              indicator: 'bg-gradient-to-r from-amber-500 to-orange-400 rounded-full',
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs text-slate-500 font-bold w-12 text-right shrink-0 group-hover/row:text-default-600 transition-colors">
+                      <div key={star} className="flex items-center gap-3">
+                        <span className="text-xs text-warning font-black w-8 shrink-0">{star}★</span>
+                        <Progress
+                          value={pct} size="sm" color="warning" aria-label={`${star} نجوم`}
+                          classNames={{ track: 'bg-content2', indicator: 'rounded-full' }}
+                          className="flex-1"
+                        />
+                        <span className="text-xs text-default-500 font-bold w-14 text-right shrink-0 tabular-nums">
                           {count} تقييم
                         </span>
                       </div>
                     )
                   })}
                 </div>
-              </div>
+              </DataCard>
             )}
           </div>
 
           {/* ── Daily chart ── */}
           {c?.daily_counts && c.daily_counts.length > 0 && (
-            <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider overflow-hidden shadow-xl relative group">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-              <div className="flex items-center gap-2.5 px-6 py-5 border-b border-divider">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                  <Icon paths="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" size={14} />
-                </div>
-                <h2 className="font-bold text-foreground text-base">نشاط المحادثات اليومي (آخر 14 يوم)</h2>
-              </div>
-              <div className="p-6">
-                {/* Bar chart */}
-                <div className="flex items-end gap-2.5 h-36 px-2">
-                  {c.daily_counts.slice(-14).map(d => {
-                    const max = Math.max(...c.daily_counts.map(x => x.count), 1)
-                    const h   = d.count === 0 ? 4 : Math.max(8, (d.count / max) * 120)
-                    return (
-                      <div key={d.date} className="flex-1 flex flex-col items-center gap-2 group">
-                        <div
-                          className="w-full bg-gradient-to-t from-blue-600/20 to-blue-500/40 hover:from-blue-500 hover:to-cyan-400 rounded-lg transition-all duration-300 cursor-default relative shadow-lg group-hover:shadow-blue-500/20"
-                          style={{ height: `${h}px` }}
-                        >
-                          {/* Tooltip */}
-                          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[11px] font-bold px-2.5 py-1 rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-all duration-200 transform translate-y-1 group-hover:translate-y-0 shadow-soft-lg z-10">
-                            {d.count} محادثة
-                          </div>
+            <DataCard
+              title="نشاط المحادثات اليومي (آخر 14 يوم)"
+              icon="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+              iconTone="primary"
+              chip={
+                (c.peak_hour ?? -1) >= 0
+                  ? <StatusPill tone="primary" label={`الذروة ${c.peak_hour}:00`} />
+                  : undefined
+              }
+            >
+              <div className="flex items-end gap-2 h-36 px-1">
+                {c.daily_counts.slice(-14).map(d => {
+                  const max = Math.max(...c.daily_counts.map(x => x.count), 1)
+                  const h   = d.count === 0 ? 4 : Math.max(8, (d.count / max) * 120)
+                  return (
+                    <div key={d.date} className="flex-1 flex flex-col items-center gap-2 group">
+                      <div className="relative w-full bg-primary/30 hover:bg-primary rounded-md transition-colors duration-200"
+                        style={{ height: `${h}px` }}>
+                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-foreground text-background text-[11px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap transition-opacity duration-200 z-10">
+                          {d.count} محادثة
                         </div>
-                        <span className="text-[10px] text-slate-500 font-bold opacity-60 group-hover:opacity-100 transition-opacity">
-                          {d.date?.slice(8)}
-                        </span>
                       </div>
-                    )
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-slate-600 mt-4 px-2 border-t border-white/5 pt-3">
-                  <span className="font-semibold">{c.daily_counts.at(-14)?.date}</span>
-                  <span className="font-semibold">{c.daily_counts.at(-1)?.date}</span>
-                </div>
+                      <span className="text-[10px] text-default-400 font-bold tabular-nums">{d.date?.slice(8)}</span>
+                    </div>
+                  )
+                })}
               </div>
-            </div>
+              <div className="flex justify-between text-xs text-default-400 mt-3 px-1 border-t border-divider pt-3 tabular-nums">
+                <span className="font-semibold">{c.daily_counts.at(-14)?.date}</span>
+                <span className="font-semibold">{c.daily_counts.at(-1)?.date}</span>
+              </div>
+            </DataCard>
           )}
 
           {/* Empty state */}
           {!m?.total && !c?.total && (
-            <div className="rounded-3xl bg-content1/60 backdrop-blur-xl border border-divider py-20 text-center shadow-xl">
-              <div className="w-16 h-16 bg-content2 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/5">
-                <Icon paths="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={26} className="text-slate-600" />
-              </div>
-              <p className="text-slate-400 text-sm font-semibold">لا توجد بيانات بعد</p>
-              <p className="text-slate-600 text-xs mt-1">ابدأ باستخدام البوت لترى التحليلات هنا</p>
-            </div>
+            <DataCard>
+              <EmptyState
+                icon="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                title="لا توجد بيانات بعد"
+                hint="ابدأ باستخدام البوت لترى التحليلات والإحصائيات تظهر هنا."
+              />
+            </DataCard>
           )}
         </>
       )}

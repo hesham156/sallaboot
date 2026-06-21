@@ -12,12 +12,30 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# Channels we break analytics out by. "widget" is the default (store
+# website embed) and the catch-all for anything unrecognised.
+CHANNELS = ("widget", "whatsapp", "telegram", "messenger", "instagram")
+
+# session_id prefix → channel. The webhooks build sessions as
+# wa:/tg:/msgr:/ig: (see routers/webhooks.py). Keep in sync with them.
+_PREFIX_CHANNEL = {
+    "wa:":   "whatsapp",
+    "tg:":   "telegram",
+    "msgr:": "messenger",
+    "ig:":   "instagram",
+}
+
+
 def _conv_channel(session_id: str, conv: dict) -> str:
-    if session_id.startswith("wa:"):
-        return "whatsapp"
+    for prefix, channel in _PREFIX_CHANNEL.items():
+        if session_id.startswith(prefix):
+            return channel
+    # Fall back to the channel stamped on customer_info (set by the
+    # webhook handlers). widget conversations have no prefix and usually
+    # no channel tag.
     ch = ((conv.get("customer_info") or {}).get("channel") or "").lower()
-    if ch == "whatsapp":
-        return "whatsapp"
+    if ch in CHANNELS:
+        return ch
     return "widget"
 
 
@@ -95,6 +113,14 @@ def _finalise_channel_stats(stats: dict) -> dict:
         {"date": d, "count": stats["_daily"][d]}
         for d in sorted(stats["_daily"].keys())
     ]
+    # Deflection rate: share of conversations the bot resolved without a
+    # human taking over. The headline "is the bot saving me work?" number.
+    c["deflection_rate"] = (
+        round(c["bot_handled"] / c["total"] * 100, 1) if c["total"] else 0
+    )
+    # Busiest hour of the day (0–23) — for staffing. -1 when no data.
+    hd = c["hourly_distribution"]
+    c["peak_hour"] = hd.index(max(hd)) if c["total"] and max(hd) > 0 else -1
     r["avg"] = round(r["_sum"] / r["count"], 1) if r["count"] else 0
     stats.pop("_daily", None)
     r.pop("_sum", None)
@@ -115,11 +141,8 @@ async def store_analytics(store_id: str):
     now_utc = _dt.datetime.utcnow()
     all_convs = await cs.get_all_conversations_for_store(store_id)
 
-    buckets = {
-        "widget":   _empty_channel_stats(now_utc),
-        "whatsapp": _empty_channel_stats(now_utc),
-        "total":    _empty_channel_stats(now_utc),
-    }
+    buckets = {ch: _empty_channel_stats(now_utc) for ch in CHANNELS}
+    buckets["total"] = _empty_channel_stats(now_utc)
 
     for sid, conv in all_convs.items():
         channel = _conv_channel(sid, conv)
@@ -137,10 +160,28 @@ async def store_analytics(store_id: str):
 
     cache = sm.get_cache(store_id)
     total = buckets["total"]
+
+    def _channel_view(b: dict) -> dict:
+        return {
+            "conversations": b["conversations"],
+            "messages":      b["messages"],
+            "ratings":       b["ratings"],
+        }
+
+    c = total["conversations"]
     return {
-        "conversations":   total["conversations"],
+        "conversations":   c,
         "messages":        total["messages"],
         "ratings":         total["ratings"],
+        # ── Headline operational metrics (was already computed, now surfaced) ──
+        "deflection": {
+            "bot_handled":     c["bot_handled"],
+            "admin_takeover":  c["admin_takeover"],
+            "rate":            c["deflection_rate"],
+        },
+        "trend":      c["daily_counts"],          # 14-day [{date, count}]
+        "hourly":     c["hourly_distribution"],   # 24-slot conversation volume
+        "peak_hour":  c["peak_hour"],
         "abandoned_carts": {
             "total":         total_carts,
             "recovered":     recovered_carts,
@@ -152,21 +193,8 @@ async def store_analytics(store_id: str):
             "last_sync": cache.get("last_sync", "never"),
         },
         "by_channel": {
-            "widget":   {
-                "conversations": buckets["widget"]["conversations"],
-                "messages":      buckets["widget"]["messages"],
-                "ratings":       buckets["widget"]["ratings"],
-            },
-            "whatsapp": {
-                "conversations": buckets["whatsapp"]["conversations"],
-                "messages":      buckets["whatsapp"]["messages"],
-                "ratings":       buckets["whatsapp"]["ratings"],
-            },
-            "total":    {
-                "conversations": total["conversations"],
-                "messages":      total["messages"],
-                "ratings":       total["ratings"],
-            },
+            **{ch: _channel_view(buckets[ch]) for ch in CHANNELS},
+            "total": _channel_view(total),
         },
     }
 
@@ -277,3 +305,110 @@ async def store_insights(store_id: str):
     import conversation_analyzer as ca
     all_convs = await cs.get_all_conversations_for_store(store_id)
     return ca.analyze_insights(all_convs)
+
+
+# ── Operations: response time + knowledge gaps ────────────────────────────────
+
+# Human-readable labels for the escalation reasons the bot hands off with
+# (see conversation_store.VALID_ESCALATION_REASONS). These are the "where
+# does the bot get stuck?" buckets the merchant uses to improve coverage.
+_ESCALATION_LABELS = {
+    "unpriced_material":    "خامة بلا سعر",
+    "oversize_design":      "مقاس أكبر من المتاح",
+    "digital_over_500":     "ديجيتال > 500 حبة",
+    "offset_under_1000":    "أوفست < 1000 حبة",
+    "offset_paper_missing": "سعر ورق الأوفست ناقص",
+    "box_oversize":         "علبة بمقاس كبير",
+    "custom_finishing":     "تشطيب غير مسعّر",
+    "vip_or_complaint":     "عميل VIP أو شكوى",
+    "customer_image":       "العميل أرسل صورة",
+    "customer_attachment":  "العميل أرسل مرفقاً",
+    "other":                "أخرى",
+}
+
+
+def _first_response_seconds(messages: list) -> float | None:
+    """Seconds between the first customer message and the first bot/admin
+    reply that follows it. None when the pair can't be formed."""
+    first_user_ts = None
+    for msg in messages:
+        role = msg.get("role")
+        ts   = _safe_dt(msg.get("ts", ""), None)
+        if ts is None:
+            continue
+        if role == "user" and first_user_ts is None:
+            first_user_ts = ts
+        elif role in ("assistant", "admin") and first_user_ts is not None:
+            delta = (ts - first_user_ts).total_seconds()
+            return delta if delta >= 0 else None
+    return None
+
+
+def _conversation_span_seconds(messages: list) -> float | None:
+    """Wall-clock duration from first to last timestamped message."""
+    stamps = [t for t in (_safe_dt(m.get("ts", ""), None) for m in messages) if t]
+    if len(stamps) < 2:
+        return None
+    span = (max(stamps) - min(stamps)).total_seconds()
+    return span if span >= 0 else None
+
+
+@router.get("/admin/{store_id}/analytics/operations")
+async def store_operations(store_id: str):
+    """Operational quality metrics:
+      - first-response + resolution times (responsiveness)
+      - escalations grouped by reason (knowledge gaps / where the bot stalls)
+      - open "needs support" count (unresolved handoffs)
+    """
+    all_convs = await cs.get_all_conversations_for_store(store_id)
+
+    response_times: list[float] = []
+    span_times:     list[float] = []
+    gap_counts:     dict[str, int] = {}
+    escalated_total = 0
+    needs_support   = 0
+
+    for conv in all_convs.values():
+        msgs = conv.get("messages", []) or []
+
+        fr = _first_response_seconds(msgs)
+        if fr is not None:
+            response_times.append(fr)
+        sp = _conversation_span_seconds(msgs)
+        if sp is not None:
+            span_times.append(sp)
+
+        esc = conv.get("escalation")
+        if isinstance(esc, dict) and esc.get("reason"):
+            escalated_total += 1
+            reason = esc.get("reason", "other")
+            gap_counts[reason] = gap_counts.get(reason, 0) + 1
+            if not esc.get("resolved"):
+                needs_support += 1
+
+    def _avg(xs: list[float]) -> int:
+        return round(sum(xs) / len(xs)) if xs else 0
+
+    knowledge_gaps = sorted(
+        (
+            {
+                "reason": r,
+                "label":  _ESCALATION_LABELS.get(r, r),
+                "count":  n,
+            }
+            for r, n in gap_counts.items()
+        ),
+        key=lambda x: x["count"],
+        reverse=True,
+    )
+
+    return {
+        "response_time": {
+            "avg_first_response_sec": _avg(response_times),
+            "avg_resolution_sec":     _avg(span_times),
+            "sample_size":            len(response_times),
+        },
+        "knowledge_gaps":  knowledge_gaps,
+        "escalated_total": escalated_total,
+        "needs_support":   needs_support,
+    }

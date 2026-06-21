@@ -237,6 +237,8 @@ export const api = {
     get<ROIData>(`/admin/${storeId}/analytics/roi?days=${days}`),
   weekly: (storeId: string) =>
     get<WeeklyReport>(`/admin/${storeId}/analytics/weekly`),
+  operations: (storeId: string) =>
+    get<OperationsStats>(`/admin/${storeId}/analytics/operations`),
 
   // AI settings
   getAI: (storeId: string) =>
@@ -770,6 +772,8 @@ export interface ConversationStats {
   avg_messages: number
   daily_counts: { date: string; count: number }[]
   hourly_distribution: number[]
+  deflection_rate?: number
+  peak_hour?: number
 }
 
 export interface MessageStats {
@@ -791,18 +795,42 @@ export interface ChannelStats {
   ratings:       RatingStats
 }
 
+export type AnalyticsChannel =
+  'widget' | 'whatsapp' | 'telegram' | 'messenger' | 'instagram' | 'total'
+
 export interface Analytics {
   conversations:   ConversationStats
   messages:        MessageStats
   ratings:         RatingStats
+  /** Share of conversations the bot resolved without a human takeover. */
+  deflection:      { bot_handled: number; admin_takeover: number; rate: number }
+  /** 14-day conversation volume, oldest→newest. */
+  trend:           { date: string; count: number }[]
+  /** 24-slot conversation volume by hour-of-day (UTC). */
+  hourly:          number[]
+  /** Busiest hour 0–23, or -1 when no data. */
+  peak_hour:       number
   abandoned_carts: { total: number; recovered: number; pending: number; recovery_rate: number }
   products:        { count: number; last_sync: string }
-  /** New: same shape as the legacy top-level fields, split per channel. */
-  by_channel?: {
-    widget:   ChannelStats
-    whatsapp: ChannelStats
-    total:    ChannelStats
+  /** Same shape as the legacy top-level fields, split per channel. */
+  by_channel?:     Partial<Record<AnalyticsChannel, ChannelStats>>
+}
+
+export interface KnowledgeGap {
+  reason: string
+  label:  string
+  count:  number
+}
+
+export interface OperationsStats {
+  response_time: {
+    avg_first_response_sec: number
+    avg_resolution_sec:     number
+    sample_size:            number
   }
+  knowledge_gaps:  KnowledgeGap[]
+  escalated_total: number
+  needs_support:   number
 }
 
 // ── Conversation Insights ─────────────────────────────────────────────────
