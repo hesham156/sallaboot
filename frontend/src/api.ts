@@ -931,6 +931,9 @@ export interface AIConfig {
   page_token_set?: boolean
   ig_id?: string
   ig_username?: string
+  // Telegram channel
+  telegram_enabled?: boolean
+  telegram_bot_username?: string
   // AI-issued discount coupons (opt-in)
   coupons_enabled?: boolean
   coupon_max_percent?: number

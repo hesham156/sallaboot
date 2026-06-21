@@ -89,6 +89,9 @@ async def get_ai_settings(store_id: str):
         "page_token_set":      bool(cfg.get("page_token")),
         "ig_id":               cfg.get("ig_id", ""),
         "ig_username":         cfg.get("ig_username", ""),
+        # Telegram channel connection status — token never echoed.
+        "telegram_enabled":      bool(cfg.get("telegram_enabled")),
+        "telegram_bot_username": cfg.get("telegram_bot_username", ""),
         "coupons_enabled":           bool(cfg.get("coupons_enabled")),
         "coupon_max_percent":        int(cfg.get("coupon_max_percent", 15) or 15),
         "coupon_max_discount_value": float(cfg.get("coupon_max_discount_value", 200) or 200),

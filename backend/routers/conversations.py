@@ -350,6 +350,31 @@ async def store_end_conversation(
                     print(f"[end-conversation] WhatsApp delivery error: {exc}")
             asyncio.create_task(_deliver_to_whatsapp())
 
+    # 6. Telegram delivery for tg: sessions. Telegram has no interactive list, so
+    # CSAT goes out as a numbered text prompt; the rating reply is captured by the
+    # CSAT intercept in webhooks.handle_telegram_message (mirrors WhatsApp).
+    elif session_id.startswith("tg:"):
+        import telegram as tg
+        tg_token = (cfg.get("telegram_bot_token") or "").strip()
+        chat_id  = session_id[3:]
+        if tg_token and chat_id:
+            async def _deliver_to_telegram():
+                try:
+                    await tg.send_text(tg_token, chat_id, farewell)
+                    await tg.send_text(tg_token, chat_id, thanks_line)
+                    if not req.skip_csat:
+                        target_tg = agent_name or "ممثل خدمة العملاء"
+                        question_tg = (
+                            f"كيف كانت تجربتك مع {target_tg}؟\n\n"
+                            "ردّ بالرقم المناسب:\n"
+                            "1️⃣ غير راضٍ تماماً\n2️⃣ غير راضٍ\n3️⃣ محايد\n"
+                            "4️⃣ راضٍ\n5️⃣ راضٍ تماماً"
+                        )
+                        await tg.send_text(tg_token, chat_id, question_tg)
+                except Exception as exc:
+                    print(f"[end-conversation] Telegram delivery error: {exc}")
+            asyncio.create_task(_deliver_to_telegram())
+
     return {"status": "ok", "session_id": session_id, "messages": conv.get("messages", [])[-3:]}
 
 

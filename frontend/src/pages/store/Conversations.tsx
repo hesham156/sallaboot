@@ -552,6 +552,18 @@ export default function Conversations({ storeId }: Props) {
                   <span className="truncate">{aiConfig.whatsapp_phone_id || 'واتساب'}</span>
                 </button>
               )}
+              {aiConfig?.telegram_enabled && (
+                <button
+                  onClick={() => toggleChannelFilter('telegram')}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    channelFilter === 'telegram'
+                      ? 'bg-sky-500/10 text-sky-400'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}>
+                  <TgIcon size={13} />
+                  <span className="truncate">{aiConfig.telegram_bot_username ? `@${aiConfig.telegram_bot_username}` : 'تيليجرام'}</span>
+                </button>
+              )}
               {aiConfig?.instagram_enabled && (
                 <button
                   onClick={() => toggleChannelFilter('instagram')}
