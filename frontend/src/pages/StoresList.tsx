@@ -104,6 +104,13 @@ export default function StoresList() {
   const [reqSending, setReqSending] = useState(false)
   const [reqError,   setReqError]   = useState('')
 
+  // Delete-store flow (destructive — type-to-confirm).
+  const delModal = useDisclosure()
+  const [delStore,   setDelStore]   = useState<StoreInfo | null>(null)
+  const [delConfirm, setDelConfirm] = useState('')
+  const [deleting,   setDeleting]   = useState(false)
+  function openDelete(s: StoreInfo) { setDelStore(s); setDelConfirm(''); delModal.onOpen() }
+
   function openRequest(s: StoreInfo) {
     setReqStore(s); setReqNote(''); setReqError(''); reqModal.onOpen()
   }
@@ -202,6 +209,32 @@ export default function StoresList() {
       await api.resetPassword(storeId)
       setMsg(`تمت إعادة التعيين — كلمة المرور الجديدة: ${storeId}`)
     } catch (e: unknown) { setMsg(e instanceof Error ? e.message : 'خطأ') }
+  }
+
+  async function handleSuspendToggle(s: StoreInfo) {
+    const next = !s.suspended
+    if (!confirm(next
+      ? `إيقاف اشتراك متجر «${s.store_name}»؟ سيتوقف البوت عن الرد على العملاء.`
+      : `إعادة تفعيل متجر «${s.store_name}»؟`)) return
+    try {
+      if (next) await api.suspendStore(s.store_id)
+      else      await api.resumeStore(s.store_id)
+      setMsg(next ? `تم إيقاف «${s.store_name}»` : `تم تفعيل «${s.store_name}»`)
+      await loadData()
+    } catch (e: unknown) { setMsg(e instanceof Error ? e.message : 'خطأ') }
+  }
+
+  async function confirmDelete() {
+    if (!delStore) return
+    setDeleting(true)
+    try {
+      await api.deleteStore(delStore.store_id)
+      setMsg(`تم حذف متجر «${delStore.store_name}» وكل بياناته`)
+      delModal.onClose(); setDelConfirm('')
+      await loadData()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'تعذّر الحذف')
+    } finally { setDeleting(false) }
   }
 
   async function handleRegister() {
@@ -480,8 +513,13 @@ export default function StoresList() {
                         className="bg-blue-500/20 text-blue-400 font-bold flex-shrink-0"
                       />
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm text-foreground truncate">
+                        <p className="font-semibold text-sm text-foreground truncate flex items-center gap-1.5">
                           {s.store_name}
+                          {s.suspended && (
+                            <Chip size="sm" color="danger" variant="flat" classNames={{ content: 'font-bold text-[10px]' }}>
+                              موقوف
+                            </Chip>
+                          )}
                         </p>
                         <p className="text-xs text-default-600 font-mono truncate">{s.store_id}</p>
                       </div>
@@ -536,6 +574,28 @@ export default function StoresList() {
                           className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-colors"
                         >
                           <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M12 7V7a4 4 0 018 0v4H4V7a4 4 0 018 0z']} size={13} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content={s.suspended ? 'إعادة تفعيل الاشتراك' : 'إيقاف الاشتراك'}>
+                        <button
+                          onClick={() => handleSuspendToggle(s)}
+                          className={`w-8 h-8 flex items-center justify-center rounded-lg border transition-colors ${
+                            s.suspended
+                              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                              : 'bg-orange-500/10 border-orange-500/20 text-orange-400 hover:bg-orange-500/20'
+                          }`}
+                        >
+                          <Icon paths={s.suspended
+                            ? ['M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z', 'M21 12a9 9 0 11-18 0 9 9 0 0118 0z']
+                            : ['M10 9v6m4-6v6', 'M21 12a9 9 0 11-18 0 9 9 0 0118 0z']} size={13} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="حذف المتجر نهائياً">
+                        <button
+                          onClick={() => openDelete(s)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors"
+                        >
+                          <Icon paths={['M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16']} size={13} />
                         </button>
                       </Tooltip>
                     </div>
@@ -652,6 +712,46 @@ export default function StoresList() {
             </Button>
             <Button color="success" isLoading={reqSending} onPress={sendRequest} className="font-bold text-white">
               إرسال الطلب
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* ════════════════ DELETE STORE MODAL ════════════════ */}
+      <Modal isOpen={delModal.isOpen} onClose={delModal.onClose} placement="center">
+        <ModalContent className="bg-content1 border border-divider" dir="rtl">
+          <ModalHeader className="text-foreground font-bold border-b border-divider pb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-red-500/15 rounded-xl flex items-center justify-center text-red-400">
+                <Icon paths={['M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16']} size={15} />
+              </div>
+              حذف المتجر نهائياً
+            </div>
+          </ModalHeader>
+          <ModalBody className="gap-3 pt-4">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-sm text-red-300 leading-relaxed">
+              سيتم حذف متجر <b className="text-red-200">«{delStore?.store_name}»</b> وكل بياناته
+              (المحادثات، جهات الاتصال، الطلبات، الموظفين…) <b>نهائيًا ولا يمكن التراجع</b>.
+            </div>
+            <Field label={`اكتب معرف المتجر للتأكيد: ${delStore?.store_id}`}>
+              <Input
+                placeholder={delStore?.store_id}
+                value={delConfirm}
+                onValueChange={setDelConfirm}
+                variant="bordered"
+                dir="ltr"
+                classNames={{ inputWrapper: 'border-default-200 hover:border-default-300 bg-default-50 h-12 rounded-xl' }}
+              />
+            </Field>
+          </ModalBody>
+          <ModalFooter className="border-t border-divider pt-4">
+            <Button variant="flat" onPress={delModal.onClose} className="text-default-400 bg-content2">
+              إلغاء
+            </Button>
+            <Button color="danger" isLoading={deleting} onPress={confirmDelete}
+              isDisabled={delConfirm.trim() !== delStore?.store_id}
+              className="font-bold text-white">
+              حذف نهائي
             </Button>
           </ModalFooter>
         </ModalContent>

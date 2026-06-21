@@ -12,8 +12,18 @@ import store_manager as sm
 import store_brain as brain
 from store_sync import sync_store
 from models import ManualRegisterRequest
+from routers.deps import audit
 
 router = APIRouter()
+
+
+def _require_super(request: Request) -> dict:
+    """Gate a route to the platform super-admin. Returns the claims."""
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(403, "مصرح للمدير العام فقط")
+    return claims
 
 # Lazy-bound at include time (set by main.py after lifecycle is wired)
 _sync_task = None
@@ -460,6 +470,53 @@ async def db_diagnostic(request: Request):
     result["env_database_url_set"] = bool(os.getenv("DATABASE_URL", "").strip())
     result["in_memory_stores"]     = len(sm.list_stores())
     return result
+
+
+# ── Suspend / resume a store's subscription (super-admin) ─────────────────────
+
+@router.post("/admin/stores/{store_id}/suspend")
+async def suspend_store(store_id: str, request: Request):
+    """Pause a store's subscription: data is kept but the bot stops serving
+    customers on every channel. Reversible via /resume."""
+    _require_super(request)
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    if not await sm.set_suspended(store_id, True):
+        raise HTTPException(503, "تعذّر إيقاف المتجر")
+    await audit(request, "store_suspended", target_store=store_id)
+    return {"status": "ok", "store_id": store_id, "suspended": True}
+
+
+@router.post("/admin/stores/{store_id}/resume")
+async def resume_store(store_id: str, request: Request):
+    """Re-activate a suspended store."""
+    _require_super(request)
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    if not await sm.set_suspended(store_id, False):
+        raise HTTPException(503, "تعذّر تفعيل المتجر")
+    await audit(request, "store_resumed", target_store=store_id)
+    return {"status": "ok", "store_id": store_id, "suspended": False}
+
+
+# ── Delete a store entirely (super-admin) ─────────────────────────────────────
+
+@router.delete("/admin/stores/{store_id}")
+async def delete_store(store_id: str, request: Request):
+    """Permanently delete a store and ALL its data (conversations, contacts,
+    orders, employees, …) from the DB and the in-memory registry. Destructive
+    and irreversible — super-admin only."""
+    _require_super(request)
+    if not sm.is_registered(store_id) and not db.available():
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    counts = await db.purge_store(store_id) if db.available() else {}
+    sm.unregister_store(store_id)
+
+    await audit(request, "store_deleted", target_store=store_id, details={
+        "purged": counts,
+    })
+    return {"status": "ok", "store_id": store_id, "purged": counts}
 
 
 # ── Removed: unauthenticated backward-compat aliases ──────────────────────────

@@ -454,6 +454,13 @@ export const api = {
   // Super-admin: reset store password
   resetPassword: (storeId: string) =>
     put(`/admin/stores/${storeId}/reset-password`),
+  // Super-admin: suspend / resume / delete a store
+  suspendStore: (storeId: string) =>
+    post<{ status: string; suspended: boolean }>(`/admin/stores/${storeId}/suspend`, {}),
+  resumeStore: (storeId: string) =>
+    post<{ status: string; suspended: boolean }>(`/admin/stores/${storeId}/resume`, {}),
+  deleteStore: (storeId: string) =>
+    req<{ status: string; purged: Record<string, number> }>('DELETE', `/admin/stores/${storeId}`),
 
   // ── Employees (per-store agents) ─────────────────────────────────────────
   employeeLogin: (storeId: string, email: string, password: string) =>
@@ -656,6 +663,8 @@ export interface StoreInfo {
   last_sync: string
   last_sync_errors: string[]
   has_ai_config: boolean
+  /** Super-admin paused this store's subscription (bot stops serving). */
+  suspended?: boolean
 }
 
 export interface ConvSummary {

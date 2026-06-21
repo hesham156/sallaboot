@@ -469,6 +469,27 @@ def get_owner_email(store_id: str) -> str:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("owner_email", "")
 
 
+def is_suspended(store_id: str) -> bool:
+    """True when a super-admin has suspended the store's subscription. A
+    suspended store keeps its data but the bot stops serving customers."""
+    return bool(_registry.get(str(store_id), {}).get("tokens", {}).get("suspended", False))
+
+
+async def set_suspended(store_id: str, suspended: bool) -> bool:
+    """Suspend/resume a store (super-admin action). Persists the flag in the
+    store's tokens JSON so it survives restarts. Returns False if unknown."""
+    store_id = str(store_id)
+    if store_id not in _registry:
+        return False
+    _registry[store_id].setdefault("tokens", {})["suspended"] = bool(suspended)
+    if db.available():
+        try:
+            await db.save_store(store_id, get_store_info(store_id))
+        except Exception as exc:
+            print(f"[store_manager] set_suspended persist failed for {store_id!r}: {exc}")
+    return True
+
+
 async def set_owner_email(store_id: str, email: str) -> bool:
     """
     Update the owner_email both in the in-memory registry and in the DB.
@@ -508,6 +529,7 @@ def list_stores() -> list:
                 tokens.get("ai_config", {}).get("anthropic_api_key") or
                 tokens.get("ai_config", {}).get("openai_api_key")
             ),
+            "suspended":        bool(tokens.get("suspended", False)),
         })
     return sorted(result, key=lambda x: x.get("connected_at", ""), reverse=True)
 

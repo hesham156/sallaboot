@@ -3186,6 +3186,13 @@ class PrintingAgent:
         # tokens this turn consumed, even after fast-path or exception paths.
         self._reset_usage()
 
+        # ── Suspension gate ──────────────────────────────────────────────────
+        # A super-admin can suspend a store's subscription: data is kept but
+        # the bot stops serving customers on EVERY channel (this is the one
+        # chokepoint they all pass through). Returns a brief notice, no LLM call.
+        if sm.is_suspended(self.store_id):
+            return "عذراً، خدمة المساعد الذكي متوقفة مؤقتاً لهذا المتجر. 🌷"
+
         # Resolve the trusted identity once per turn and thread it into every
         # tool call. The chat handler normally supplies it; if omitted we resolve
         # a safe default (channel sessions verify by their authenticated sender,
