@@ -1814,6 +1814,38 @@ async def telegram_webhook(store_id: str, request: Request):
     return {"status": "ok", "queued": queued}
 
 
+async def _telegram_store_photo(token: str, file_id: str, store_id: str,
+                                session_id: str, caption: str) -> str:
+    """Download an inbound Telegram photo, persist it via the upload store, and
+    return the message text with an inline image link folded in (renders in the
+    inbox; the bot sees it too). Falls back to a placeholder on any failure so the
+    customer's message never disappears."""
+    import os as _os
+    import uuid as _uuid
+    import telegram as tg
+
+    def _placeholder() -> str:
+        return f"{caption}\n📎 (أرسل العميل صورة)".strip() if caption else "📎 (أرسل العميل صورة)"
+
+    media = await tg.fetch_media(token, file_id)
+    if not media or not db.available():
+        return _placeholder()
+    raw, ctype = media
+    ext   = ".png" if "png" in ctype else ".webp" if "webp" in ctype else ".jpg"
+    fid   = str(_uuid.uuid4())
+    fname = f"telegram_{fid}{ext}"
+    try:
+        await db.save_upload(file_id=fid, filename=fname, content_type=ctype,
+                             data=raw, store_id=store_id, session_id=session_id)
+    except Exception as exc:
+        print(f"[telegram] save photo failed: {exc}")
+        return _placeholder()
+    base_url = _os.getenv("BASE_URL", "").rstrip("/")
+    url = f"{base_url}/file/{fid}" if base_url else f"/file/{fid}"
+    image_md = f"[صورة]({url})"
+    return f"{caption}\n{image_md}".strip() if caption else image_md
+
+
 async def handle_telegram_message(msg: dict):
     """
     Route one inbound Telegram message → bot → reply. Channel-agnostic mirror of
@@ -1830,10 +1862,12 @@ async def handle_telegram_message(msg: dict):
         chat_id  = str(msg.get("chat_id", "") or "")
         sender   = str(msg.get("from", "") or "")
         text     = msg.get("text", "")
+        photo_file_id = str(msg.get("photo_file_id", "") or "")
 
         # Log metadata only — never the message body (PII / message content, M-17).
-        print(f"[telegram] 📨 incoming: store={store_id!r} chat={chat_id!r} chars={len(text)}")
-        if not (store_id and chat_id and text):
+        print(f"[telegram] 📨 incoming: store={store_id!r} chat={chat_id!r} "
+              f"chars={len(text)} photo={'y' if photo_file_id else 'n'}")
+        if not (store_id and chat_id):
             return
 
         cfg   = sm.get_ai_config(store_id) or {}
@@ -1845,6 +1879,14 @@ async def handle_telegram_message(msg: dict):
         # Stable per-customer session keyed by chat id — persists and shows in the
         # admin inbox just like a widget / WhatsApp / Messenger chat.
         session_id = f"tg:{sender}"
+
+        # Inbound photo → download, store, and fold an inline image link into the
+        # message so it renders in the inbox AND the bot can react to it.
+        if photo_file_id:
+            text = await _telegram_store_photo(token, photo_file_id, store_id, session_id, text)
+        if not text:
+            return
+
         await cs.restore_to_memory(session_id)
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}

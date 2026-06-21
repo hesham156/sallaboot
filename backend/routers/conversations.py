@@ -174,6 +174,18 @@ async def store_admin_reply(
                     "text":     text,
                 },
             )
+    elif session_id.startswith("tg:"):
+        cfg = sm.get_ai_config(store_id) or {}
+        tg_token = (cfg.get("telegram_bot_token") or "").strip()
+        if tg_token:
+            await db.outbox_enqueue(
+                kind     = "telegram_send",
+                store_id = store_id,
+                payload  = {
+                    "chat_id": session_id[3:],
+                    "text":    text,
+                },
+            )
 
     return {"status": "sent", "message": msg}
 

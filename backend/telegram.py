@@ -106,31 +106,80 @@ def extract_messages(payload: dict) -> list[dict]:
     whatsapp.extract_messages / messenger.extract_messages.
 
     Emitted dict keys:
-      msg_id     : str  — "<update_id>" (unique per bot → dedup key)
-      chat_id    : str  — Telegram chat id (the send target)
-      from       : str  — same chat id (sender identity for the session)
-      text       : str  — message body
-      name       : str  — sender display name
+      msg_id        : str  — "<update_id>" (unique per bot → dedup key)
+      chat_id       : str  — Telegram chat id (the send target)
+      from          : str  — same chat id (sender identity for the session)
+      text          : str  — message body (caption for media)
+      name          : str  — sender display name
+      photo_file_id : str  — set when the message carries a photo; the handler
+                             resolves it to a stored image (else "").
+
+    A photo is surfaced with its largest file_id so the handler can download +
+    store it. Other media (documents, voice, video, stickers …) get a placeholder
+    text so the message still appears and the bot responds rather than going
+    silent — mirrors whatsapp.extract_messages.
     """
     if not isinstance(payload, dict):
         return []
-    update_id = payload.get("update_id")
     msg = payload.get("message") or payload.get("edited_message")
     if not isinstance(msg, dict):
         return []
-    text = str(msg.get("text") or msg.get("caption") or "").strip()
     chat = msg.get("chat") or {}
     chat_id = str(chat.get("id") or "").strip()
-    if not (text and chat_id):
+    if not chat_id:
         return []
-    frm = msg.get("from") or {}
-    return [{
+
+    update_id = payload.get("update_id")
+    base = {
         "msg_id":  str(update_id if update_id is not None else msg.get("message_id", "")),
         "chat_id": chat_id,
         "from":    chat_id,
-        "text":    text,
-        "name":    _sender_name(frm),
-    }]
+        "name":    _sender_name(msg.get("from") or {}),
+        "photo_file_id": "",
+    }
+    caption = str(msg.get("caption") or "").strip()
+
+    photo = msg.get("photo")
+    if isinstance(photo, list) and photo:
+        # PhotoSize array is ordered small→large; take the largest.
+        file_id = str((photo[-1] or {}).get("file_id") or "")
+        if file_id:
+            return [{**base, "text": caption, "photo_file_id": file_id}]
+
+    if any(k in msg for k in ("document", "video", "voice", "audio", "sticker", "animation")):
+        return [{**base, "text": caption or "📎 (أرسل العميل مرفقاً عبر تيليجرام)"}]
+
+    body = str(msg.get("text") or "").strip() or caption
+    if not body:
+        return []
+    return [{**base, "text": body}]
+
+
+async def fetch_media(token: str, file_id: str) -> tuple[bytes, str] | None:
+    """
+    Resolve a Telegram file_id → (raw_bytes, content_type). Two calls: getFile
+    (file_id → file_path) then a download from the file endpoint. Returns None on
+    any failure so the caller falls back to a placeholder. Never raises.
+    """
+    if not (token and file_id):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(_api(token, "getFile"), params={"file_id": file_id})
+            data = r.json()
+            if not (r.status_code < 400 and data.get("ok")):
+                return None
+            file_path = ((data.get("result") or {}).get("file_path") or "").strip()
+            if not file_path:
+                return None
+            fr = await client.get(f"{API_BASE}/file/bot{token}/{file_path}")
+            if fr.status_code >= 400 or not fr.content:
+                return None
+            ctype = (fr.headers.get("content-type") or "image/jpeg").split(";")[0].strip()
+            return fr.content, ctype
+    except Exception as exc:
+        print(f"[telegram] fetch_media error: {exc}")
+        return None
 
 
 def _split(text: str, limit: int) -> list[str]:

@@ -59,6 +59,43 @@ def test_extract_message_ignores_non_text(update):
     assert tg.extract_messages(update) == []
 
 
+def test_extract_photo_surfaces_largest_file_id_and_caption():
+    import telegram as tg
+    update = {
+        "update_id": 5,
+        "message": {
+            "message_id": 2, "from": {"id": 7, "first_name": "Noura"},
+            "chat": {"id": 7},
+            "photo": [
+                {"file_id": "small", "width": 90},
+                {"file_id": "big",   "width": 1280},   # largest = last
+            ],
+            "caption": "تصميمي",
+        },
+    }
+    out = tg.extract_messages(update)
+    assert len(out) == 1
+    assert out[0]["photo_file_id"] == "big"            # picks the largest size
+    assert out[0]["text"] == "تصميمي"                  # caption carried as text
+    assert out[0]["chat_id"] == "7"
+
+
+def test_extract_other_media_gets_placeholder_not_dropped():
+    import telegram as tg
+    for media_key in ("document", "voice", "video", "sticker"):
+        update = {"update_id": 1, "message": {
+            "from": {"id": 3}, "chat": {"id": 3}, media_key: {"file_id": "x"}}}
+        out = tg.extract_messages(update)
+        assert out and out[0]["text"]                  # placeholder text, not empty
+        assert out[0]["photo_file_id"] == ""
+
+
+async def test_fetch_media_returns_none_on_empty_inputs():
+    import telegram as tg
+    assert await tg.fetch_media("", "file") is None
+    assert await tg.fetch_media("123:tok", "") is None
+
+
 # ── bot id + split ────────────────────────────────────────────────────────────
 
 def test_bot_id_from_token():

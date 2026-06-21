@@ -125,6 +125,21 @@ async def _deliver_outbox_row(row: dict) -> None:
             raise RuntimeError("whatsapp send failed (see whatsapp.py log)")
         return
 
+    if kind == "telegram_send":
+        import telegram as tg
+        import store_manager as sm
+        cfg     = sm.get_ai_config(store_id) or {}
+        token   = (cfg.get("telegram_bot_token") or "").strip()
+        chat_id = payload.get("chat_id", "")
+        text    = payload.get("text", "")
+        if not (token and chat_id and text):
+            print(f"[outbox] telegram_send skipped (store={store_id}): missing config")
+            return
+        ok = await tg.send_text(token, chat_id, text)
+        if not ok:
+            raise RuntimeError("telegram send failed (see telegram.py log)")
+        return
+
     raise ValueError(f"unknown outbox kind: {kind!r}")
 
 
