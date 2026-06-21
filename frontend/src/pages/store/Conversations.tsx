@@ -47,9 +47,27 @@ function IgIcon({ size = 12 }: { size?: number }) {
   )
 }
 
+function TgIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="#229ED9" className="flex-shrink-0">
+      <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+    </svg>
+  )
+}
+
+function MsgrIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="#0084FF" className="flex-shrink-0">
+      <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.44 3.14 7.17.16.14.26.35.27.57l.05 1.78c.02.57.6.94 1.12.71l1.99-.88c.17-.07.36-.09.53-.04.91.25 1.88.39 2.9.39 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm6.01 7.46l-2.93 4.66c-.47.74-1.47.93-2.18.4l-2.33-1.75a.6.6 0 00-.72 0l-3.15 2.39c-.42.32-.97-.18-.69-.63l2.93-4.66c.47-.74 1.47-.93 2.18-.4l2.33 1.75c.21.16.51.16.72 0l3.15-2.39c.42-.32.97.18.69.63z" />
+    </svg>
+  )
+}
+
 function detectChannel(c: { channel?: string; session_id: string }): string {
   if (c.channel === 'whatsapp' || c.session_id.startsWith('wa:'))        return 'whatsapp'
+  if (c.channel === 'telegram' || c.session_id.startsWith('tg:'))        return 'telegram'
   if (c.channel === 'instagram' || c.session_id.startsWith('ig:'))       return 'instagram'
+  if (c.channel === 'messenger' || c.session_id.startsWith('msgr:'))     return 'messenger'
   if (c.channel === 'widget'    || c.session_id.startsWith('widget:'))   return 'widget'
   return c.channel || 'widget'
 }
@@ -75,7 +93,9 @@ function customerDisplayName(c: { customer_info?: { name?: string; phone?: strin
   if (ci?.name)  return ci.name
   if (ci?.phone) return ci.phone
   if (c.session_id.startsWith('wa:')) return '+' + c.session_id.slice(3)
-  return `جلسة ${c.session_id.slice(0, 8)}`
+  // Strip a known channel prefix so the fallback reads cleanly (no "tg:"/"msgr:").
+  const bare = c.session_id.replace(/^(tg|msgr|ig|widget):/, '')
+  return `جلسة ${bare.slice(0, 8)}`
 }
 
 function renderMessageBody(content: string): React.ReactNode {
@@ -395,7 +415,9 @@ export default function Conversations({ storeId }: Props) {
 
   function channelLabel(ch: string): string {
     if (ch === 'whatsapp')  return aiConfig?.whatsapp_phone_id ? `+${aiConfig.whatsapp_phone_id}` : 'واتساب'
+    if (ch === 'telegram')  return 'تيليجرام'
     if (ch === 'instagram') return aiConfig?.ig_username || 'إنستقرام'
+    if (ch === 'messenger') return 'ماسنجر'
     return 'ويدجت'
   }
 
@@ -724,7 +746,8 @@ export default function Conversations({ storeId }: Props) {
           <div className="px-4 py-1.5 flex gap-1.5 flex-wrap border-b border-divider/40">
             {channelFilter && (
               <span className="flex items-center gap-1 text-[10px] bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded-full">
-                {channelFilter === 'whatsapp' ? <WaIcon size={9} /> : channelFilter === 'instagram' ? <IgIcon size={9} /> :
+                {channelFilter === 'whatsapp' ? <WaIcon size={9} /> : channelFilter === 'telegram' ? <TgIcon size={9} /> :
+                  channelFilter === 'instagram' ? <IgIcon size={9} /> : channelFilter === 'messenger' ? <MsgrIcon size={9} /> :
                   <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" size={9} className="text-indigo-400" />}
                 {channelLabel(channelFilter)}
                 <button onClick={() => setChannelFilter(null)} className="hover:text-white ml-0.5">✕</button>
@@ -786,7 +809,9 @@ export default function Conversations({ storeId }: Props) {
                       {/* Line 1: channel icon + label */}
                       <div className="flex items-center gap-1.5 mb-1">
                         {ch === 'whatsapp'  ? <WaIcon size={11} /> :
-                         ch === 'instagram' ? <IgIcon size={11} /> : (
+                         ch === 'telegram'  ? <TgIcon size={11} /> :
+                         ch === 'instagram' ? <IgIcon size={11} /> :
+                         ch === 'messenger' ? <MsgrIcon size={11} /> : (
                           <Icon paths="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
                                 size={11} className="text-indigo-400 flex-shrink-0" />
                         )}
