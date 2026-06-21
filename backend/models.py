@@ -122,6 +122,12 @@ class AccountEmailRequest(BaseModel):
     email: str
 
 
+class AccountEmailVerifyRequest(BaseModel):
+    email:     str
+    challenge: str
+    code:      str
+
+
 # ── Settings ─────────────────────────────────────────────────────────────
 
 class AIConfigRequest(BaseModel):

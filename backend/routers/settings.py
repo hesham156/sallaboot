@@ -18,6 +18,7 @@ import notifications as _notif
 from models import (
     AIConfigRequest, CustomKnowledgeRequest, TrainingTextRequest,
     NotificationSettingsRequest, PasswordChangeRequest, AccountEmailRequest,
+    AccountEmailVerifyRequest,
 )
 from routers.deps import (
     audit, CONTENT_TYPES, MAX_FILE_MB, UPLOAD_DIR, read_upload_bounded,
@@ -1092,38 +1093,62 @@ async def change_store_password(store_id: str, req: PasswordChangeRequest, reque
 
 import re as _re
 _EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_CHANGE_EMAIL_PURPOSE = "change_email"
 
 
-@router.put("/admin/{store_id}/settings/account-email")
-async def change_account_email(store_id: str, req: AccountEmailRequest, request: Request):
-    """Change the store's account email (the signup email). Owner-only.
-
-    This is the email used for login and the default notification address,
-    so changing it routes future notifications to the new address.
-    """
-    if not sm.is_registered(store_id):
-        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
-    require_store_owner(request, store_id)
-
-    email = (req.email or "").strip().lower()
-    if not _EMAIL_RE.match(email):
+async def _validate_new_account_email(store_id: str, raw_email: str) -> str:
+    """Normalise + validate a candidate account email. Raises HTTPException
+    on bad format / collision. Returns the clean lowercase email."""
+    email = (raw_email or "").strip().lower()
+    if not _EMAIL_RE.match(email) or len(email) > 254:
         raise HTTPException(400, "صيغة البريد الإلكتروني غير صحيحة")
-    if len(email) > 254:
-        raise HTTPException(400, "البريد الإلكتروني طويل جداً")
-
     # Uniqueness: an email must resolve to exactly one account.
     other = await db.find_store_by_owner_email(email)
     if other and other != store_id:
         raise HTTPException(409, "هذا البريد مستخدم في حساب آخر")
+    return email
+
+
+@router.post("/admin/{store_id}/settings/account-email/request-otp")
+async def request_account_email_otp(store_id: str, req: AccountEmailRequest, request: Request):
+    """Step 1 of changing the account email: send a 6-digit code to the NEW
+    address to prove the owner controls it. Owner-only. Returns a signed
+    challenge the client echoes back at verify-otp (stateless — no DB row)."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    require_store_owner(request, store_id)
+
+    email = await _validate_new_account_email(store_id, req.email)
+    if email == sm.get_owner_email(store_id):
+        raise HTTPException(400, "هذا هو بريدك الحالي بالفعل")
+
+    code      = _auth.generate_otp_code()
+    challenge = _auth.make_otp_challenge(email, _CHANGE_EMAIL_PURPOSE, code)
+    if not await _notif.send_otp_email(email, code, _CHANGE_EMAIL_PURPOSE):
+        raise HTTPException(502, "تعذّر إرسال رمز التحقق إلى البريد الجديد. حاول لاحقاً.")
+    return {"otp_required": True, "challenge": challenge, "email": email}
+
+
+@router.post("/admin/{store_id}/settings/account-email/verify-otp")
+async def verify_account_email_otp(store_id: str, req: AccountEmailVerifyRequest, request: Request):
+    """Step 2: verify the code against the challenge, then apply the change.
+    Changing the email routes login + default notifications to the new one."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    require_store_owner(request, store_id)
+
+    email = await _validate_new_account_email(store_id, req.email)
+    if not _auth.verify_otp_challenge(req.challenge or "", email, _CHANGE_EMAIL_PURPOSE, req.code or ""):
+        raise HTTPException(400, "رمز التحقق غير صحيح أو منتهي الصلاحية")
 
     ok = await sm.set_owner_email(store_id, email)
     if not ok:
         raise HTTPException(503, "تعذّر حفظ البريد — تحقق من اتصال قاعدة البيانات")
 
     await audit(request, "change_account_email", target_store=store_id, details={
-        "email": email,
+        "email": email, "verified": True,
     })
-    return {"status": "ok", "email": email, "message": "تم تحديث بريد الحساب"}
+    return {"status": "ok", "email": email, "message": "تم تحديث بريد الحساب ✅"}
 
 
 # ── Token status / refresh ────────────────────────────────────────────────────

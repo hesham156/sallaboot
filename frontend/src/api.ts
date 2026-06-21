@@ -345,9 +345,14 @@ export const api = {
   // Password
   changePassword: (storeId: string, current_password: string, new_password: string) =>
     put(`/admin/${storeId}/settings/password`, { current_password, new_password }),
-  setAccountEmail: (storeId: string, email: string) =>
-    put<{ status: string; email: string; message: string }>(
-      `/admin/${storeId}/settings/account-email`, { email }),
+  // Changing the account email is OTP-verified: request a code to the NEW
+  // address, then verify it to apply the change.
+  requestAccountEmailOtp: (storeId: string, email: string) =>
+    post<{ otp_required: boolean; challenge: string; email: string }>(
+      `/admin/${storeId}/settings/account-email/request-otp`, { email }),
+  verifyAccountEmailOtp: (storeId: string, payload: { email: string; challenge: string; code: string }) =>
+    post<{ status: string; email: string; message: string }>(
+      `/admin/${storeId}/settings/account-email/verify-otp`, payload),
 
   // Token status
   tokenStatus: (storeId: string) =>

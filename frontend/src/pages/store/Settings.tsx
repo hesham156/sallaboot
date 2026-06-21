@@ -156,10 +156,15 @@ export default function Settings({ storeId }: Props) {
   const [refreshing, setRefreshing]   = useState(false)
   const [tokenMsg, setTokenMsg]       = useState('')
 
-  /* Account email (signup email — also the default notifications address) */
-  const [accountEmail, setAccountEmail] = useState('')
-  const [emailSaving, setEmailSaving]   = useState(false)
-  const [emailMsg, setEmailMsg]         = useState('')
+  /* Account email (signup email — also the default notifications address).
+     Changing it is OTP-verified: request a code to the new address, then
+     verify it to apply. */
+  const [accountEmail, setAccountEmail]   = useState('')
+  const [emailSaving, setEmailSaving]     = useState(false)
+  const [emailMsg, setEmailMsg]           = useState('')
+  const [emailStep, setEmailStep]         = useState<'idle' | 'otp'>('idle')
+  const [emailChallenge, setEmailChallenge] = useState('')
+  const [emailOtp, setEmailOtp]           = useState('')
 
   /* ── load ── */
   useEffect(() => { load() }, [storeId])
@@ -476,15 +481,34 @@ export default function Settings({ storeId }: Props) {
     finally { setRefreshing(false) }
   }
 
-  async function saveAccountEmail() {
+  async function requestEmailOtp() {
     setEmailSaving(true); setEmailMsg('')
     try {
-      const r = await api.setAccountEmail(storeId, accountEmail.trim())
+      const r = await api.requestAccountEmailOtp(storeId, accountEmail.trim())
+      setEmailChallenge(r.challenge); setEmailOtp(''); setEmailStep('otp')
+      setEmailMsg('📧 أرسلنا رمز تحقق إلى البريد الجديد')
+    } catch (e: unknown) {
+      setEmailMsg(e instanceof Error ? e.message : 'خطأ')
+    } finally { setEmailSaving(false) }
+  }
+
+  async function verifyEmailOtp() {
+    setEmailSaving(true); setEmailMsg('')
+    try {
+      const r = await api.verifyAccountEmailOtp(storeId, {
+        email: accountEmail.trim(), challenge: emailChallenge, code: emailOtp.trim(),
+      })
       setEmailMsg(r.message || '✅ تم التحديث')
+      setEmailStep('idle'); setEmailChallenge(''); setEmailOtp('')
       await load()   // refresh so the notifications tab picks up the new default
     } catch (e: unknown) {
       setEmailMsg(e instanceof Error ? e.message : 'خطأ')
     } finally { setEmailSaving(false) }
+  }
+
+  function cancelEmailChange() {
+    setEmailStep('idle'); setEmailChallenge(''); setEmailOtp(''); setEmailMsg('')
+    setAccountEmail(notif.account_email || '')
   }
 
   /* ── derived ── */
@@ -1269,26 +1293,56 @@ export default function Settings({ storeId }: Props) {
         {tab === 'security' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
 
-            {/* Account email */}
+            {/* Account email (OTP-verified change) */}
             <section className="lg:col-span-2">
               <label className="text-xs font-bold text-default-500 block mb-2">بريد الحساب</label>
               <div className="bg-content2 rounded-xl border border-divider p-4 space-y-3">
                 <p className="text-xs text-default-400 leading-relaxed">
                   هذا هو البريد الذي سجّلت به، ويُستخدم لتسجيل الدخول وكعنوان افتراضي
-                  لإشعارات البريد. تغييره يوجّه الإشعارات إلى البريد الجديد.
+                  لإشعارات البريد. لتغييره سنرسل رمز تحقق إلى البريد الجديد للتأكد أنه يخصّك.
                 </p>
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-                  <div className="flex-1">
-                    <TextField label="" type="email" dir="ltr"
-                      value={accountEmail} onChange={setAccountEmail}
-                      placeholder="owner@store.com" />
+
+                {emailStep === 'idle' ? (
+                  <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                    <div className="flex-1">
+                      <TextField label="" type="email" dir="ltr"
+                        value={accountEmail} onChange={setAccountEmail}
+                        placeholder="owner@store.com" />
+                    </div>
+                    <Button color="primary" isLoading={emailSaving} onPress={requestEmailOtp}
+                      isDisabled={!accountEmail.trim() || accountEmail.trim() === (notif.account_email || '')}
+                      className="font-semibold h-12 sm:w-40">
+                      {emailSaving ? '' : 'إرسال رمز التحقق'}
+                    </Button>
                   </div>
-                  <Button color="primary" isLoading={emailSaving} onPress={saveAccountEmail}
-                    isDisabled={!accountEmail.trim() || accountEmail.trim() === (notif.account_email || '')}
-                    className="font-semibold h-12 sm:w-32">
-                    {emailSaving ? '' : 'حفظ البريد'}
-                  </Button>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-default-500">
+                      أدخل الرمز المرسَل إلى <b className="text-foreground" dir="ltr">{accountEmail}</b>
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                      <div className="flex-1">
+                        <TextField label="" dir="ltr"
+                          value={emailOtp} onChange={(v) => setEmailOtp(v.replace(/\D/g, '').slice(0, 6))}
+                          placeholder="######" />
+                      </div>
+                      <Button color="success" isLoading={emailSaving} onPress={verifyEmailOtp}
+                        isDisabled={emailOtp.trim().length !== 6}
+                        className="font-semibold h-12 sm:w-40 text-white">
+                        {emailSaving ? '' : 'تأكيد وتغيير'}
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button onClick={cancelEmailChange} className="text-xs text-default-400 hover:text-foreground">
+                        إلغاء
+                      </button>
+                      <button onClick={requestEmailOtp} disabled={emailSaving}
+                        className="text-xs text-primary hover:underline disabled:opacity-50">
+                        إعادة إرسال الرمز
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <InlineAlert text={emailMsg} />
               </div>
             </section>

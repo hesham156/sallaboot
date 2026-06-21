@@ -205,7 +205,10 @@ async def _send_email(to: str, subject: str, html: str) -> bool:
 async def send_otp_email(to: str, code: str, purpose: str = "login") -> bool:
     """Email a 6-digit verification code (signup confirmation / login 2FA).
     Returns True if Resend accepted it (False when email isn't configured)."""
-    title = "تأكيد إنشاء الحساب" if purpose == "signup" else "رمز تسجيل الدخول"
+    title = {
+        "signup":       "تأكيد إنشاء الحساب",
+        "change_email": "تأكيد تغيير البريد الإلكتروني",
+    }.get(purpose, "رمز تسجيل الدخول")
     html = (
         '<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;max-width:480px;'
         'margin:0 auto;padding:24px">'
