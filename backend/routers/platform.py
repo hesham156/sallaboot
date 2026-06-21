@@ -19,7 +19,123 @@ async def support_access_status(store_id: str):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     active  = await db.support_access_active(store_id)
     history = await db.support_access_list(store_id, limit=50)
-    return {"active": active, "history": history}
+    pending = await db.support_access_pending(store_id)
+    return {"active": active, "pending": pending, "history": history}
+
+
+def _decider_label(request: Request, store_id: str) -> str:
+    """Who is approving/rejecting — 'owner' or 'emp:<id>'. Only the store's
+    owner or a manager may decide; super (the requester) and agents are
+    rejected."""
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if claims.get("su"):
+        # The super admin is the REQUESTER — they must not decide their own
+        # request. Only a store-side owner/manager can.
+        raise HTTPException(403, "طلب الوصول يقرّره صاحب المتجر أو المدير، لا المدير العام")
+    # Tenant binding: token must belong to THIS store.
+    if (claims.get("s") or "") != store_id:
+        raise HTTPException(403, "غير مصرح لك بالوصول")
+    if claims.get("eid"):
+        if claims.get("er", "agent") != "manager":
+            raise HTTPException(403, "الموافقة متاحة لصاحب المتجر أو المدير فقط")
+        return f"emp:{claims.get('eid')}"
+    return "owner"
+
+
+@router.post("/admin/{store_id}/support-access/request")
+async def support_access_request_endpoint(store_id: str, request: Request):
+    """A platform super-admin requests time-boxed access; the owner decides.
+
+    Reachable cross-store without an existing grant because the middleware
+    exempts the /support-access subtree from the JIT gate.
+    """
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if not claims.get("su"):
+        raise HTTPException(403, "طلب الوصول متاح للمدير العام فقط")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    note = str((body or {}).get("note") or "")[:500]
+    requested_by = str(claims.get("email") or claims.get("sub") or "super-admin")[:200]
+
+    # One open request at a time — don't spam the owner with duplicates.
+    existing = await db.support_access_pending(store_id)
+    if existing:
+        return existing[0]
+
+    req = await db.support_access_request(store_id, requested_by=requested_by, note=note)
+    if not req:
+        raise HTTPException(503, "تعذّر إنشاء الطلب — تحقق من اتصال قاعدة البيانات")
+
+    await audit(request, "support_access_requested", target_store=store_id, details={
+        "request_id":   req["id"],
+        "requested_by": requested_by,
+        "note":         note[:120],
+    })
+    # Best-effort notification to the merchant (email/webhook per their settings).
+    try:
+        import notifications as _notif
+        await _notif.notify(store_id, "support_access_requested", {
+            "requested_by": requested_by, "note": note,
+        })
+    except Exception as exc:
+        print(f"[support-access] notify failed: {exc}")
+
+    return req
+
+
+@router.post("/admin/{store_id}/support-access/{grant_id}/approve")
+async def support_access_approve_endpoint(store_id: str, grant_id: int, request: Request):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    decided_by = _decider_label(request, store_id)   # owner/manager only (raises on super)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        duration = int((body or {}).get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "duration_minutes must be an integer")
+    if duration <= 0 or duration > 24 * 60:
+        raise HTTPException(400, "duration_minutes must be in 1..1440")
+
+    grant = await db.support_access_approve(
+        grant_id, store_id, decided_by=decided_by, duration_minutes=duration,
+    )
+    if not grant:
+        raise HTTPException(404, "الطلب غير موجود أو تمّت معالجته بالفعل")
+
+    await audit(request, "support_access_approved", target_store=store_id, details={
+        "grant_id":         grant_id,
+        "duration_minutes": duration,
+        "expires_at":       grant["expires_at"],
+    })
+    return grant
+
+
+@router.post("/admin/{store_id}/support-access/{grant_id}/reject")
+async def support_access_reject_endpoint(store_id: str, grant_id: int, request: Request):
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    decided_by = _decider_label(request, store_id)   # owner/manager only (raises on super)
+
+    ok = await db.support_access_reject(grant_id, store_id, decided_by=decided_by)
+    if not ok:
+        raise HTTPException(404, "الطلب غير موجود أو تمّت معالجته بالفعل")
+
+    await audit(request, "support_access_rejected", target_store=store_id, details={
+        "grant_id": grant_id,
+    })
+    return {"status": "ok"}
 
 
 @router.post("/admin/{store_id}/support-access")

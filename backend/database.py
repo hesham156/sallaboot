@@ -358,11 +358,25 @@ async def _create_tables():
                 granted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 expires_at    TIMESTAMPTZ NOT NULL,
                 note          TEXT NOT NULL DEFAULT '',
-                revoked_at    TIMESTAMPTZ
+                revoked_at    TIMESTAMPTZ,
+                -- Admin-initiated request flow (added later; defaults keep
+                -- legacy owner-granted rows = immediately 'active').
+                status        TEXT NOT NULL DEFAULT 'active',  -- 'pending'|'active'|'rejected'
+                requested_by  TEXT,              -- super-admin id/email for requests
+                decided_by    TEXT,              -- who approved/rejected ("owner"|"emp:<id>")
+                decided_at    TIMESTAMPTZ
             );
+            -- Idempotent column adds for DBs created before the request flow.
+            ALTER TABLE support_access_grants ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+            ALTER TABLE support_access_grants ADD COLUMN IF NOT EXISTS requested_by TEXT;
+            ALTER TABLE support_access_grants ADD COLUMN IF NOT EXISTS decided_by TEXT;
+            ALTER TABLE support_access_grants ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
             CREATE INDEX IF NOT EXISTS idx_sag_store_active
                 ON support_access_grants (store_id, expires_at DESC)
                 WHERE revoked_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_sag_store_pending
+                ON support_access_grants (store_id)
+                WHERE status = 'pending';
 
             -- ── Audit log (sensitive admin actions) ──────────────────────
             -- One row per security-relevant write. Designed for compliance /
@@ -3010,6 +3024,7 @@ async def support_access_active(store_id: str) -> dict | None:
                 SELECT id, store_id, granted_by, granted_at, expires_at, note
                   FROM support_access_grants
                  WHERE store_id   = $1
+                   AND status     = 'active'
                    AND revoked_at IS NULL
                    AND expires_at > NOW()
                  ORDER BY expires_at ASC
@@ -3047,7 +3062,8 @@ async def support_access_list(store_id: str, *, limit: int = 50) -> list[dict]:
         async with _pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, store_id, granted_by, granted_at, expires_at, note, revoked_at
+                SELECT id, store_id, granted_by, granted_at, expires_at, note,
+                       revoked_at, status, requested_by, decided_by, decided_at
                   FROM support_access_grants
                  WHERE store_id = $1
                  ORDER BY granted_at DESC
@@ -3057,7 +3073,11 @@ async def support_access_list(store_id: str, *, limit: int = 50) -> list[dict]:
             )
         out = []
         for r in rows:
-            now_active = r["revoked_at"] is None and r["expires_at"] > _utcnow()
+            now_active = (
+                r["status"] == "active"
+                and r["revoked_at"] is None
+                and r["expires_at"] > _utcnow()
+            )
             out.append({
                 "id":           int(r["id"]),
                 "store_id":     r["store_id"],
@@ -3067,11 +3087,149 @@ async def support_access_list(store_id: str, *, limit: int = 50) -> list[dict]:
                 "note":         r["note"] or "",
                 "revoked_at":   _iso_z(r["revoked_at"]) or None,
                 "active":       now_active,
+                "status":       r["status"],
+                "requested_by": r["requested_by"],
+                "decided_by":   r["decided_by"],
+                "decided_at":   _iso_z(r["decided_at"]) or None,
             })
         return out
     except Exception as e:
         print(f"[db] support_access_list error: {e}")
         return []
+
+
+def _sag_row(row) -> dict:
+    """Shape a support_access_grants row into the API dict."""
+    now_active = (
+        row["status"] == "active"
+        and row["revoked_at"] is None
+        and row["expires_at"] > _utcnow()
+    )
+    return {
+        "id":           int(row["id"]),
+        "store_id":     row["store_id"],
+        "granted_by":   row["granted_by"],
+        "granted_at":   _iso_z(row["granted_at"]),
+        "expires_at":   _iso_z(row["expires_at"]),
+        "note":         row["note"] or "",
+        "revoked_at":   _iso_z(row["revoked_at"]) or None,
+        "active":       now_active,
+        "status":       row["status"],
+        "requested_by": row["requested_by"],
+        "decided_by":   row["decided_by"],
+        "decided_at":   _iso_z(row["decided_at"]) or None,
+    }
+
+
+async def support_access_request(
+    store_id: str, *, requested_by: str, note: str = "",
+) -> dict | None:
+    """
+    Create a PENDING access request (admin-initiated). It grants NO access
+    until an owner/manager approves — `expires_at` is set in the past and
+    `status='pending'` so support_access_active() never returns it.
+    """
+    if not _pool or not store_id:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO support_access_grants
+                    (store_id, granted_by, expires_at, note, status, requested_by)
+                VALUES ($1, '', NOW(), $2, 'pending', $3)
+                RETURNING id, store_id, granted_by, granted_at, expires_at, note,
+                          revoked_at, status, requested_by, decided_by, decided_at
+                """,
+                store_id, (note or "")[:500], (requested_by or "")[:200],
+            )
+        return _sag_row(row) if row else None
+    except Exception as e:
+        print(f"[db] support_access_request error: {e}")
+        return None
+
+
+async def support_access_pending(store_id: str) -> list[dict]:
+    """Open (pending) access requests for a store — for the owner to act on."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, store_id, granted_by, granted_at, expires_at, note,
+                       revoked_at, status, requested_by, decided_by, decided_at
+                  FROM support_access_grants
+                 WHERE store_id = $1 AND status = 'pending'
+                 ORDER BY granted_at DESC
+                """,
+                store_id,
+            )
+        return [_sag_row(r) for r in rows]
+    except Exception as e:
+        print(f"[db] support_access_pending error: {e}")
+        return []
+
+
+async def support_access_approve(
+    grant_id: int, store_id: str, *, decided_by: str, duration_minutes: int,
+) -> dict | None:
+    """
+    Approve a pending request → active grant. The owner chooses the
+    duration; the window starts NOW. Scoped to store_id + status='pending'
+    so a stale/foreign id can't be approved. Returns the row or None.
+    """
+    if not _pool:
+        return None
+    dur = max(1, min(int(duration_minutes or 60), _MAX_GRANT_DURATION_MINUTES))
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE support_access_grants
+                   SET status      = 'active',
+                       granted_at  = NOW(),
+                       expires_at  = NOW() + ($3 || ' minutes')::interval,
+                       decided_by  = $4,
+                       decided_at  = NOW()
+                 WHERE id = $1 AND store_id = $2 AND status = 'pending'
+                RETURNING id, store_id, granted_by, granted_at, expires_at, note,
+                          revoked_at, status, requested_by, decided_by, decided_at
+                """,
+                int(grant_id), store_id, str(dur), (decided_by or "")[:200],
+            )
+        return _sag_row(row) if row else None
+    except Exception as e:
+        print(f"[db] support_access_approve error: {e}")
+        return None
+
+
+async def support_access_reject(
+    grant_id: int, store_id: str, *, decided_by: str,
+) -> bool:
+    """Reject a pending request. Returns True if a pending row was updated."""
+    if not _pool:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE support_access_grants
+                   SET status     = 'rejected',
+                       revoked_at = NOW(),
+                       decided_by = $3,
+                       decided_at = NOW()
+                 WHERE id = $1 AND store_id = $2 AND status = 'pending'
+                """,
+                int(grant_id), store_id, (decided_by or "")[:200],
+            )
+        try:
+            return int(result.split()[-1]) > 0
+        except Exception:
+            return False
+    except Exception as e:
+        print(f"[db] support_access_reject error: {e}")
+        return False
 
 
 def _utcnow():

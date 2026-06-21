@@ -45,6 +45,7 @@ function fmtAbs(iso: string): string {
 
 export default function SupportAccess({ storeId }: Props) {
   const [active,  setActive]   = useState<SupportAccessGrant | null>(null)
+  const [pending, setPending]  = useState<SupportAccessGrant[]>([])
   const [history, setHistory]  = useState<SupportAccessGrant[]>([])
   const [loading, setLoading]  = useState(true)
   const [error,   setError]    = useState<string>('')
@@ -54,6 +55,13 @@ export default function SupportAccess({ storeId }: Props) {
   const [note,      setNote]      = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [grantErr,  setGrantErr]  = useState<string>('')
+
+  // Approve-request modal (owner picks the duration when approving).
+  const approve = useDisclosure()
+  const [approveReq,      setApproveReq]      = useState<SupportAccessGrant | null>(null)
+  const [approveDuration, setApproveDuration] = useState<string>('1h')
+  const [deciding,        setDeciding]        = useState(false)
+  const [decideErr,       setDecideErr]       = useState<string>('')
 
   // Tick once a minute so the relative countdown stays fresh without
   // hitting the API. Cheap — just rebinds the rendered string.
@@ -69,6 +77,7 @@ export default function SupportAccess({ storeId }: Props) {
     try {
       const res = await api.supportAccessStatus(storeId)
       setActive(res.active)
+      setPending(res.pending || [])
       setHistory(res.history)
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : (e instanceof Error ? e.message : '—'))
@@ -105,6 +114,38 @@ export default function SupportAccess({ storeId }: Props) {
     }
   }
 
+  function openApprove(reqRow: SupportAccessGrant) {
+    setApproveReq(reqRow)
+    setApproveDuration('1h')
+    setDecideErr('')
+    approve.onOpen()
+  }
+
+  async function submitApprove() {
+    if (!approveReq) return
+    setDecideErr('')
+    setDeciding(true)
+    try {
+      const minutes = DURATION_PRESETS.find(d => d.key === approveDuration)?.minutes ?? 60
+      await api.supportAccessApprove(storeId, approveReq.id, { duration_minutes: minutes })
+      approve.onClose()
+      await load()
+    } catch (e) {
+      setDecideErr(e instanceof ApiError ? e.detail : (e instanceof Error ? e.message : '—'))
+    } finally {
+      setDeciding(false)
+    }
+  }
+
+  async function reject(grantId: number) {
+    try {
+      await api.supportAccessReject(storeId, grantId)
+      await load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : (e instanceof Error ? e.message : '—'))
+    }
+  }
+
   const expiresInLabel = useMemo(
     () => (active ? fmtRel(active.expires_at, now) : ''),
     [active, now],
@@ -135,6 +176,53 @@ export default function SupportAccess({ storeId }: Props) {
         <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-sm">
           {error}
         </div>
+      )}
+
+      {/* ── Pending requests (admin asked, owner decides) ─────────────── */}
+      {pending.length > 0 && (
+        <Card className="border border-warning/40">
+          <CardHeader className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-warning opacity-75 animate-ping" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+            </span>
+            <h3 className="font-bold">طلبات وصول بانتظار موافقتك ({pending.length})</h3>
+          </CardHeader>
+          <Divider />
+          <CardBody className="space-y-3">
+            <p className="text-xs text-default-500">
+              طلب فريق المنصة الدخول لمساعدتك. لن يتمكّن أحد من الدخول قبل موافقتك،
+              وأنت تحدّد المدة.
+            </p>
+            {pending.map((r) => (
+              <div key={r.id} className="border border-divider rounded-xl px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="text-sm">
+                    <span className="font-semibold text-foreground">
+                      {r.requested_by || 'فريق الدعم'}
+                    </span>
+                    <span className="text-xs text-default-400 mr-2">{fmtAbs(r.granted_at)}</span>
+                  </div>
+                  <Chip size="sm" color="warning" variant="flat">بانتظار القرار</Chip>
+                </div>
+                {r.note && (
+                  <p className="text-xs text-default-500 bg-content2 rounded-lg px-3 py-2">
+                    <span className="text-default-400">السبب: </span>{r.note}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 pt-1">
+                  <Button size="sm" color="success" className="font-bold text-white"
+                    onPress={() => openApprove(r)}>
+                    موافقة وتحديد المدة
+                  </Button>
+                  <Button size="sm" color="danger" variant="flat" onPress={() => reject(r.id)}>
+                    رفض
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardBody>
+        </Card>
       )}
 
       {/* ── Active grant card ─────────────────────────────────────────── */}
@@ -268,6 +356,49 @@ export default function SupportAccess({ storeId }: Props) {
                 <Button variant="light" onPress={close} isDisabled={submitting}>إلغاء</Button>
                 <Button color="primary" onPress={submitGrant} isLoading={submitting}>
                   منح
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* ── Approve-request modal (owner picks duration) ──────────────── */}
+      <Modal isOpen={approve.isOpen} onOpenChange={approve.onOpenChange} placement="center" backdrop="blur" size="md">
+        <ModalContent>
+          {(close) => (
+            <>
+              <ModalHeader dir="rtl" className="flex flex-col gap-1">
+                <h3 className="font-bold">الموافقة على طلب الوصول</h3>
+                <p className="text-xs text-default-500 font-normal">
+                  اختر المدة المسموح بها. ينتهي الوصول تلقائياً بعدها — ويمكنك إلغاؤه في أي وقت.
+                </p>
+              </ModalHeader>
+              <ModalBody dir="rtl" className="space-y-3">
+                {approveReq?.note && (
+                  <p className="text-xs text-default-500 bg-content2 rounded-lg px-3 py-2">
+                    <span className="text-default-400">سبب الطلب: </span>{approveReq.note}
+                  </p>
+                )}
+                <Select
+                  label="مدة الوصول"
+                  selectedKeys={[approveDuration]}
+                  onSelectionChange={(keys) => setApproveDuration(Array.from(keys)[0] as string)}
+                >
+                  {DURATION_PRESETS.map((d) => (
+                    <SelectItem key={d.key}>{d.label}</SelectItem>
+                  ))}
+                </Select>
+                {decideErr && (
+                  <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                    {decideErr}
+                  </div>
+                )}
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={close} isDisabled={deciding}>إلغاء</Button>
+                <Button color="success" className="text-white" onPress={submitApprove} isLoading={deciding}>
+                  موافقة
                 </Button>
               </ModalFooter>
             </>

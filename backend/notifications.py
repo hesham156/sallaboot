@@ -355,8 +355,11 @@ async def notify(store_id: str, event: str, ctx: dict) -> None:
             "abandoned_cart":   "on_abandoned_cart",
             "low_rating":       "on_low_rating",
         }.get(event)
-        if event == "llm_budget_warning":
-            pass  # bypass gating — always notify
+        # Security-relevant events bypass per-trigger gating — the owner
+        # should always hear about an over-budget store or a support-access
+        # request (they can still disable email/webhook entirely to mute).
+        if event in ("llm_budget_warning", "support_access_requested"):
+            pass
         elif not gate_key or not n[gate_key]:
             return
 
@@ -424,6 +427,19 @@ async def deliver_outbox_row(store_id: str, payload: dict) -> None:
             used_today   = int(ctx.get("used_today", 0)),
             daily_budget = int(ctx.get("daily_budget", 0)),
             percent_used = float(ctx.get("percent_used", 0)),
+        )
+    elif event == "support_access_requested":
+        reason = (ctx.get("note") or "").strip()
+        subject = f"طلب وصول للدعم الفني — {store_name}"
+        html = (
+            f"<div style='font-family:Tahoma,Arial;direction:rtl;text-align:right'>"
+            f"<h2>طلب وصول جديد 🔐</h2>"
+            f"<p>طلب فريق المنصة إذناً مؤقتاً للدخول على لوحة متجر <b>{store_name}</b> "
+            f"لمساعدتك.</p>"
+            + (f"<p><b>السبب:</b> {reason}</p>" if reason else "")
+            + f"<p>افتح <b>وصول الدعم الفني</b> في لوحة التحكم للموافقة (مع تحديد "
+            f"المدة) أو الرفض. لن يتمكّن أحد من الدخول قبل موافقتك.</p>"
+            f"</div>"
         )
     else:
         return  # unknown event → silent ok

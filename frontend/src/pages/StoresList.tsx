@@ -97,6 +97,28 @@ export default function StoresList() {
   const [regLoading, setRegLoading]   = useState(false)
   const [regError, setRegError]       = useState('')
 
+  // Request-access flow (super asks the merchant for time-boxed access).
+  const reqModal = useDisclosure()
+  const [reqStore,   setReqStore]   = useState<StoreInfo | null>(null)
+  const [reqNote,    setReqNote]    = useState('')
+  const [reqSending, setReqSending] = useState(false)
+  const [reqError,   setReqError]   = useState('')
+
+  function openRequest(s: StoreInfo) {
+    setReqStore(s); setReqNote(''); setReqError(''); reqModal.onOpen()
+  }
+  async function sendRequest() {
+    if (!reqStore) return
+    setReqSending(true); setReqError('')
+    try {
+      await api.supportAccessRequest(reqStore.store_id, { note: reqNote })
+      reqModal.onClose()
+      setMsg(`تم إرسال طلب الوصول لصاحب متجر «${reqStore.store_name}» — بانتظار موافقته`)
+    } catch (e) {
+      setReqError(e instanceof Error ? e.message : 'تعذّر إرسال الطلب')
+    } finally { setReqSending(false) }
+  }
+
   useEffect(() => { loadData() }, [])
 
   const [dbTesting, setDbTesting] = useState(false)
@@ -500,6 +522,14 @@ export default function StoresList() {
                           <Icon paths={['M15 12H3', 'M13 18l6-6-6-6']} size={13} />
                         </button>
                       </Tooltip>
+                      <Tooltip content="طلب وصول من صاحب المتجر">
+                        <button
+                          onClick={() => openRequest(s)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                        >
+                          <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M16 11V7a4 4 0 00-8 0v4']} size={13} />
+                        </button>
+                      </Tooltip>
                       <Tooltip content="إعادة تعيين كلمة المرور">
                         <button
                           onClick={() => handleReset(s.store_id)}
@@ -579,6 +609,49 @@ export default function StoresList() {
             </Button>
             <Button color="primary" isLoading={regLoading} onPress={handleRegister} className="font-bold">
               تسجيل المتجر
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* ════════════════ REQUEST ACCESS MODAL ════════════════ */}
+      <Modal isOpen={reqModal.isOpen} onClose={reqModal.onClose} placement="center">
+        <ModalContent className="bg-content1 border border-divider" dir="rtl">
+          <ModalHeader className="text-foreground font-bold border-b border-divider pb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-emerald-500/15 rounded-xl flex items-center justify-center text-emerald-400">
+                <Icon paths={['M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z', 'M16 11V7a4 4 0 00-8 0v4']} size={15} />
+              </div>
+              طلب وصول لمتجر {reqStore?.store_name}
+            </div>
+          </ModalHeader>
+          <ModalBody className="gap-3 pt-4">
+            <p className="text-sm text-default-500 leading-relaxed">
+              سيصل الطلب لصاحب المتجر ليوافق (مع تحديد المدة) أو يرفض. لن تتمكّن من
+              الدخول قبل موافقته.
+            </p>
+            <Field label="سبب الطلب (اختياري)">
+              <Input
+                placeholder="مثلاً: متابعة بلاغ دعم #4221"
+                value={reqNote}
+                onValueChange={setReqNote}
+                variant="bordered"
+                classNames={{ inputWrapper: 'border-default-200 hover:border-default-300 bg-default-50 h-12 rounded-xl' }}
+              />
+            </Field>
+            {reqError && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 text-red-400 text-sm">
+                <Icon paths="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" size={15} className="flex-shrink-0" />
+                {reqError}
+              </div>
+            )}
+          </ModalBody>
+          <ModalFooter className="border-t border-divider pt-4">
+            <Button variant="flat" onPress={reqModal.onClose} className="text-default-400 bg-content2">
+              إلغاء
+            </Button>
+            <Button color="success" isLoading={reqSending} onPress={sendRequest} className="font-bold text-white">
+              إرسال الطلب
             </Button>
           </ModalFooter>
         </ModalContent>

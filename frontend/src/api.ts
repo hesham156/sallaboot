@@ -485,13 +485,20 @@ export const api = {
   // Both owner and super can READ (super needs to know if access exists);
   // only owner can mutate.
   supportAccessStatus: (storeId: string) =>
-    get<{ active: SupportAccessGrant | null; history: SupportAccessGrant[] }>(
+    get<{ active: SupportAccessGrant | null; pending: SupportAccessGrant[]; history: SupportAccessGrant[] }>(
       `/admin/${storeId}/support-access`,
     ),
   supportAccessGrant: (storeId: string, payload: { duration_minutes: number; note?: string }) =>
     post<SupportAccessGrant>(`/admin/${storeId}/support-access`, payload),
   supportAccessRevoke: (storeId: string, grantId: number) =>
     req<{ status: string }>('DELETE', `/admin/${storeId}/support-access/${grantId}`),
+  // Admin-initiated request flow
+  supportAccessRequest: (storeId: string, payload: { note?: string }) =>
+    post<SupportAccessGrant>(`/admin/${storeId}/support-access/request`, payload),
+  supportAccessApprove: (storeId: string, grantId: number, payload: { duration_minutes: number }) =>
+    post<SupportAccessGrant>(`/admin/${storeId}/support-access/${grantId}/approve`, payload),
+  supportAccessReject: (storeId: string, grantId: number) =>
+    post<{ status: string }>(`/admin/${storeId}/support-access/${grantId}/reject`, {}),
 
   // Super-admin: platform operations snapshot
   platformOps: () =>
@@ -1239,14 +1246,18 @@ export interface ChannelData {
 }
 
 export interface SupportAccessGrant {
-  id:          number
-  store_id:    string
-  granted_by:  string             // "owner" | "emp:<id>"
-  granted_at:  string             // ISO timestamp
-  expires_at:  string
-  note:        string
-  revoked_at:  string | null
-  active?:     boolean            // present on history rows; absent on POST response
+  id:           number
+  store_id:     string
+  granted_by:   string            // "owner" | "emp:<id>"
+  granted_at:   string            // ISO timestamp
+  expires_at:   string
+  note:         string
+  revoked_at:   string | null
+  active?:      boolean           // present on history rows; absent on POST response
+  status?:      'pending' | 'active' | 'rejected'
+  requested_by?: string | null    // super-admin id/email for admin-initiated requests
+  decided_by?:  string | null     // who approved/rejected
+  decided_at?:  string | null
 }
 
 // ── Audit log ──────────────────────────────────────────────────────────
