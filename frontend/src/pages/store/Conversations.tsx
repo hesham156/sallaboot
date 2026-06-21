@@ -139,7 +139,7 @@ function renderMessageBody(content: string): React.ReactNode {
   return parts.length > 0 ? parts : content
 }
 
-type ViewMode      = 'all' | 'mentions' | 'unattended' | 'chatbot'
+type ViewMode      = 'all' | 'mentions' | 'unattended' | 'chatbot' | 'needs_support'
 type ActiveTab     = 'mine' | 'unassigned' | 'all'
 type SortOrder     = 'last_activity' | 'newest' | 'oldest'
 type StatusFilter  = 'open' | 'unread' | 'bot' | 'human'
@@ -366,9 +366,10 @@ export default function Conversations({ storeId }: Props) {
 
   // 1. View-mode filter
   const viewFiltered: ConvSummary[] = (() => {
-    if (viewMode === 'unattended') return convs.filter(c => c.unread)
-    if (viewMode === 'chatbot')    return convs.filter(c => c.bot_enabled)
-    if (viewMode === 'mentions')   return []
+    if (viewMode === 'unattended')    return convs.filter(c => c.unread)
+    if (viewMode === 'chatbot')       return convs.filter(c => c.bot_enabled)
+    if (viewMode === 'needs_support') return convs.filter(c => c.needs_support)
+    if (viewMode === 'mentions')      return []
     return convs
   })()
 
@@ -441,6 +442,8 @@ export default function Conversations({ storeId }: Props) {
       icon: 'M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207' },
     { id: 'unattended', label: 'غير المتابعة',  count: unreadCount,
       icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { id: 'needs_support', label: 'تحتاج تدخل الدعم', count: convs.filter(c => c.needs_support).length,
+      icon: 'M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z' },
     { id: 'chatbot',    label: 'البوت',          count: convs.filter(c => c.bot_enabled).length,
       icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2h-2' },
   ]
@@ -828,6 +831,12 @@ export default function Conversations({ storeId }: Props) {
                                 size={11} className="text-indigo-400 flex-shrink-0" />
                         )}
                         <span className="text-[10px] text-slate-500">{channelLabel(ch)}</span>
+                        {c.needs_support && (
+                          <span className="ml-auto flex items-center gap-1 text-[9px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                            <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                            تحتاج دعم
+                          </span>
+                        )}
                       </div>
 
                       {/* Line 2: name + unread badge + time + assign btn */}

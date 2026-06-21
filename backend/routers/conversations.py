@@ -157,6 +157,9 @@ async def store_admin_reply(
             await cs.flush(session_id)
 
     await cs.mark_admin_read(session_id)
+    # Support has engaged → resolve any "needs support" escalation so the
+    # conversation leaves that queue.
+    await cs.clear_escalation(session_id)
     import bot_learning
     asyncio.create_task(bot_learning.capture_admin_correction(store_id, session_id, text))
 
@@ -197,6 +200,7 @@ async def store_takeover(store_id: str, session_id: str, request: Request):
     await _load_owned_conv(session_id, store_id, request)  # C-1
     await cs.set_session_bot(session_id, False)
     await cs.mark_admin_read(session_id)
+    await cs.clear_escalation(session_id)   # support stepped in → leave the queue
     await cs.flush(session_id)
     await realtime.publish(f"session:{session_id}", "bot_toggle", {
         "session_id":  session_id,

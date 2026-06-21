@@ -487,6 +487,7 @@ VALID_ESCALATION_REASONS = {
     "box_oversize",          # علب بمقاس فرد أكبر من 99×69
     "custom_finishing",      # تشطيب/مواصفة غير مسعّرة
     "vip_or_complaint",      # عميل VIP أو شكوى
+    "customer_image",        # العميل أرسل صورة/مرفقاً يحتاج مراجعة بشرية
     "other",                 # غير ذلك
 }
 
@@ -763,6 +764,8 @@ def _summarise_row(sid: str, store_id: str, conv: dict) -> dict:
             break
 
     cust = conv.get("customer_info") or {}
+    esc  = conv.get("escalation")
+    needs_support = bool(isinstance(esc, dict) and esc.get("reason") and not esc.get("resolved"))
     return {
         "session_id":          sid,
         # Prefer the conversations.store_id column (canonical), fall
@@ -772,6 +775,7 @@ def _summarise_row(sid: str, store_id: str, conv: dict) -> dict:
         "user_messages_count": user_count,
         "last_message":        last,
         "bot_enabled":         conv.get("bot_enabled", True),
+        "needs_support":       needs_support,
         "last_activity":       conv.get("last_activity", ""),
         "created_at":          conv.get("created_at", ""),
         "unread":              unread,

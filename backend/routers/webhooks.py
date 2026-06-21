@@ -1880,11 +1880,12 @@ async def handle_telegram_message(msg: dict):
         # admin inbox just like a widget / WhatsApp / Messenger chat.
         session_id = f"tg:{sender}"
 
-        # Inbound photo → download, store, and fold an inline image link into the
-        # message so it renders in the inbox AND the bot can react to it.
+        # A photo becomes an inline image link so it renders in the inbox; the bot
+        # can't see image content, so it's handled (acknowledge + escalate) below.
+        image_text = ""
         if photo_file_id:
-            text = await _telegram_store_photo(token, photo_file_id, store_id, session_id, text)
-        if not text:
+            image_text = await _telegram_store_photo(token, photo_file_id, store_id, session_id, text)
+        if not (text or image_text):
             return
 
         await cs.restore_to_memory(session_id)
@@ -1895,6 +1896,28 @@ async def handle_telegram_message(msg: dict):
                 "name":    msg.get("name", "") or info.get("name", ""),
                 "channel": "telegram",
             })
+
+        # Inbound photo → the bot can't see image content. Record it so it shows in
+        # the inbox, acknowledge gracefully, and ESCALATE to support (handoff) so a
+        # human reviews it — it surfaces in the "needs support" queue. Never the
+        # rude "don't share files here" the text model would otherwise produce.
+        if photo_file_id:
+            await cs.add_message(session_id, "user", image_text, store_id)
+            if cs.is_bot_enabled(session_id):
+                ack = (
+                    "شكراً لإرسال الصورة 📷 لا أستطيع الاطّلاع على محتوى الصور مباشرةً، "
+                    "لكن أحد ممثلي خدمة العملاء سيراجعها ويساعدك. "
+                    "أو اكتب لي اسم المنتج أو تفاصيل طلبك وأساعدك فوراً 🌷"
+                )
+                await cs.add_message(session_id, "assistant", ack, store_id)
+                await cs.escalate_session(
+                    session_id, reason="customer_image",
+                    details="أرسل العميل صورة تحتاج مراجعة بشرية.",
+                    customer_summary="📷 صورة من العميل",
+                )
+                await tg.send_text(token, chat_id, ack)
+                print(f"[telegram] 📷 photo → escalated to support (store {store_id})")
+            return
 
         # CSAT reply intercept — if the most-recent bot message was a CSAT survey
         # (sent by end-conversation), treat a numeric/label reply as the rating

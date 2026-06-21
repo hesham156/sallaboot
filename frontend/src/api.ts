@@ -648,8 +648,11 @@ export interface ConvSummary {
   bot_enabled: boolean
   unread: boolean
   rating?: number
+  // True when the bot handed off to a human (unresolved escalation) — e.g. the
+  // customer sent an image. Drives the "needs support" queue.
+  needs_support?: boolean
   // Channel the conversation arrived on. Absent on legacy rows.
-  channel?: 'widget' | 'whatsapp'
+  channel?: 'widget' | 'whatsapp' | 'telegram' | 'messenger' | 'instagram'
 }
 
 export interface CsatOption { value: number; label: string }
