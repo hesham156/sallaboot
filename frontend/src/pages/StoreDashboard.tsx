@@ -25,6 +25,7 @@ const CustomerSegments   = lazy(() => import('./store/CustomerSegments'))
 const Campaigns          = lazy(() => import('./store/Campaigns'))
 const Contacts           = lazy(() => import('./store/Contacts'))
 const Integrations       = lazy(() => import('./store/Integrations'))
+const Channels           = lazy(() => import('./store/Channels'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -190,6 +191,15 @@ const NAV_ITEMS: Array<{
     activeColor: 'text-indigo-400',
     activeBg: 'bg-indigo-500/10',
     activeBorder: 'border-r-indigo-500',
+    roles: ['owner', 'manager'],
+  },
+  {
+    key: 'channels',
+    label: 'القنوات',
+    icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
+    activeColor: 'text-sky-400',
+    activeBg: 'bg-sky-500/10',
+    activeBorder: 'border-r-sky-500',
     roles: ['owner', 'manager'],
   },
   {
@@ -680,6 +690,7 @@ export default function StoreDashboard() {
               <Route path="customer-segments"  element={<CustomerSegments  storeId={storeId} />} />
               <Route path="contacts"           element={<Contacts          storeId={storeId} />} />
               <Route path="integrations"      element={<Integrations      storeId={storeId} />} />
+              <Route path="channels"          element={<Channels          storeId={storeId} />} />
               <Route path="campaigns"          element={<Campaigns         storeId={storeId} />} />
               <Route path="whatsapp-templates" element={<WhatsAppTemplates storeId={storeId} />} />
               <Route path="whatsapp-events" element={<WhatsAppEvents    storeId={storeId} />} />

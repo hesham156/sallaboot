@@ -49,7 +49,7 @@ def _is_browser_navigation(request: Request) -> bool:
 # endpoints themselves).
 
 _PROTECTED_RE = re.compile(
-    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log|support-access|whatsapp|meta|segments|integrations|api-key)"
+    r"^/admin/(?!stores$|auth/)([^/]+)/(conversations|bot|sync|products|debug|settings|webhooks|abandoned-carts|analytics|orders|info|employees|llm-usage|llm-budget|audit-log|support-access|whatsapp|meta|segments|integrations|channels|api-key)"
 )
 _SUPER_PROTECTED_RE = re.compile(r"^/admin/stores$")
 
