@@ -1527,6 +1527,25 @@ async def find_store_by_owner_email(email: str) -> str | None:
         return None
 
 
+async def get_store_owner_email(store_id: str) -> str | None:
+    """Return the owner_email for *store_id*, or None if not found / not set."""
+    if not _pool:
+        return None
+    sid = (store_id or "").strip()
+    if not sid:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT owner_email FROM stores WHERE store_id = $1 LIMIT 1",
+                sid,
+            )
+        return row["owner_email"] if row else None
+    except Exception as ex:
+        print(f"[db] get_store_owner_email error: {ex}")
+        return None
+
+
 async def find_employee_by_email_any_store(email: str) -> dict | None:
     """
     Find an active employee by email across ALL stores. Used by the

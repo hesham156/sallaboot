@@ -106,7 +106,7 @@ export default function Login() {
     if (loading) return
     setError('')
     const addr = forgotEmail.trim() || email.trim()
-    if (!addr || !addr.includes('@')) { setError('يرجى إدخال بريد إلكتروني صحيح'); return }
+    if (!addr) { setError('يرجى إدخال البريد الإلكتروني أو معرّف المتجر'); return }
     setLoading(true)
     try {
       await api.forgotPassword(addr)
@@ -238,10 +238,10 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
+                <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني أو معرّف المتجر</label>
                 <Input
-                  placeholder="you@example.com"
-                  type="email"
+                  placeholder="you@example.com أو store_id"
+                  type="text"
                   value={forgotEmail}
                   onValueChange={v => { setForgotEmail(v); setError('') }}
                   variant="bordered"

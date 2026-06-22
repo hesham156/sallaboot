@@ -495,17 +495,31 @@ async def verify_store_token(store_id: str, request: Request):
 @router.post("/auth/forgot-password")
 async def forgot_password(req: ForgotPasswordRequest, request: Request):
     """
-    Send a password-reset link to the given email.
-    Always returns 200 so callers cannot probe whether an email is registered.
+    Send a password-reset link to the given email or store-id.
+    Always returns 200 so callers cannot probe whether an account exists.
     """
     ip    = request.client.host if request.client else "unknown"
-    email = (req.email or "").strip().lower()
+    raw   = (req.email or "").strip()
 
-    if not email or "@" not in email:
-        raise HTTPException(400, "البريد الإلكتروني غير صالح")
+    if not raw:
+        raise HTTPException(400, "يرجى إدخال البريد الإلكتروني أو معرّف المتجر")
 
-    if await _is_rate_limited(f"forgot:{email}", max_attempts=3, window=600):
+    if await _is_rate_limited(f"forgot:{raw.lower()}", max_attempts=3, window=600):
         raise HTTPException(429, "طلبات كثيرة جداً. انتظر 10 دقائق وحاول مجدداً.")
+
+    # Resolve the email address to send to
+    if "@" in raw:
+        # Input is an email address
+        email = raw.lower()
+    else:
+        # Input is a store_id — look up its owner email
+        owner_email = await db.get_store_owner_email(raw)
+        if not owner_email:
+            # Could also be an employee — but employees don't have a store_id login.
+            # Silently succeed so we don't reveal whether a store_id exists.
+            print(f"[auth] 🔑 Forgot password for unknown store_id {raw!r} — silently ignored")
+            return {"ok": True, "message": "إذا كان المعرّف مسجّلاً، ستصلك رسالة بتعليمات إعادة التعيين."}
+        email = owner_email.strip().lower()
 
     token     = _auth.make_reset_token(email)
     reset_url = f"{os.getenv('BASE_URL', 'https://7ayak.app')}/reset-password?token={token}"
@@ -516,9 +530,9 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
         await _notif.send_password_reset_email(email, reset_url)
         print(f"[auth] 🔑 Password reset email sent to {email!r} from {ip}")
     else:
-        print(f"[auth] 🔑 Password reset for unknown email {email!r} — silently ignored")
+        print(f"[auth] 🔑 Forgot password for unknown email {email!r} — silently ignored")
 
-    return {"ok": True, "message": "إذا كان البريد الإلكتروني مسجّلاً، ستصلك رسالة بتعليمات إعادة التعيين."}
+    return {"ok": True, "message": "إذا كان الحساب مسجّلاً، ستصلك رسالة بتعليمات إعادة التعيين."}
 
 
 @router.post("/auth/reset-password")
