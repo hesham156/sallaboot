@@ -28,6 +28,7 @@ backend/uploads/
 
 # Multi-tenant store data (contains access tokens — never commit)
 backend/data/
+!backend/data/sallabot_knowledge.md
 
 # Legacy single-store token file
 backend/tokens.json
