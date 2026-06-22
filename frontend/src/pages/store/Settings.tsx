@@ -48,7 +48,7 @@ const MODELS: Record<ProviderKey, string[]> = {
   groq:      ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
   anthropic: ['claude-sonnet-4-6', 'claude-3-5-haiku-20241022', 'claude-opus-4-5'],
   openai:    ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
-  naraya:    ['minimax-m3'],
+  naraya:    ['minimax-m3', 'deepseek'],
 }
 const ACCENT: Record<string, { btn: string; ring: string }> = {
   orange:  { btn: 'bg-orange-500/12 border-orange-500/40 text-orange-300',   ring: 'ring-orange-500/30'  },

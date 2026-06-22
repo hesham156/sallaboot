@@ -395,6 +395,10 @@ async def chat(req: ChatRequest, request: Request):
             or "incorrect api key" in err_lower or "invalid_api_key" in err_lower
         ):
             friendly = "عذراً، هناك مشكلة في مفتاح API للذكاء الاصطناعي. يرجى مراجعة الإعدادات من لوحة التحكم. 🔑"
+        elif "payment" in err_lower or "402" in err_lower or "insufficient" in err_lower or "balance" in err_lower:
+            friendly = "عذراً، رصيد مزوّد الذكاء الاصطناعي نفد. يرجى شحن الرصيد من لوحة التحكم الخاصة بالمزوّد. 💳"
+        elif "503" in err_lower or "service unavailable" in err_lower or "service_unavailable" in err_lower:
+            friendly = "عذراً، خدمة الذكاء الاصطناعي غير متاحة مؤقتاً. جرّب موديلاً مختلفاً أو حاول لاحقاً. 🔧"
         elif "rate" in err_lower or "429" in err_lower or "quota" in err_lower:
             friendly = "عذراً، المساعد مشغول الآن بسبب الضغط الزائد. انتظر لحظة وحاول مجدداً. ⏳"
         elif "timeout" in err_lower or "connect" in err_lower or "connection" in err_lower:
