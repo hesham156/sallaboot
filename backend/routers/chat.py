@@ -384,6 +384,12 @@ async def chat(req: ChatRequest, request: Request):
         })
         err_lower = err_msg.lower()
         if (
+            "404" in err_lower or "not_found" in err_lower
+            or ("model" in err_lower and "not exist" in err_lower)
+            or ("model" in err_lower and "not found" in err_lower)
+        ):
+            friendly = "عذراً، الموديل المحدد غير متاح على هذا المزوّد. يرجى تغيير الموديل من إعدادات الذكاء الاصطناعي. ⚙️"
+        elif (
             "401" in err_lower or "authentication" in err_lower
             or ("invalid" in err_lower and "key" in err_lower)
             or "incorrect api key" in err_lower or "invalid_api_key" in err_lower
