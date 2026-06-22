@@ -220,10 +220,15 @@ async def store_add_note(
     # the note. Longest names first so "@محمد علي" wins over "@محمد".
     employees = await db.list_employees(store_id)
     mentions: list[dict] = []
+    # Match longest names first and CONSUME each hit from a working copy so a
+    # shorter name that is a prefix of another ("@محمد" inside "@محمد علي") isn't
+    # falsely mentioned too.
+    remaining = text
     for e in sorted(employees, key=lambda x: len(str(x.get("name") or "")), reverse=True):
         nm = (e.get("name") or "").strip()
-        if nm and f"@{nm}" in text:
+        if nm and f"@{nm}" in remaining:
             mentions.append({"id": e.get("id"), "name": nm})
+            remaining = remaining.replace(f"@{nm}", " ")
 
     msg = await cs.add_message(session_id, "note", text, store_id)
     conv = cs.all_conversations().get(session_id)

@@ -150,6 +150,11 @@ async def chat_stream(session_id: str):
             if etype == "_heartbeat":
                 yield ": heartbeat\n\n"
                 continue
+            # Internal staff notes (@mentions) are pushed on the same session
+            # channel for the admin dashboard — they must NEVER reach the
+            # customer's widget. Drop them here (this stream is public/customer-side).
+            if etype == "note_message":
+                continue
             yield _format_sse(etype, event["data"])
 
     return StreamingResponse(
