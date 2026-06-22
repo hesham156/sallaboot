@@ -134,6 +134,7 @@ class AIConfigRequest(BaseModel):
     groq_api_key:      Optional[str] = ""
     anthropic_api_key: Optional[str] = ""
     openai_api_key:    Optional[str] = ""  # sk-proj-...
+    naraya_api_key:    Optional[str] = ""  # sk-nry-... (router.naraya.ai)
     ai_model:          Optional[str] = ""  # e.g. "gpt-4o", "llama-3.3-70b-versatile", "claude-sonnet-4-6"
     bot_name:          Optional[str] = ""
     store_type:        Optional[str] = None  # "printing" | "general" — gates printing features

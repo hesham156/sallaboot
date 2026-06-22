@@ -1185,7 +1185,8 @@ class PrintingAgent:
         has_per_store_key = bool(
             ai_cfg.get("groq_api_key")      or
             ai_cfg.get("anthropic_api_key") or
-            ai_cfg.get("openai_api_key")
+            ai_cfg.get("openai_api_key")    or
+            ai_cfg.get("naraya_api_key")
         )
 
         if has_per_store_key:
@@ -1193,11 +1194,13 @@ class PrintingAgent:
             groq_key      = ai_cfg.get("groq_api_key",      "").strip()
             anthropic_key = ai_cfg.get("anthropic_api_key", "").strip()
             openai_key    = ai_cfg.get("openai_api_key",    "").strip()
+            naraya_key    = ai_cfg.get("naraya_api_key",    "").strip()
         else:
             # No per-store keys at all — fall back to global env vars
             groq_key      = os.getenv("GROQ_API_KEY",      "")
             anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
             openai_key    = os.getenv("OPENAI_API_KEY",    "")
+            naraya_key    = os.getenv("NARAYA_API_KEY",    "")
 
         self._bot_name = ai_cfg.get("bot_name", "").strip()
 
@@ -1227,6 +1230,7 @@ class PrintingAgent:
         self._groq_model      = (cfg_model if ai_cfg.get("groq_api_key")      else "") or "llama-3.3-70b-versatile"
         self._anthropic_model = (cfg_model if ai_cfg.get("anthropic_api_key") else "") or "claude-sonnet-4-6"
         self._openai_model    = (cfg_model if ai_cfg.get("openai_api_key")    else "") or "gpt-4o-mini"
+        self._naraya_model    = (cfg_model if ai_cfg.get("naraya_api_key")    else "") or "minimax-m3"
 
         # Resilience: all three SDKs (Anthropic/Groq/OpenAI) retry 429/5xx/408/409
         # with exponential backoff + jitter and honour the Retry-After header.
@@ -1235,7 +1239,7 @@ class PrintingAgent:
         _MAX_RETRIES = 4
         _TIMEOUT     = 45.0   # seconds per request
 
-        # Provider priority: Groq → Anthropic → OpenAI (fallback to env vars)
+        # Provider priority: Groq → Anthropic → OpenAI → Naraya (fallback to env vars)
         if groq_key:
             self.provider       = "groq"
             self.groq_client    = AsyncGroq(api_key=groq_key, max_retries=_MAX_RETRIES, timeout=_TIMEOUT)
@@ -1251,9 +1255,19 @@ class PrintingAgent:
             self.openai_client  = AsyncOpenAI(api_key=openai_key, max_retries=_MAX_RETRIES, timeout=_TIMEOUT)
             self.ai             = None
             self.groq_client    = None
+        elif naraya_key:
+            self.provider       = "naraya"
+            self.openai_client  = AsyncOpenAI(
+                api_key=naraya_key,
+                base_url="https://router.naraya.ai/v1",
+                max_retries=_MAX_RETRIES,
+                timeout=_TIMEOUT,
+            )
+            self.ai             = None
+            self.groq_client    = None
         else:
             raise RuntimeError(
-                "يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY أو OPENAI_API_KEY "
+                "يجب تعيين GROQ_API_KEY أو ANTHROPIC_API_KEY أو OPENAI_API_KEY أو NARAYA_API_KEY "
                 "في إعدادات المتجر أو متغيرات البيئة."
             )
 
@@ -3227,7 +3241,7 @@ class PrintingAgent:
 
         if self.provider == "groq":
             return await self._chat_groq(message, session_id)
-        if self.provider == "openai":
+        if self.provider in ("openai", "naraya"):
             return await self._chat_openai(message, session_id)
         return await self._chat_anthropic(message, session_id)
 
@@ -3334,8 +3348,9 @@ class PrintingAgent:
 
         tool_rounds = 0
         while True:
+            _oai_model = self._naraya_model if self.provider == "naraya" else self._openai_model
             response = await self.openai_client.chat.completions.create(
-                model=self._openai_model,
+                model=_oai_model,
                 messages=messages,
                 tools=openai_tools,
                 tool_choice="auto",

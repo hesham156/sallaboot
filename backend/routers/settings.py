@@ -49,12 +49,15 @@ async def get_ai_settings(store_id: str):
     groq_set      = bool(cfg.get("groq_api_key"))
     anthropic_set = bool(cfg.get("anthropic_api_key"))
     openai_set    = bool(cfg.get("openai_api_key"))
+    naraya_set    = bool(cfg.get("naraya_api_key"))
     if groq_set:
         provider = "groq"
     elif anthropic_set:
         provider = "anthropic"
     elif openai_set:
         provider = "openai"
+    elif naraya_set:
+        provider = "naraya"
     else:
         provider = "env"
     store_type = (cfg.get("store_type") or "").strip().lower()
@@ -73,6 +76,7 @@ async def get_ai_settings(store_id: str):
         "groq_api_key":      "••••" if groq_set      else "",
         "anthropic_api_key": "••••" if anthropic_set else "",
         "openai_api_key":    "••••" if openai_set    else "",
+        "naraya_api_key":    "••••" if naraya_set    else "",
         "ai_model":          cfg.get("ai_model",  ""),
         "bot_name":          cfg.get("bot_name",  ""),
         "provider":          provider,
@@ -128,12 +132,14 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     groq_key      = (req.groq_api_key      or "").strip()
     anthropic_key = (req.anthropic_api_key or "").strip()
     openai_key    = (req.openai_api_key    or "").strip()
+    naraya_key    = (req.naraya_api_key    or "").strip()
 
     config = dict(existing)
     config.update({
         "groq_api_key":      groq_key      or existing.get("groq_api_key",      ""),
         "anthropic_api_key": anthropic_key or existing.get("anthropic_api_key", ""),
         "openai_api_key":    openai_key    or existing.get("openai_api_key",    ""),
+        "naraya_api_key":    naraya_key    or existing.get("naraya_api_key",    ""),
         "ai_model":          (req.ai_model  or "").strip() or existing.get("ai_model",  ""),
         "bot_name":          (req.bot_name  or "").strip() or existing.get("bot_name",  ""),
     })
@@ -206,12 +212,19 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     if groq_key:
         config["anthropic_api_key"] = ""
         config["openai_api_key"]    = ""
+        config["naraya_api_key"]    = ""
     elif anthropic_key:
         config["groq_api_key"]   = ""
         config["openai_api_key"] = ""
+        config["naraya_api_key"] = ""
     elif openai_key:
         config["groq_api_key"]      = ""
         config["anthropic_api_key"] = ""
+        config["naraya_api_key"]    = ""
+    elif naraya_key:
+        config["groq_api_key"]      = ""
+        config["anthropic_api_key"] = ""
+        config["openai_api_key"]    = ""
 
     await sm.set_ai_config(store_id, config)
     tokens = sm.get_store_info(store_id)
@@ -227,7 +240,7 @@ async def update_ai_settings(store_id: str, req: AIConfigRequest, request: Reque
     sm.reset_agent(store_id)
 
     _changed: list[str] = []
-    for field in ("groq_api_key", "anthropic_api_key", "openai_api_key", "whatsapp_token"):
+    for field in ("groq_api_key", "anthropic_api_key", "openai_api_key", "naraya_api_key", "whatsapp_token"):
         if (existing.get(field) or "") != (config.get(field) or ""):
             _changed.append(field)
     other_changes = {}

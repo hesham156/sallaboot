@@ -35,23 +35,26 @@ function CopyRow({ label, value }: { label: string; value: string }) {
 
 /* ─────── Data ─────── */
 interface Props { storeId: string }
-type ProviderKey = 'groq' | 'anthropic' | 'openai'
+type ProviderKey = 'groq' | 'anthropic' | 'openai' | 'naraya'
 type TabKey = 'ai' | 'whatsapp' | 'notifications' | 'security'
 
 const PROVIDERS: { key: ProviderKey; label: string; sub: string; ph: string; accent: string }[] = [
-  { key: 'groq',      label: 'Groq',      sub: 'Llama 3.3', ph: 'gsk_...',          accent: 'orange'  },
-  { key: 'anthropic', label: 'Anthropic', sub: 'Claude',    ph: 'sk-ant-api03-...', accent: 'violet'  },
-  { key: 'openai',    label: 'OpenAI',    sub: 'GPT-4o',    ph: 'sk-proj-...',      accent: 'emerald' },
+  { key: 'groq',      label: 'Groq',      sub: 'Llama 3.3',   ph: 'gsk_...',          accent: 'orange'  },
+  { key: 'anthropic', label: 'Anthropic', sub: 'Claude',      ph: 'sk-ant-api03-...', accent: 'violet'  },
+  { key: 'openai',    label: 'OpenAI',    sub: 'GPT-4o',      ph: 'sk-proj-...',      accent: 'emerald' },
+  { key: 'naraya',    label: 'Naraya',    sub: 'MiniMax M3',  ph: 'sk-nry-...',       accent: 'cyan'    },
 ]
 const MODELS: Record<ProviderKey, string[]> = {
   groq:      ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
   anthropic: ['claude-sonnet-4-6', 'claude-3-5-haiku-20241022', 'claude-opus-4-5'],
   openai:    ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
+  naraya:    ['minimax-m3', 'minimax-text-01'],
 }
 const ACCENT: Record<string, { btn: string; ring: string }> = {
-  orange:  { btn: 'bg-orange-500/12 border-orange-500/40 text-orange-300',  ring: 'ring-orange-500/30'  },
-  violet:  { btn: 'bg-violet-500/12 border-violet-500/40 text-violet-300',  ring: 'ring-violet-500/30'  },
+  orange:  { btn: 'bg-orange-500/12 border-orange-500/40 text-orange-300',   ring: 'ring-orange-500/30'  },
+  violet:  { btn: 'bg-violet-500/12 border-violet-500/40 text-violet-300',   ring: 'ring-violet-500/30'  },
   emerald: { btn: 'bg-emerald-500/12 border-emerald-500/40 text-emerald-300', ring: 'ring-emerald-500/30' },
+  cyan:    { btn: 'bg-cyan-500/12 border-cyan-500/40 text-cyan-300',          ring: 'ring-cyan-500/30'    },
 }
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
@@ -178,7 +181,8 @@ export default function Settings({ storeId }: Props) {
         api.getNotifications(storeId).catch(() => DEF_NOTIF),
       ])
       setCfg(ai)
-      setProvider((ai.provider !== 'env' ? ai.provider : 'groq') as ProviderKey)
+      const validProviders: ProviderKey[] = ['groq', 'anthropic', 'openai', 'naraya']
+      setProvider(validProviders.includes(ai.provider as ProviderKey) ? ai.provider as ProviderKey : 'groq')
       setBotName(ai.bot_name || '')
       setModel(ai.ai_model || '')
       setStoreType(ai.store_type === 'printing' ? 'printing' : 'general')
@@ -244,7 +248,7 @@ export default function Settings({ storeId }: Props) {
     setAiSaving(true); setAiMsg('')
     try {
       const payload: Partial<AIConfig> = {
-        groq_api_key: '', anthropic_api_key: '', openai_api_key: '',
+        groq_api_key: '', anthropic_api_key: '', openai_api_key: '', naraya_api_key: '',
         ai_model: model, bot_name: botName, store_type: storeType,
         excluded_categories: excludedCats,
       }
@@ -252,6 +256,7 @@ export default function Settings({ storeId }: Props) {
         if (provider === 'groq')      payload.groq_api_key      = apiKey.trim()
         if (provider === 'anthropic') payload.anthropic_api_key = apiKey.trim()
         if (provider === 'openai')    payload.openai_api_key    = apiKey.trim()
+        if (provider === 'naraya')    payload.naraya_api_key    = apiKey.trim()
       }
       await api.setAI(storeId, payload)
       setAiMsg('✅ تم حفظ إعدادات الذكاء الاصطناعي')
@@ -514,9 +519,10 @@ export default function Settings({ storeId }: Props) {
   /* ── derived ── */
   const cur       = PROVIDERS.find(p => p.key === provider)!
   const models    = MODELS[provider]
-  const keySaved  = !!(provider === 'groq' && cfg.groq_api_key) ||
+  const keySaved  = !!(provider === 'groq'      && cfg.groq_api_key)      ||
                     !!(provider === 'anthropic' && cfg.anthropic_api_key) ||
-                    !!(provider === 'openai' && cfg.openai_api_key)
+                    !!(provider === 'openai'    && cfg.openai_api_key)    ||
+                    !!(provider === 'naraya'    && cfg.naraya_api_key)
 
   const tokInfo = (() => {
     if (!tokenStatus) return null
@@ -577,7 +583,7 @@ export default function Settings({ storeId }: Props) {
               {/* Provider */}
               <section>
                 <label className="text-xs font-bold text-default-500 block mb-2">المزوّد</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {PROVIDERS.map(p => {
                     const active = provider === p.key
                     const a = ACCENT[p.accent]

@@ -976,9 +976,10 @@ export interface AIConfig {
   groq_api_key: string
   anthropic_api_key: string
   openai_api_key: string
+  naraya_api_key: string
   ai_model: string
   bot_name: string
-  provider: 'groq' | 'anthropic' | 'openai' | 'env'
+  provider: 'groq' | 'anthropic' | 'openai' | 'naraya' | 'env'
   store_type: 'printing' | 'general'
   // Categories hidden from the bot + the full list to pick from (read-only).
   excluded_categories?: string[]
