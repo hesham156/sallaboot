@@ -264,12 +264,20 @@ async def _resolve_login(email_raw: str, pwd_in: str) -> dict | None:
     return None
 
 
-async def _begin_otp(email: str, purpose: str) -> dict:
+async def _begin_otp(email: str, purpose: str, send_to: str = "") -> dict:
     """Generate a code, email it, and return the signed challenge for the client
-    to echo back at /auth/otp/verify. Raises 502 if the email can't be sent."""
-    code = _auth.generate_otp_code()
+    to echo back at /auth/otp/verify. Raises 502 if the email can't be sent.
+
+    `email`   — used for the HMAC challenge (may be a store_id or real email).
+    `send_to` — the actual email address to deliver to; falls back to `email`
+                when not provided (the normal path where the input IS an email).
+    """
+    code      = _auth.generate_otp_code()
     challenge = _auth.make_otp_challenge(email, purpose, code)
-    if not await _notif.send_otp_email(email, code, purpose):
+    dest      = (send_to or email).strip()
+    if not dest or "@" not in dest:
+        raise HTTPException(502, "تعذّر إرسال رمز التحقق — لا يوجد بريد إلكتروني مرتبط بهذا الحساب. يرجى التواصل مع الدعم.")
+    if not await _notif.send_otp_email(dest, code, purpose):
         raise HTTPException(502, "تعذّر إرسال رمز التحقق إلى بريدك الإلكتروني. حاول لاحقاً.")
     return {"otp_required": True, "challenge": challenge}
 
@@ -315,7 +323,12 @@ async def unified_login(req: LoginRequest, request: Request):
     # within the 30-day trust window. Transparent no-op when OTP is disabled.
     if _otp_enabled() and not _auth.device_trust_valid(req.device_token or "", email_in):
         print(f"[auth] 🔐 OTP required for login from {ip}")
-        return await _begin_otp(email_in, "login")
+        # When the user logged in with a store_id (no "@"), we need the real
+        # owner email as the OTP destination — store_id is not a valid email.
+        send_to = email_in
+        if "@" not in email_in:
+            send_to = (await db.get_store_owner_email(email_raw) or "").lower()
+        return await _begin_otp(email_in, "login", send_to=send_to)
 
     print(f"[auth] ✅ Unified login ({resolved['store_id']!r}) from {ip}")
     return resolved
