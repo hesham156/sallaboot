@@ -1262,6 +1262,7 @@ class PrintingAgent:
                 base_url="https://router.naraya.ai/v1",
                 max_retries=_MAX_RETRIES,
                 timeout=_TIMEOUT,
+                default_headers={"Authorization": f"Bearer {naraya_key}"},
             )
             self.ai             = None
             self.groq_client    = None
@@ -3348,16 +3349,43 @@ class PrintingAgent:
             _sys_prompt = _sys_prompt + "\n\n" + _cust_ctx
         messages = [{"role": "system", "content": _sys_prompt}] + history
 
+        _oai_model = self._naraya_model if self.provider == "naraya" else self._openai_model
+        # Some models routed through OpenAI-compatible gateways don't support
+        # the tools/function-calling parameter. Try with tools first; if the
+        # API rejects it (400/422 or "not supported" message), fall back to a
+        # plain completion so the bot still replies instead of erroring out.
+        _tools_supported = True
+
         tool_rounds = 0
         while True:
-            _oai_model = self._naraya_model if self.provider == "naraya" else self._openai_model
-            response = await self.openai_client.chat.completions.create(
-                model=_oai_model,
-                messages=messages,
-                tools=openai_tools,
-                tool_choice="auto",
-                max_tokens=1024,
-            )
+            try:
+                if _tools_supported:
+                    response = await self.openai_client.chat.completions.create(
+                        model=_oai_model,
+                        messages=messages,
+                        tools=openai_tools,
+                        tool_choice="auto",
+                        max_tokens=1024,
+                    )
+                else:
+                    response = await self.openai_client.chat.completions.create(
+                        model=_oai_model,
+                        messages=messages,
+                        max_tokens=1024,
+                    )
+            except Exception as _tool_exc:
+                _exc_str = str(_tool_exc).lower()
+                print(f"[_chat_openai] provider={self.provider} model={_oai_model} error: {_tool_exc}")
+                if _tools_supported and any(
+                    k in _exc_str for k in (
+                        "tool", "function", "not support", "unsupported",
+                        "400", "invalid_request", "unrecognized",
+                    )
+                ):
+                    print(f"[_chat_openai] tools not supported by {_oai_model}, retrying without tools")
+                    _tools_supported = False
+                    continue
+                raise
 
             _u = getattr(response, "usage", None)
             if _u:
