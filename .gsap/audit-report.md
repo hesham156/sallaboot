@@ -19,7 +19,7 @@
 ## Should Fix
 
 - [ ] Stats section: no count-up animation — numbers appear statically. P03 target.
-- [ ] FAQ accordion: no open/close animation — content snaps in/out instantly. P06 target.
+- [x] FAQ accordion: no open/close animation — content snapped in/out instantly. Fixed (P06, 2026-06-22) with a Framer `AnimatePresence` height/opacity tween, reduced-motion aware.
 - [ ] Feature cards: Framer Motion `whileHover={{ y: -6 }}` and stagger reveal still in place — refactor to GSAP ScrollTrigger in P02.
 
 ## Nice To Have

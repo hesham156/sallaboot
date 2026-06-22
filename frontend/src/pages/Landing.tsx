@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import { useGSAP } from '@gsap/react'
@@ -114,6 +114,7 @@ const FAQS = [
 
 function FAQSection() {
   const [open, setOpen] = useState<number | null>(0)
+  const reduce = useReducedMotion()
   return (
     <section id="faq" className="max-w-4xl mx-auto px-5 sm:px-8 py-20 sm:py-28">
       <AnimatedSection className="text-center mb-12">
@@ -146,11 +147,25 @@ function FAQSection() {
                   <Icon d={ICONS.chevDown} size={16} />
                 </div>
               </button>
-              {isOpen && (
-                <div className="px-5 sm:px-7 pb-6 text-slate-600 leading-loose text-sm sm:text-base border-t border-slate-100 pt-4">
-                  {faq.a}
-                </div>
-              )}
+              <AnimatePresence initial={false}>
+                {isOpen && (
+                  <motion.div
+                    key="answer"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{
+                      height:  { duration: reduce ? 0.15 : 0.42, ease: [0.16, 1, 0.3, 1] },
+                      opacity: { duration: reduce ? 0.15 : 0.3, ease: 'easeOut' },
+                    }}
+                    style={{ overflow: 'hidden' }}
+                  >
+                    <div className="px-5 sm:px-7 pb-6 text-slate-600 leading-loose text-sm sm:text-base border-t border-slate-100 pt-4">
+                      {faq.a}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )
         })}
@@ -436,7 +451,7 @@ export default function Landing() {
         <div className="absolute top-[10rem] left-[-8rem] w-[30rem] h-[30rem] bg-cyan-300/20 rounded-full blur-[130px] pointer-events-none" />
         <div className="absolute inset-0 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:26px_26px] opacity-40 pointer-events-none" />
 
-        <div className="relative max-w-7xl mx-auto px-5 sm:px-8 pt-16 sm:pt-24 pb-20 grid lg:grid-cols-2 gap-12 lg:gap-8 items-center">
+        <div className="relative max-w-7xl mx-auto px-5 sm:px-8 pt-16 sm:pt-24 pb-20 grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* copy — GSAP-driven entrance, class names match the timeline targets */}
           <div className="text-center lg:text-right">
             <div className="hero-anim hero-badge inline-flex items-center gap-2 bg-teal-50 border border-teal-100 text-teal-700 text-xs font-bold rounded-full px-3.5 py-1.5 mb-5">

@@ -16,9 +16,9 @@
 | P11 | landing | Hero | Cinematic GSAP timeline entrance + floating cards + scroll parallax | Done |
 | P01 | landing | Navigation | Navbar bg/shadow deepens past hero (ScrollTrigger) | Done |
 | P03 | landing | Stats | Count-up on scroll-enter (ScrollTrigger, Arabic digits) | Done |
+| P06 | landing | FAQ | Accordion height/opacity animation (Framer AnimatePresence) | Done |
 | P02 | landing | Feature Grid | Staggered ScrollTrigger card reveal + hover depth | Next |
 | P05 | landing | How It Works | Step-by-step reveal with connector line draw | Planned |
-| P06 | landing | FAQ | Accordion height animation (GSAP height tween) | Planned |
 | P10 | landing | CTA | Shimmer/emphasis on gradient CTA section | Planned |
 | P04 | landing | Testimonials | N/A — no testimonials section on this page | Skip |
 | P07 | landing | Pricing | N/A — no pricing section on this page | Skip |
