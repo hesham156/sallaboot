@@ -3240,13 +3240,14 @@ class PrintingAgent:
                 return reply
 
         if self.provider == "groq":
-            return await self._chat_groq(message, session_id)
+            return await self._chat_groq(message, session_id, identity=identity)
         if self.provider in ("openai", "naraya"):
-            return await self._chat_openai(message, session_id)
-        return await self._chat_anthropic(message, session_id)
+            return await self._chat_openai(message, session_id, identity=identity)
+        return await self._chat_anthropic(message, session_id, identity=identity)
 
     # ── Groq (Llama 3.3-70b) ──────────────────────────────────────────────────
-    async def _chat_groq(self, message: str, session_id: str) -> str:
+    async def _chat_groq(self, message: str, session_id: str,
+                         identity: "SessionIdentity | None" = None) -> str:
         await cs.add_message(session_id, "user", message, self.store_id)
         history = cs.get_groq_history(session_id)
 
@@ -3318,7 +3319,8 @@ class PrintingAgent:
             return reply
 
     # ── OpenAI (GPT) ──────────────────────────────────────────────────────────
-    async def _chat_openai(self, message: str, session_id: str) -> str:
+    async def _chat_openai(self, message: str, session_id: str,
+                           identity: "SessionIdentity | None" = None) -> str:
         """
         OpenAI-compatible chat with tool use.
         Uses the same OpenAI function-calling format as Groq — the two APIs
@@ -3400,7 +3402,8 @@ class PrintingAgent:
             return reply
 
     # ── Anthropic (Claude) ────────────────────────────────────────────────────
-    async def _chat_anthropic(self, message: str, session_id: str) -> str:
+    async def _chat_anthropic(self, message: str, session_id: str,
+                              identity: "SessionIdentity | None" = None) -> str:
         await cs.add_message(session_id, "user", message, self.store_id)
         # get_groq_history returns [{role, content: str}] — valid for Anthropic too
         # (Anthropic accepts plain string content; tool-call turns are ephemeral
