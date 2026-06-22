@@ -175,6 +175,32 @@ async def serve_logo():
     raise _HE(404, "logo not found")
 
 
+# Favicons — search engines (Google) need a SQUARE icon at a real, crawlable URL
+# (a data: URI is ignored, and /logo.png is a 1250x375 banner → rejected). These
+# serve the committed square brand icons from admin-dist with an uploads fallback.
+_FAVICONS = {
+    "/favicon.ico":         ("favicon.ico",        "image/x-icon"),
+    "/favicon.svg":         ("favicon.svg",        "image/svg+xml"),
+    "/favicon.png":         ("favicon.png",        "image/png"),
+    "/apple-touch-icon.png":("apple-touch-icon.png", "image/png"),
+}
+
+def _make_favicon_route(filename: str, media_type: str):
+    async def _serve():
+        for base in (_ADMIN_DIST_DIR, UPLOAD_DIR):
+            path = base / filename
+            if path.exists():
+                return _FR(str(path), media_type=media_type,
+                           headers={"Cache-Control": "public, max-age=604800"})
+        from fastapi import HTTPException as _HE
+        raise _HE(404, "favicon not found")
+    return _serve
+
+for _route, (_fname, _mt) in _FAVICONS.items():
+    app.add_api_route(_route, _make_favicon_route(_fname, _mt),
+                      methods=["GET"], include_in_schema=False)
+
+
 # ── Middleware ────────────────────────────────────────────────────────────────
 import middleware as _mw
 _mw.register(app)

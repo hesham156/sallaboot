@@ -230,8 +230,10 @@ async def web_manifest():
         "lang":             "ar",
         "dir":              "rtl",
         "icons": [
-            {"src": "/logo.png", "sizes": "any",     "type": "image/png", "purpose": "any"},
-            {"src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            {"src": "/favicon.svg", "sizes": "any",     "type": "image/svg+xml", "purpose": "any"},
+            {"src": "/favicon.png", "sizes": "512x512", "type": "image/png",     "purpose": "any"},
+            {"src": "/favicon.png", "sizes": "512x512", "type": "image/png",     "purpose": "maskable"},
+            {"src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
         ],
     }
     return Response(
