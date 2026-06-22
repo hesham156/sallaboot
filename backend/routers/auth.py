@@ -25,7 +25,8 @@ import auth as _auth
 import database as db
 import notifications as _notif
 import store_manager as sm
-from models import EmployeeLoginRequest, LoginRequest, OtpVerifyRequest, SignupRequest
+from models import (EmployeeLoginRequest, ForgotPasswordRequest, LoginRequest,
+                    OtpVerifyRequest, ResetPasswordRequest, SignupRequest)
 from routers.deps import is_rate_limited as _is_rate_limited
 
 
@@ -485,3 +486,69 @@ async def verify_store_token(store_id: str, request: Request):
         "is_super": claims.get("su", False),
         "employee": emp,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Forgot / Reset password
+# ─────────────────────────────────────────────────────────────────────────
+
+@router.post("/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest, request: Request):
+    """
+    Send a password-reset link to the given email.
+    Always returns 200 so callers cannot probe whether an email is registered.
+    """
+    ip    = request.client.host if request.client else "unknown"
+    email = (req.email or "").strip().lower()
+
+    if not email or "@" not in email:
+        raise HTTPException(400, "البريد الإلكتروني غير صالح")
+
+    if await _is_rate_limited(f"forgot:{email}", max_attempts=3, window=600):
+        raise HTTPException(429, "طلبات كثيرة جداً. انتظر 10 دقائق وحاول مجدداً.")
+
+    token     = _auth.make_reset_token(email)
+    reset_url = f"{os.getenv('BASE_URL', 'https://7ayak.app')}/reset-password?token={token}"
+
+    store_id = await db.find_store_by_owner_email(email)
+    emp      = await db.find_employee_by_email_any_store(email)
+    if store_id or emp:
+        await _notif.send_password_reset_email(email, reset_url)
+        print(f"[auth] 🔑 Password reset email sent to {email!r} from {ip}")
+    else:
+        print(f"[auth] 🔑 Password reset for unknown email {email!r} — silently ignored")
+
+    return {"ok": True, "message": "إذا كان البريد الإلكتروني مسجّلاً، ستصلك رسالة بتعليمات إعادة التعيين."}
+
+
+@router.post("/auth/reset-password")
+async def reset_password_with_token(req: ResetPasswordRequest, request: Request):
+    """Consume a reset token and update the account password."""
+    ip = request.client.host if request.client else "unknown"
+
+    if await _is_rate_limited(f"reset_ip:{ip}", max_attempts=10, window=600):
+        raise HTTPException(429, "محاولات كثيرة. انتظر قليلاً ثم حاول مجدداً.")
+
+    email = _auth.verify_reset_token(req.token or "")
+    if not email:
+        raise HTTPException(400, "رابط إعادة التعيين غير صالح أو منتهي الصلاحية")
+
+    new_pwd = req.new_password or ""
+    if len(new_pwd) < 8:
+        raise HTTPException(400, "كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+
+    new_hash = _auth.hash_password(new_pwd)
+
+    store_id = await db.find_store_by_owner_email(email)
+    if store_id:
+        await sm.set_admin_password(store_id, new_hash)
+        print(f"[auth] ✅ Password reset: owner {email!r} (store {store_id!r}) from {ip}")
+        return {"ok": True, "message": "تم تحديث كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن."}
+
+    emp = await db.find_employee_by_email_any_store(email)
+    if emp:
+        await db.update_employee(emp["id"], password_hash=new_hash)
+        print(f"[auth] ✅ Password reset: employee {email!r} from {ip}")
+        return {"ok": True, "message": "تم تحديث كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن."}
+
+    raise HTTPException(404, "لم يُعثر على حساب مرتبط بهذا البريد الإلكتروني")

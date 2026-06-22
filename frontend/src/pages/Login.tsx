@@ -33,11 +33,12 @@ const inputCls = {
 export default function Login() {
   const navigate = useNavigate()
 
-  const [step, setStep]         = useState<'credentials' | 'otp'>('credentials')
+  const [step, setStep]         = useState<'credentials' | 'otp' | 'forgot' | 'sent'>('credentials')
   const [email, setEmail]       = useState('')  // holds email OR store_id
   const [password, setPassword] = useState('')
   const [challenge, setChallenge] = useState('')
   const [code, setCode]         = useState('')
+  const [forgotEmail, setForgotEmail] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
 
@@ -101,8 +102,26 @@ export default function Login() {
     } finally { setLoading(false) }
   }
 
+  async function handleForgot() {
+    if (loading) return
+    setError('')
+    const addr = forgotEmail.trim() || email.trim()
+    if (!addr || !addr.includes('@')) { setError('يرجى إدخال بريد إلكتروني صحيح'); return }
+    setLoading(true)
+    try {
+      await api.forgotPassword(addr)
+      setStep('sent')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'تعذّر إرسال الرسالة، حاول مجدداً')
+    } finally { setLoading(false) }
+  }
+
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') (step === 'otp' ? handleVerify() : handleSubmit())
+    if (e.key === 'Enter') {
+      if (step === 'otp') handleVerify()
+      else if (step === 'forgot') handleForgot()
+      else handleSubmit()
+    }
   }
 
   return (
@@ -159,7 +178,16 @@ export default function Login() {
 
               {/* Password */}
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1.5">كلمة المرور</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-semibold text-slate-600">كلمة المرور</label>
+                  <button
+                    type="button"
+                    onClick={() => { setForgotEmail(email.trim()); setError(''); setStep('forgot') }}
+                    className="text-[11px] text-teal-600 font-bold hover:underline"
+                  >
+                    نسيت كلمة المرور؟
+                  </button>
+                </div>
                 <Input
                   placeholder="أدخل كلمة المرور"
                   type="password"
@@ -195,6 +223,77 @@ export default function Login() {
                 {' '}
                 <a href="/signup" className="text-teal-600 font-bold hover:underline">إنشاء حساب جديد</a>
               </p>
+            </div>
+          )}
+
+          {/* ── Step: forgot password ── */}
+          {step === 'forgot' && (
+            <div className="p-6 sm:p-8 space-y-5">
+              <div className="text-center space-y-1.5">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-teal-50 flex items-center justify-center">
+                  <Icon paths={['M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z']} size={22} className="text-teal-500" />
+                </div>
+                <h2 className="text-xl font-black text-slate-800">نسيت كلمة المرور؟</h2>
+                <p className="text-xs text-slate-500">أدخل بريدك الإلكتروني وسنرسل لك رابط إعادة التعيين</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-600 mb-1.5">البريد الإلكتروني</label>
+                <Input
+                  placeholder="you@example.com"
+                  type="email"
+                  value={forgotEmail}
+                  onValueChange={v => { setForgotEmail(v); setError('') }}
+                  variant="bordered"
+                  autoFocus
+                  autoComplete="email"
+                  classNames={inputCls}
+                  onKeyDown={handleKey}
+                  startContent={
+                    <Icon paths={['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z', 'M22 6l-10 7L2 6']} size={16} className="text-slate-500 flex-shrink-0 ml-2" />
+                  }
+                />
+              </div>
+
+              {error && (
+                <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-xs font-bold text-red-600 animate-in fade-in duration-300">
+                  <Icon paths="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" size={16} className="flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <Button
+                className="w-full font-bold text-base h-12 text-white shadow-lg rounded-2xl hover:opacity-95 active:scale-[0.98] transition-all bg-gradient-to-r from-teal-500 to-cyan-500 shadow-teal-500/25"
+                isLoading={loading}
+                onPress={handleForgot}
+              >
+                {loading ? <Spinner size="sm" /> : 'إرسال رابط إعادة التعيين'}
+              </Button>
+
+              <button onClick={() => { setStep('credentials'); setError('') }}
+                className="w-full text-[11px] text-slate-400 font-bold hover:text-slate-600">
+                → رجوع لتسجيل الدخول
+              </button>
+            </div>
+          )}
+
+          {/* ── Step: reset link sent ── */}
+          {step === 'sent' && (
+            <div className="p-6 sm:p-8 space-y-5 text-center">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-teal-50 flex items-center justify-center">
+                <Icon paths={['M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z']} size={28} className="text-teal-500" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-xl font-black text-slate-800">تم إرسال الرابط!</h2>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  إذا كان البريد الإلكتروني مسجّلاً لدينا، ستصلك رسالة بها رابط إعادة تعيين كلمة المرور.
+                  <br />تحقق من صندوق البريد الوارد أو مجلد الـ Spam.
+                </p>
+              </div>
+              <button onClick={() => { setStep('credentials'); setError('') }}
+                className="text-sm text-teal-600 font-bold hover:underline">
+                → رجوع لتسجيل الدخول
+              </button>
             </div>
           )}
 

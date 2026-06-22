@@ -4,6 +4,7 @@ import { Spinner } from '@heroui/react'
 import { getToken, getIsSuper } from './api'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import ResetPassword from './pages/ResetPassword'
 import Landing from './pages/Landing'
 import ErrorPage from './pages/ErrorPage'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -58,6 +59,7 @@ export default function App() {
 
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Public Policy Pages */}
           <Route path="/privacy" element={<PrivacyPolicy />} />

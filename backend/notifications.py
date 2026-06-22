@@ -224,6 +224,21 @@ async def send_otp_email(to: str, code: str, purpose: str = "login") -> bool:
     return await _send_email(to, f"رمز التحقق: {code} — حياك", html)
 
 
+async def send_password_reset_email(to: str, reset_url: str) -> bool:
+    """Send a password-reset link to *to*. Returns True if Resend accepted it."""
+    subject = "🔑 إعادة تعيين كلمة المرور — حياك"
+    body = f"""
+<p>مرحباً،</p>
+<p>تلقّينا طلباً لإعادة تعيين كلمة المرور لحسابك في <b>حياك</b>.</p>
+<p>اضغط الزر أدناه لاختيار كلمة مرور جديدة. الرابط صالح لمدة ساعة واحدة فقط.</p>
+<a class="btn" href="{reset_url}">إعادة تعيين كلمة المرور ←</a>
+<p style="margin-top:16px;font-size:13px;color:#64748b">
+  إذا لم تطلب إعادة التعيين، تجاهل هذه الرسالة — كلمة مرورك لن تتغير.
+</p>
+"""
+    return await _send_email(to, subject, _html_wrapper("إعادة تعيين كلمة المرور", body))
+
+
 # ── SSRF guard for outbound webhooks (finding M-3) ─────────────────────────────
 import ipaddress as _ipaddress
 import socket as _socket

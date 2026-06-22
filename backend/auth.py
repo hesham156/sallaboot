@@ -198,6 +198,39 @@ def token_employee(token: str) -> Optional[dict]:
     }
 
 
+# ── Password-reset tokens ─────────────────────────────────────────────────────
+
+RESET_TOKEN_EXPIRY = 60 * 60  # 1 hour
+
+
+def make_reset_token(email: str) -> str:
+    """Return a signed, time-limited password-reset token for *email*."""
+    exp = int(time.time()) + RESET_TOKEN_EXPIRY
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"e": email.lower(), "exp": exp}, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    sig = hmac.new(ADMIN_SECRET.encode(), f"reset:{payload}".encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def verify_reset_token(token: str) -> Optional[str]:
+    """Verify a reset token. Returns the email or None if invalid / expired."""
+    if not token:
+        return None
+    try:
+        payload, sig = token.rsplit(".", 1)
+        expected = hmac.new(ADMIN_SECRET.encode(), f"reset:{payload}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return None
+        padding = 4 - len(payload) % 4
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * padding))
+        if data.get("exp", 0) < time.time():
+            return None
+        return data.get("e")
+    except Exception:
+        return None
+
+
 # ── Email OTP + trusted-device tokens ──────────────────────────────────────────
 #
 # Both are STATELESS (no DB table): a payload is HMAC-signed with ADMIN_SECRET,

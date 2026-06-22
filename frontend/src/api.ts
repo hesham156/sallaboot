@@ -153,6 +153,12 @@ export const api = {
     purpose: 'login' | 'signup'; name?: string; remember_device?: boolean
   }) => post<SessionResponse>('/auth/otp/verify', body),
 
+  forgotPassword: (email: string) =>
+    post<{ ok: boolean; message: string }>('/auth/forgot-password', { email }),
+
+  resetPasswordWithToken: (token: string, newPassword: string) =>
+    post<{ ok: boolean; message: string }>('/auth/reset-password', { token, new_password: newPassword }),
+
   // Legacy login endpoints — kept so older clients still work but the
   // SPA itself uses `login()` above.
   superLogin: (email: string, password: string) =>
