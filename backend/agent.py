@@ -3350,16 +3350,15 @@ class PrintingAgent:
         messages = [{"role": "system", "content": _sys_prompt}] + history
 
         _oai_model = self._naraya_model if self.provider == "naraya" else self._openai_model
-        # Some models routed through OpenAI-compatible gateways don't support
-        # the tools/function-calling parameter. Try with tools first; if the
-        # API rejects it (400/422 or "not supported" message), fall back to a
-        # plain completion so the bot still replies instead of erroring out.
-        _tools_supported = True
+        # Naraya-routed models (e.g. minimax-m3) do not support OpenAI-style
+        # function calling — skip tools entirely to avoid a 45s timeout on
+        # every message while the gateway times out the unsupported parameter.
+        _use_tools = self.provider != "naraya"
 
         tool_rounds = 0
         while True:
             try:
-                if _tools_supported:
+                if _use_tools:
                     response = await self.openai_client.chat.completions.create(
                         model=_oai_model,
                         messages=messages,
@@ -3376,14 +3375,14 @@ class PrintingAgent:
             except Exception as _tool_exc:
                 _exc_str = str(_tool_exc).lower()
                 print(f"[_chat_openai] provider={self.provider} model={_oai_model} error: {_tool_exc}")
-                if _tools_supported and any(
+                if _use_tools and any(
                     k in _exc_str for k in (
                         "tool", "function", "not support", "unsupported",
                         "400", "invalid_request", "unrecognized",
                     )
                 ):
-                    print(f"[_chat_openai] tools not supported by {_oai_model}, retrying without tools")
-                    _tools_supported = False
+                    print(f"[_chat_openai] tools rejected by {_oai_model}, retrying without tools")
+                    _use_tools = False
                     continue
                 raise
 
@@ -3393,7 +3392,7 @@ class PrintingAgent:
 
             msg = response.choices[0].message
 
-            if msg.tool_calls and tool_rounds < 5:
+            if _use_tools and msg.tool_calls and tool_rounds < 5:
                 tool_rounds += 1
                 messages.append({
                     "role":       "assistant",
