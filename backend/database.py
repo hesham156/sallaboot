@@ -3524,7 +3524,7 @@ async def blog_list_public() -> list[dict]:
         async with _pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT id, slug, title, description, tags, author,
-                       read_time, published_at
+                       read_time, cover_image, published_at
                 FROM blog_posts
                 WHERE published = TRUE
                 ORDER BY published_at DESC NULLS LAST, created_at DESC
@@ -3543,7 +3543,7 @@ async def blog_list_all() -> list[dict]:
         async with _pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT id, slug, title, description, tags, author,
-                       read_time, published, published_at,
+                       read_time, cover_image, published, published_at,
                        created_at, updated_at
                 FROM blog_posts
                 ORDER BY COALESCE(published_at, created_at) DESC
@@ -3564,14 +3564,14 @@ async def blog_get_by_slug(slug: str, *, only_published: bool = True) -> dict | 
             if only_published:
                 row = await conn.fetchrow("""
                     SELECT id, slug, title, description, content_md, tags,
-                           author, read_time, published, published_at
+                           author, read_time, cover_image, published, published_at
                     FROM blog_posts
                     WHERE slug = $1 AND published = TRUE
                 """, slug)
             else:
                 row = await conn.fetchrow("""
                     SELECT id, slug, title, description, content_md, tags,
-                           author, read_time, published, published_at,
+                           author, read_time, cover_image, published, published_at,
                            created_at, updated_at
                     FROM blog_posts
                     WHERE slug = $1
@@ -3589,7 +3589,7 @@ async def blog_get_by_id(post_id: int) -> dict | None:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id, slug, title, description, content_md, tags,
-                       author, read_time, published, published_at,
+                       author, read_time, cover_image, published, published_at,
                        created_at, updated_at
                 FROM blog_posts
                 WHERE id = $1
@@ -3611,17 +3611,18 @@ async def blog_create(data: dict) -> dict | None:
             row = await conn.fetchrow("""
                 INSERT INTO blog_posts
                     (slug, title, description, content_md, tags, author,
-                     read_time, published, published_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                     read_time, published, cover_image, published_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
                         CASE WHEN $8 THEN NOW() ELSE NULL END)
                 RETURNING id, slug, title, description, content_md, tags,
-                          author, read_time, published, published_at,
+                          author, read_time, cover_image, published, published_at,
                           created_at, updated_at
             """,
                 data["slug"], data["title"], data.get("description", ""),
                 data.get("content_md", ""), data.get("tags", []) or [],
                 data.get("author", "فريق حياك"),
                 int(data.get("read_time", 5)), bool(data.get("published", False)),
+                data.get("cover_image") or None,
             )
             return dict(row) if row else None
     except Exception as e:
@@ -3647,6 +3648,7 @@ async def blog_update(post_id: int, data: dict) -> dict | None:
                     author       = COALESCE($7, author),
                     read_time    = COALESCE($8, read_time),
                     published    = COALESCE($9, published),
+                    cover_image  = COALESCE($10, cover_image),
                     published_at = CASE
                         WHEN $9 = TRUE AND published_at IS NULL THEN NOW()
                         ELSE published_at
@@ -3654,7 +3656,7 @@ async def blog_update(post_id: int, data: dict) -> dict | None:
                     updated_at   = NOW()
                 WHERE id = $1
                 RETURNING id, slug, title, description, content_md, tags,
-                          author, read_time, published, published_at,
+                          author, read_time, cover_image, published, published_at,
                           created_at, updated_at
             """,
                 post_id,
@@ -3666,6 +3668,7 @@ async def blog_update(post_id: int, data: dict) -> dict | None:
                 data.get("author"),
                 data.get("read_time"),
                 data.get("published"),
+                data.get("cover_image"),
             )
             return dict(row) if row else None
     except Exception as e:

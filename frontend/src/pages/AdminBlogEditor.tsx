@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -37,6 +37,7 @@ const EMPTY: BlogPostInput = {
   author:      'فريق حياك',
   read_time:   5,
   published:   false,
+  cover_image: '',
 }
 
 export default function AdminBlogEditor() {
@@ -53,6 +54,38 @@ export default function AdminBlogEditor() {
   const [message, setMessage] = useState('')
   // user manually edited the slug → stop auto-deriving from title
   const [slugTouched, setSlugTouched] = useState(isEdit)
+  const [uploadingCover,  setUploadingCover]  = useState(false)
+  const [uploadingInline, setUploadingInline] = useState(false)
+  const contentRef = useRef<HTMLTextAreaElement | null>(null)
+
+  async function uploadCover(file: File) {
+    setUploadingCover(true); setError('')
+    try {
+      const { url } = await api.blogUploadImage(file)
+      update('cover_image', url)
+    } catch (e: any) {
+      setError(e.message || 'تعذّر رفع صورة الغلاف')
+    } finally { setUploadingCover(false) }
+  }
+
+  async function uploadInline(file: File) {
+    setUploadingInline(true); setError('')
+    try {
+      const { url } = await api.blogUploadImage(file)
+      const md = `\n\n![${file.name.replace(/\.[^.]+$/, '')}](${url})\n\n`
+      // Insert at the cursor when possible, else append.
+      const ta = contentRef.current
+      if (ta) {
+        const start = ta.selectionStart ?? form.content_md.length
+        const next = form.content_md.slice(0, start) + md + form.content_md.slice(start)
+        update('content_md', next)
+      } else {
+        update('content_md', form.content_md + md)
+      }
+    } catch (e: any) {
+      setError(e.message || 'تعذّر رفع الصورة')
+    } finally { setUploadingInline(false) }
+  }
 
   useEffect(() => {
     document.title = isEdit ? 'تعديل مقال | حياك' : 'مقال جديد | حياك'
@@ -68,6 +101,7 @@ export default function AdminBlogEditor() {
           author:      p.author,
           read_time:   p.read_time,
           published:   p.published,
+          cover_image: p.cover_image || '',
         })
         setTagsInput(p.tags.join(', '))
       })
@@ -273,14 +307,67 @@ export default function AdminBlogEditor() {
           </div>
         </div>
 
+        {/* Cover image */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5">
+          <label className="block text-xs font-bold text-slate-600 mb-2">
+            صورة الغلاف
+            <span className="text-slate-400 font-normal mr-2">— تُحسَّن تلقائيًا (WebP، بحد أقصى 1600px)</span>
+          </label>
+          {form.cover_image ? (
+            <div className="flex items-start gap-4 flex-wrap">
+              <img src={form.cover_image} alt="غلاف المقال" loading="lazy"
+                className="w-56 aspect-video object-cover rounded-xl border border-slate-200 bg-slate-50" />
+              <div className="flex flex-col gap-2">
+                <label className={`inline-flex items-center justify-center gap-1.5 text-xs font-bold rounded-lg px-3 py-2 cursor-pointer transition-colors ${
+                  uploadingCover ? 'opacity-60 pointer-events-none' : 'text-teal-700 bg-teal-50 hover:bg-teal-100'
+                }`}>
+                  {uploadingCover ? 'جاري الرفع…' : 'تغيير الصورة'}
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadCover(f); e.target.value = '' }} />
+                </label>
+                <button type="button" onClick={() => update('cover_image', '')}
+                  className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg px-3 py-2 transition-colors">
+                  إزالة
+                </button>
+              </div>
+            </div>
+          ) : (
+            <label className={`flex flex-col items-center justify-center gap-2 w-full py-10 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-teal-300 hover:bg-teal-50/40 transition-colors ${
+              uploadingCover ? 'opacity-60 pointer-events-none' : ''
+            }`}>
+              <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
+                strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+              </svg>
+              <span className="text-sm font-bold text-slate-500">
+                {uploadingCover ? 'جاري الرفع…' : 'اضغط لرفع صورة الغلاف'}
+              </span>
+              <span className="text-xs text-slate-400">PNG / JPG / WebP</span>
+              <input type="file" accept="image/*" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadCover(f); e.target.value = '' }} />
+            </label>
+          )}
+        </div>
+
         {/* Markdown editor + preview */}
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <div className="grid grid-cols-1 lg:grid-cols-2">
             <div className="border-l border-slate-200">
-              <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600">
-                المحتوى (Markdown)
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600 flex items-center justify-between">
+                <span>المحتوى (Markdown)</span>
+                <label className={`inline-flex items-center gap-1.5 text-xs font-bold rounded-lg px-2.5 py-1 cursor-pointer transition-colors ${
+                  uploadingInline ? 'opacity-60 pointer-events-none' : 'text-teal-700 bg-teal-50 hover:bg-teal-100'
+                }`}>
+                  <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+                  </svg>
+                  {uploadingInline ? 'جاري الرفع…' : 'إدراج صورة'}
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadInline(f); e.target.value = '' }} />
+                </label>
               </div>
               <textarea
+                ref={contentRef}
                 value={form.content_md}
                 onChange={e => update('content_md', e.target.value)}
                 placeholder={`# مقدمة\n\nاكتب مقالك هنا بتنسيق Markdown:\n\n## عنوان فرعي\n\n**نص عريض** أو *مائل*\n\n- نقطة أولى\n- نقطة ثانية\n\n[رابط](https://example.com)\n\n> اقتباس مهم`}

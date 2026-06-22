@@ -572,6 +572,21 @@ export const api = {
     put<BlogPost>(`/admin/blog/posts/${id}`, data),
   blogDelete: (id: number) =>
     req<{ status: string; deleted_id: number }>('DELETE', `/admin/blog/posts/${id}`),
+  blogUploadImage: async (file: File): Promise<{ url: string; bytes: number; content_type: string }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const token = getToken()
+    const res = await fetch('/admin/blog/upload-image', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    })
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}))
+      throw new ApiError(res.status, detail.detail || 'تعذّر رفع الصورة')
+    }
+    return res.json()
+  },
 
   // ── Contacts (CRM) ─────────────────────────────────────────────────────
   listContacts: (storeId: string, params: { page?: number; per_page?: number; search?: string } = {}) => {
@@ -915,6 +930,7 @@ export interface BlogPostMeta {
   author:       string
   read_time:    number
   published_at: string | null
+  cover_image?: string | null
 }
 
 export interface BlogPostAdmin extends BlogPostMeta {
@@ -936,6 +952,7 @@ export interface BlogPostInput {
   author:      string
   read_time:   number
   published:   boolean
+  cover_image: string
 }
 
 export interface NotificationSettings {

@@ -20,3 +20,6 @@ cryptography>=43.0.0
 alembic>=1.13.0
 psycopg2-binary>=2.9.9
 SQLAlchemy>=2.0.0
+# Pillow: server-side image optimisation (resize + WebP + EXIF orient/strip)
+# for blog cover/inline images on upload.
+Pillow>=10.2.0

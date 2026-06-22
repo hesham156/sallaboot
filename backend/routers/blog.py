@@ -13,14 +13,23 @@ us a clean place to add image uploads or richer post features later.
 """
 from __future__ import annotations
 
+import os
 import re
-from fastapi import APIRouter, HTTPException, Request
+import uuid
+
+import aiofiles
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, Field
 
 import auth as _auth
 import database as db
+import image_utils
+from routers.deps import UPLOAD_DIR, MAX_FILE_MB, read_upload_bounded, _content_length
 
 router = APIRouter()
+
+# Images the blog editor accepts (validated by extension AND decoded by Pillow).
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -64,6 +73,7 @@ class BlogPostCreate(BaseModel):
     author:      str  = "فريق حياك"
     read_time:   int  = 5
     published:   bool = False
+    cover_image: str  = ""
 
 
 class BlogPostUpdate(BaseModel):
@@ -78,6 +88,7 @@ class BlogPostUpdate(BaseModel):
     author:      str  | None = None
     read_time:   int  | None = None
     published:   bool | None = None
+    cover_image: str  | None = None
 
 
 # ── Public reads (no auth) ────────────────────────────────────────────────
@@ -176,3 +187,44 @@ async def admin_delete_post(post_id: int, request: Request):
     if not ok:
         raise HTTPException(404, "المقال غير موجود")
     return {"status": "ok", "deleted_id": post_id}
+
+
+# ── Image upload (super-admin) ────────────────────────────────────────────────
+
+@router.post("/admin/blog/upload-image")
+async def admin_upload_blog_image(request: Request, file: UploadFile = File(...)):
+    """Optimise + store an image for a blog cover or inline use. Returns a
+    `/file/<id>` URL. The image is downscaled (≤1600px) and re-encoded as
+    WebP server-side, so a 4 MB phone photo becomes a lean web asset."""
+    _require_super(request)
+
+    suffix = os.path.splitext(file.filename or "")[1].lower()
+    if suffix not in _IMAGE_EXTS:
+        raise HTTPException(400, f"نوع الصورة غير مدعوم. المسموح: {', '.join(sorted(_IMAGE_EXTS))}")
+
+    raw = await read_upload_bounded(
+        file, MAX_FILE_MB * 1024 * 1024, content_length=_content_length(request),
+    )
+
+    try:
+        data, ext, content_type = image_utils.optimize_image(raw)
+    except image_utils.ImageError:
+        raise HTTPException(400, "تعذّر قراءة الصورة — تأكد أنها ملف صورة صالح")
+
+    file_id  = str(uuid.uuid4())
+    filename = f"blog-{file_id}{ext}"
+
+    if db.available():
+        await db.save_upload(
+            file_id=file_id, filename=filename, content_type=content_type,
+            data=data, store_id="_blog", session_id="",
+        )
+    try:
+        async with aiofiles.open(UPLOAD_DIR / f"{file_id}{ext}", "wb") as f:
+            await f.write(data)
+    except Exception as exc:
+        print(f"[blog] image disk cache failed for {file_id!r}: {exc}")
+
+    base_url = os.getenv("BASE_URL", "").rstrip("/")
+    url = f"{base_url}/file/{file_id}" if base_url else f"/file/{file_id}"
+    return {"url": url, "bytes": len(data), "content_type": content_type}

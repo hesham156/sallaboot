@@ -173,6 +173,13 @@ export default function BlogPost() {
           </motion.div>
         </div>
 
+        {post.cover_image && (
+          <div className="max-w-4xl mx-auto px-6 mt-8">
+            <img src={post.cover_image} alt={post.title} loading="lazy"
+              className="w-full aspect-video object-cover rounded-2xl border border-slate-200 bg-slate-100" />
+          </div>
+        )}
+
         <div className="max-w-3xl mx-auto px-6">
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5, delay: 0.1 }}

@@ -90,6 +90,12 @@ export default function BlogList() {
                 className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-teal-300 hover:shadow-soft transition-all group cursor-pointer"
                 onClick={() => navigate(`/blog/${post.slug}`)}
               >
+                {post.cover_image && (
+                  <div className="aspect-video bg-slate-100 overflow-hidden">
+                    <img src={post.cover_image} alt={post.title} loading="lazy"
+                      className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500" />
+                  </div>
+                )}
                 <div className="p-6 sm:p-7">
                   <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
                     {post.published_at && <time dateTime={post.published_at}>{formatDate(post.published_at)}</time>}
