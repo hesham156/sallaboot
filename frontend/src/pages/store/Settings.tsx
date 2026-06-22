@@ -42,13 +42,24 @@ const PROVIDERS: { key: ProviderKey; label: string; sub: string; ph: string; acc
   { key: 'groq',      label: 'Groq',      sub: 'Llama 3.3',   ph: 'gsk_...',          accent: 'orange'  },
   { key: 'anthropic', label: 'Anthropic', sub: 'Claude',      ph: 'sk-ant-api03-...', accent: 'violet'  },
   { key: 'openai',    label: 'OpenAI',    sub: 'GPT-4o',      ph: 'sk-proj-...',      accent: 'emerald' },
-  { key: 'naraya',    label: 'Naraya',    sub: 'MiniMax M3',  ph: 'sk-nry-...',       accent: 'cyan'    },
+  { key: 'naraya',    label: 'Naraya',    sub: 'DeepSeek 3.2', ph: 'sk-nry-...',      accent: 'cyan'    },
 ]
 const MODELS: Record<ProviderKey, string[]> = {
   groq:      ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
   anthropic: ['claude-sonnet-4-6', 'claude-3-5-haiku-20241022', 'claude-opus-4-5'],
   openai:    ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
-  naraya:    ['minimax-m3', 'deepseek'],
+  naraya:    [
+    // Base (free quota)
+    'deepseek-3.2', 'mistral-large', 'mistral-medium-3-5',
+    'qwen3.7-max-naraya', 'claude-sonnet-4.5', 'claude-haiku-4.5', 'glm-5',
+    // Lite (requires credits)
+    'minimax-m3', 'claude-sonnet-4.6', 'naraya-max',
+    'kimi-k2.6', 'gemini-2.5-flash', 'gemini-3-flash', 'gpt-5.4',
+    'glm-5.1', 'glm-5.2-naraya',
+    // Mocin (requires credits)
+    'deepseek-v4-flash-naraya', 'deepseek-v4-pro-naraya',
+    'qwen3.7-max', 'qwen3.7-plus',
+  ],
 }
 const ACCENT: Record<string, { btn: string; ring: string }> = {
   orange:  { btn: 'bg-orange-500/12 border-orange-500/40 text-orange-300',   ring: 'ring-orange-500/30'  },

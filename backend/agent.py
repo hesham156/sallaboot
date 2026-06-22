@@ -1230,7 +1230,7 @@ class PrintingAgent:
         self._groq_model      = (cfg_model if ai_cfg.get("groq_api_key")      else "") or "llama-3.3-70b-versatile"
         self._anthropic_model = (cfg_model if ai_cfg.get("anthropic_api_key") else "") or "claude-sonnet-4-6"
         self._openai_model    = (cfg_model if ai_cfg.get("openai_api_key")    else "") or "gpt-4o-mini"
-        self._naraya_model    = (cfg_model if ai_cfg.get("naraya_api_key")    else "") or "minimax-m3"
+        self._naraya_model    = (cfg_model if ai_cfg.get("naraya_api_key")    else "") or "deepseek-3.2"
 
         # Resilience: all three SDKs (Anthropic/Groq/OpenAI) retry 429/5xx/408/409
         # with exponential backoff + jitter and honour the Retry-After header.
