@@ -573,37 +573,27 @@ export default function Landing() {
       </section>
 
       {/* ═══════════════ PARTNERS MARQUEE ═══════════════ */}
-      <section className="border-y border-slate-100 bg-white py-10 overflow-hidden">
-        <p className="text-center text-[11px] font-bold text-slate-400 tracking-widest uppercase mb-8">يثق به أصحاب المتاجر الكبرى</p>
-        {/* Outer mask fades edges to transparent */}
+      <section className="bg-slate-50 border-y border-slate-200 py-10 overflow-hidden">
+        <p className="text-center text-xs font-bold text-slate-500 tracking-widest mb-7">يثق به أصحاب المتاجر الكبرى</p>
+        {/* Edge fade */}
         <div
           className="relative overflow-hidden"
-          style={{ maskImage: 'linear-gradient(to right, transparent, black 12%, black 88%, transparent)', WebkitMaskImage: 'linear-gradient(to right, transparent, black 12%, black 88%, transparent)' }}
+          style={{ maskImage: 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)', WebkitMaskImage: 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)' }}
         >
-          {/* dir="ltr" overrides the page's RTL so translateX(-50%) animates left→right as expected */}
-          <div dir="ltr" className="flex gap-10 animate-marquee" style={{ width: 'max-content' }}>
+          {/* dir="ltr" ensures flex flows left→right inside the RTL page so translateX(-50%) animates correctly */}
+          <div dir="ltr" className="flex items-center gap-8 animate-marquee" style={{ width: 'max-content' }}>
             {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map(({ domain, name }, i) => (
-              <div key={i} className="flex items-center justify-center w-28 h-14 shrink-0">
-                <img
-                  src={`https://img.logo.dev/${domain}?token=pk_X2A7SSz4RzO6g8lQo6EwdA&size=80&format=png`}
-                  alt={name}
-                  title={name}
-                  draggable={false}
-                  className="max-h-10 max-w-[6.5rem] object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all duration-300 select-none"
-                  onError={(e) => {
-                    const t = e.currentTarget
-                    t.style.display = 'none'
-                    const fb = t.nextElementSibling as HTMLElement | null
-                    if (fb) fb.style.display = 'flex'
-                  }}
-                />
-                {/* Fallback initials tile — hidden until img errors */}
-                <span
-                  className="hidden items-center justify-center w-10 h-10 rounded-xl text-xs font-black text-white bg-slate-400 select-none"
-                  style={{ display: 'none' }}
-                >
-                  {name.slice(0, 2).toUpperCase()}
-                </span>
+              <div key={i} className="flex flex-col items-center gap-2 w-24 shrink-0 select-none">
+                <div className="w-16 h-10 flex items-center justify-center">
+                  <img
+                    src={`https://img.logo.dev/${domain}?token=pk_X2A7SSz4RzO6g8lQo6EwdA&size=80&format=png`}
+                    alt={name}
+                    draggable={false}
+                    className="max-h-9 max-w-[4rem] object-contain grayscale opacity-50"
+                    onError={(e) => { e.currentTarget.style.display = 'none' }}
+                  />
+                </div>
+                <span className="text-[11px] font-semibold text-slate-400 whitespace-nowrap">{name}</span>
               </div>
             ))}
           </div>
