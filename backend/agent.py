@@ -3455,7 +3455,13 @@ class PrintingAgent:
     # ── Anthropic (Claude) ────────────────────────────────────────────────────
     async def _chat_anthropic(self, message: str, session_id: str,
                               identity: "SessionIdentity | None" = None) -> str:
-        await cs.add_message(session_id, "user", message, self.store_id)
+        # Guard: same retry-dedup logic as _chat_groq — don't double-add.
+        await cs.restore_to_memory(session_id)
+        existing = cs.all_conversations().get(session_id) or {}
+        existing_msgs = existing.get("messages", [])
+        last_user = next((m for m in reversed(existing_msgs) if m.get("role") == "user"), None)
+        if not (last_user and last_user.get("content") == message):
+            await cs.add_message(session_id, "user", message, self.store_id)
         # get_groq_history returns [{role, content: str}] — valid for Anthropic too
         # (Anthropic accepts plain string content; tool-call turns are ephemeral
         #  per request and are NOT persisted to the conversation store)

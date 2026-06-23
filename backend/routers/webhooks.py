@@ -1695,7 +1695,12 @@ async def handle_whatsapp_message(msg: dict):
         print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
     except Exception as exc:
         print(f"[whatsapp] handle error: {exc}")
-        raise  # let the inbox drainer retry this message
+        # Auth errors (bad API key) will never succeed on retry — drop them.
+        _s = str(exc).lower()
+        if "authentication_error" in _s or "invalid x-api-key" in _s or "401" in _s:
+            print(f"[whatsapp] ⛔ auth error — not retrying (fix the API key for store {store_id})")
+            return
+        raise  # let the inbox drainer retry transient errors
 
 
 async def handle_messenger_message(msg: dict):
@@ -1986,4 +1991,8 @@ async def handle_telegram_message(msg: dict):
         print(f"[telegram] ↩ replied to {chat_id} (store {store_id})")
     except Exception as exc:
         print(f"[telegram] handle error: {exc}")
-        raise  # let the inbox drainer retry this message
+        _s = str(exc).lower()
+        if "authentication_error" in _s or "invalid x-api-key" in _s or "401" in _s:
+            print(f"[telegram] ⛔ auth error — not retrying (fix the API key for store {store_id})")
+            return
+        raise  # let the inbox drainer retry transient errors
