@@ -76,6 +76,7 @@ async def _run() -> None:
         asyncio.create_task(main._token_refresh_loop(),    name="token_refresh"),
         asyncio.create_task(main._periodic_flush_loop(),   name="periodic_flush"),
         asyncio.create_task(main._periodic_cleanup_loop(), name="periodic_cleanup"),
+        asyncio.create_task(main._backup_loop(),           name="backup"),
         asyncio.create_task(main._inbox_drain_loop(),      name="inbox_drain"),
         asyncio.create_task(main._outbox_drain_loop(),     name="outbox_drain"),
     ]
@@ -124,7 +125,7 @@ async def _run() -> None:
 
     # Release any leader locks we hold so the next worker picks up faster.
     # Safe even if we never won — release_leader is a no-op for non-holders.
-    for lock_name in ("token_refresh", "periodic_flush", "periodic_cleanup"):
+    for lock_name in ("token_refresh", "periodic_flush", "periodic_cleanup", "backup"):
         try:
             await db.release_leader(lock_name, main._WORKER_ID)
         except Exception:

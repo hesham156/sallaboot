@@ -57,6 +57,7 @@ _check_expiring_tokens = _lc.check_expiring_tokens
 _token_refresh_loop    = _lc.token_refresh_loop
 _periodic_flush_loop   = _lc.periodic_flush_loop
 _periodic_cleanup_loop = _lc.periodic_cleanup_loop
+_backup_loop           = _lc.backup_loop
 _inbox_drain_loop      = _lc.inbox_drain_loop
 _outbox_drain_loop     = _lc.outbox_drain_loop
 

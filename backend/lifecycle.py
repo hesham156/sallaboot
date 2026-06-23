@@ -189,6 +189,36 @@ async def learning_loop() -> None:
         await asyncio.sleep(6 * 3600)
 
 
+async def backup_loop() -> None:
+    """
+    Daily (BACKUP_INTERVAL_HOURS): take an encrypted off-site DB backup and
+    prune copies past the retention window. Leader-elected so a multi-instance
+    deploy takes exactly one backup per window, not one per replica. No-op
+    when R2 isn't configured, so it's safe to leave running everywhere.
+    """
+    import backup as _bk
+    if not _bk.enabled():
+        log.info("backup_loop_disabled_unconfigured")
+        return
+    await asyncio.sleep(240)          # let startup settle
+    interval = _bk.interval_hours() * 3600
+    while True:
+        try:
+            # TTL covers a worst-case dump+upload; the next tick renews it.
+            if await db.try_lead("backup", WORKER_ID, ttl_seconds=interval + 600):
+                res = await _bk.run_backup()
+                if res["ok"]:
+                    log.info("backup_loop_ok", extra={
+                        "key": res["key"], "bytes": res["size_bytes"],
+                        "pruned": res["pruned"],
+                    })
+                else:
+                    log.error("backup_loop_failed", extra={"error": res["error"]})
+        except Exception:
+            log.exception("backup_loop_top_level_error")
+        await asyncio.sleep(interval)
+
+
 async def periodic_cleanup_loop() -> None:
     """
     Every 6h: prune the small bookkeeping tables. Leader-elected with a
@@ -427,6 +457,7 @@ async def startup() -> None:
         asyncio.create_task(campaign_scheduler_loop())
         asyncio.create_task(abandoned_cart_loop())
         asyncio.create_task(learning_loop())
+        asyncio.create_task(backup_loop())
         print("[startup] 🔄💾🧹 Periodic loops registered (leader-elected)")
     else:
         print("[startup] ⏸ Periodic loops disabled (ENABLE_PERIODIC=false)")

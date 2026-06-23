@@ -3,8 +3,16 @@ Store-level admin routes: sync, products, debug, register, diagnostics.
 Super-admin platform-ops routes: registry-vs-db, reload-from-db, db-test.
 """
 import asyncio
+import datetime as _dt
+import json
+import os
+import re
+import tempfile
+import zipfile
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 import auth as _auth
 import database as db
@@ -12,7 +20,7 @@ import store_manager as sm
 import store_brain as brain
 from store_sync import sync_store
 from models import ManualRegisterRequest
-from routers.deps import audit
+from routers.deps import audit, require_store_owner
 
 router = APIRouter()
 
@@ -517,6 +525,98 @@ async def delete_store(store_id: str, request: Request):
         "purged": counts,
     })
     return {"status": "ok", "store_id": store_id, "purged": counts}
+
+
+# ── Export a store's data (owner / super) ─────────────────────────────────────
+
+# Cap on the total upload bytes bundled into one export, so a store with
+# huge attachments can't OOM the process. Files past the cap are listed in
+# metadata.json under "uploads_skipped". Override via env if needed.
+_EXPORT_MAX_UPLOAD_BYTES = int(os.getenv("EXPORT_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
+
+_UNSAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._\-؀-ۿ ]+")
+
+
+def _safe_name(name: str) -> str:
+    """Flatten a user-supplied filename to a single safe path segment
+    (no separators, no traversal). Keeps Arabic letters readable."""
+    base = (name or "file").replace("\\", "/").split("/")[-1]
+    base = _UNSAFE_NAME_RE.sub("_", base).strip(". ") or "file"
+    return base[:120]
+
+
+@router.get("/admin/{store_id}/export")
+async def export_store_data(store_id: str, request: Request):
+    """
+    Download EVERYTHING this store owns as a ZIP — the data-portability
+    counterpart to the data-deletion flow (PDPL / GDPR Art. 20). Owner or
+    super only; employees are blocked.
+
+    Archive layout:
+      • metadata.json — store_id, generated_at, record counts, skipped uploads
+      • data.json     — every per-store table row (secrets/PII-hashes redacted)
+      • uploads/<file_id>__<filename> — the actual uploaded files (up to the cap)
+    """
+    require_store_owner(request, store_id)   # owner or super; raises on employee
+    if not db.available():
+        raise HTTPException(503, "قاعدة البيانات غير متاحة — التصدير يتطلب اتصالاً بقاعدة البيانات")
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+
+    data = await db.export_store(store_id)
+    if not data:
+        raise HTTPException(404, "لا توجد بيانات للتصدير")
+
+    counts = {k: len(v) for k, v in data.items() if isinstance(v, list)}
+    skipped: list[str] = []
+
+    fd, tmp = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            seen: dict[str, int] = {}
+            async for file_id, filename, _ctype, blob in db.fetch_store_upload_blobs(
+                store_id, _EXPORT_MAX_UPLOAD_BYTES, skipped
+            ):
+                arc = f"uploads/{file_id}__{_safe_name(filename)}"
+                # Guard against the (unlikely) duplicate arcname.
+                if arc in seen:
+                    seen[arc] += 1
+                    arc = f"uploads/{file_id}_{seen[arc]}__{_safe_name(filename)}"
+                else:
+                    seen[arc] = 0
+                zf.writestr(arc, blob)
+
+            meta = {
+                "store_id":       store_id,
+                "generated_at":   _dt.datetime.now(_dt.timezone.utc)
+                                      .isoformat().replace("+00:00", "Z"),
+                "schema_version": 1,
+                "record_counts":  counts,
+                "uploads_skipped": skipped,
+                "note": ("Secrets are redacted: OAuth access/refresh tokens, "
+                         "provider API keys, the store linking key, and employee "
+                         "password hashes are NOT included."),
+            }
+            zf.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
+            zf.writestr("data.json", json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+    await audit(request, "store_data_exported", target_store=store_id, details={
+        "record_counts":   counts,
+        "uploads_skipped": len(skipped),
+    })
+
+    filename = f"export_{store_id}_{_dt.date.today().isoformat()}.zip"
+    return FileResponse(
+        tmp,
+        media_type="application/zip",
+        filename=filename,
+        background=BackgroundTask(os.remove, tmp),
+    )
 
 
 # ── Removed: unauthenticated backward-compat aliases ──────────────────────────

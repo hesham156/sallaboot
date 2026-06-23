@@ -306,6 +306,11 @@ async def env_check(request: Request):
         super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
         result["ADMIN_SECRET_STABLE"]             = _auth.ADMIN_SECRET_STABLE
         result["SUPER_ADMIN_PASSWORD_IS_DEFAULT"] = (super_pass == "admin")
+        try:
+            import backup as _bk
+            result["BACKUP"] = _bk.get_status()
+        except Exception:
+            result["BACKUP"] = {"enabled": False, "error": "backup module unavailable"}
 
     return result
 

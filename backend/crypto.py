@@ -266,6 +266,56 @@ def decrypt_ai_config_blob(ai_config: dict | None) -> dict:
     return decrypt_fields(ai_config, AI_CONFIG_SECRET_FIELDS)
 
 
+# ── Key rotation: re-encrypt onto the ACTIVE key ──────────────────────────
+# encrypt() is idempotent on already-ciphertext (returns it unchanged), so it
+# can NOT move a value from an old key to the new one. Rotation must DECRYPT
+# (MultiFernet tries the active key + every ENCRYPTION_KEYS_OLD) and then
+# ENCRYPT again — encrypt() uses the active (first) key, so the rewritten
+# value is readable with the new key alone. This is what lets you finally
+# drop ENCRYPTION_KEYS_OLD.
+
+def reencrypt(value: str) -> str:
+    """
+    Re-encrypt one value onto the active key. Empty / non-string pass
+    through. Legacy plaintext gets encrypted (so rotation also finishes any
+    leftover migration). Raises ValueError if the value can't be decrypted
+    by ANY configured key — i.e. the matching old key is missing from
+    ENCRYPTION_KEYS_OLD; surfacing it beats silently dropping a secret.
+    """
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str):
+        return value
+    return encrypt(decrypt(value))
+
+
+def reencrypt_fields(blob: dict | None, fields: Iterable[str]) -> dict:
+    """Mirror of encrypt_fields, but decrypt-then-encrypt onto the active key."""
+    if not blob:
+        return {} if blob is None else blob
+    out = dict(blob)
+    for f in fields:
+        v = out.get(f)
+        if isinstance(v, str) and v:
+            out[f] = reencrypt(v)
+    return out
+
+
+def reencrypt_store_blob(tokens: dict | None) -> dict:
+    """Rotate every secret in a stores.tokens blob (incl. nested ai_config)."""
+    if not tokens:
+        return {}
+    out = reencrypt_fields(tokens, TOKENS_SECRET_FIELDS)
+    nested_ai = out.get("ai_config")
+    if isinstance(nested_ai, dict) and nested_ai:
+        out["ai_config"] = reencrypt_fields(nested_ai, AI_CONFIG_SECRET_FIELDS)
+    return out
+
+
+def reencrypt_ai_config_blob(ai_config: dict | None) -> dict:
+    return reencrypt_fields(ai_config, AI_CONFIG_SECRET_FIELDS)
+
+
 # ── Status (for /env-check diagnostics) ──────────────────────────────────
 
 def get_status() -> dict:

@@ -18,6 +18,7 @@ import os
 import json
 import asyncio
 import datetime as _dt
+import decimal as _decimal
 import secrets
 import asyncpg
 from typing import Optional
@@ -1251,6 +1252,59 @@ async def force_save_all_stores(stores: list[dict]) -> int:
     return saved
 
 
+async def rotate_encryption() -> dict:
+    """
+    Re-encrypt every stores row onto the ACTIVE encryption key, so the keys
+    in ENCRYPTION_KEYS_OLD can be retired. Run AFTER deploying with the new
+    key as ENCRYPTION_KEY and the previous key in ENCRYPTION_KEYS_OLD.
+
+    For each row: decrypt the secret blobs (MultiFernet tries active + old
+    keys) then re-encrypt with the active key, and UPDATE only when the
+    ciphertext actually changed. Returns:
+        {total, rotated, unchanged, errors:[{store_id, error}]}
+
+    A row whose old key is missing from ENCRYPTION_KEYS_OLD is reported in
+    `errors` and left untouched — rotation never drops an unreadable secret.
+    """
+    result = {"total": 0, "rotated": 0, "unchanged": 0, "errors": []}
+    if not _pool:
+        result["errors"].append({"store_id": "*", "error": "DB not connected"})
+        return result
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("SELECT store_id, tokens, ai_config FROM stores")
+        result["total"] = len(rows)
+        for r in rows:
+            sid    = r["store_id"]
+            tokens = _coerce_jsonb(r["tokens"])
+            ai_cfg = _coerce_jsonb(r["ai_config"])
+            try:
+                new_tokens = _crypto.reencrypt_store_blob(tokens)
+                new_ai_cfg = _crypto.reencrypt_ai_config_blob(ai_cfg)
+            except ValueError as exc:
+                # Missing old key — surface, don't clobber.
+                result["errors"].append({"store_id": sid, "error": str(exc)[:200]})
+                continue
+            if new_tokens == tokens and new_ai_cfg == ai_cfg:
+                result["unchanged"] += 1
+                continue
+            try:
+                async with _pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE stores SET tokens = $2::jsonb, ai_config = $3::jsonb, "
+                        "updated_at = NOW() WHERE store_id = $1",
+                        sid,
+                        json.dumps(new_tokens, ensure_ascii=False),
+                        json.dumps(new_ai_cfg, ensure_ascii=False),
+                    )
+                result["rotated"] += 1
+            except Exception as exc:
+                result["errors"].append({"store_id": sid, "error": str(exc)[:200]})
+    except Exception as e:
+        result["errors"].append({"store_id": "*", "error": f"{type(e).__name__}: {e}"[:200]})
+    return result
+
+
 def _log_task_error(task: asyncio.Task):
     """Print exceptions raised by fire-and-forget DB tasks so they don't vanish."""
     try:
@@ -1635,6 +1689,164 @@ async def purge_store(store_id: str) -> dict:
     except Exception as e:
         print(f"[db] purge_store({store_id!r}) error: {e}")
     return counts
+
+
+def _json_row(rec, drop: tuple = ()) -> dict:
+    """
+    Serialise an asyncpg Record into a JSON-safe dict.
+      • datetime → ISO-8601 UTC 'Z'; date → ISO date
+      • Decimal → float (NUMERIC money columns)
+      • bytes/memoryview → SKIPPED (never inline binary in the JSON; the
+        actual upload bytes are bundled as files in the ZIP instead)
+      • JSONB is already a dict via the codec
+    `drop` lists column names to omit entirely (secrets, password hashes).
+    """
+    out: dict = {}
+    for k, v in dict(rec).items():
+        if k in drop:
+            continue
+        if isinstance(v, _dt.datetime):
+            v = _iso_z(v)
+        elif isinstance(v, _dt.date):
+            v = v.isoformat()
+        elif isinstance(v, _decimal.Decimal):
+            v = float(v)
+        elif isinstance(v, (bytes, bytearray, memoryview)):
+            continue
+        out[k] = v
+    return out
+
+
+def _redact_store_blob(blob) -> dict:
+    """Drop every secret field from a stores tokens / ai_config blob so a
+    merchant data export never leaks OAuth tokens or provider API keys.
+
+    Copies defensively — _coerce_jsonb hands back the SAME dict when passed
+    a dict, so popping in place would mutate the caller's data.
+    """
+    d = dict(_coerce_jsonb(blob))
+    for f in _crypto.TOKENS_SECRET_FIELDS:
+        d.pop(f, None)
+    for f in _crypto.AI_CONFIG_SECRET_FIELDS:
+        d.pop(f, None)
+    nested = d.get("ai_config")
+    if isinstance(nested, dict):
+        nested = dict(nested)
+        for f in _crypto.AI_CONFIG_SECRET_FIELDS:
+            nested.pop(f, None)
+        d["ai_config"] = nested
+    return d
+
+
+async def export_store(store_id: str) -> dict:
+    """
+    Gather ALL of one store's business + customer data for a data-portability
+    export (the read-side mirror of purge_store). Secrets are redacted:
+    OAuth tokens, provider API keys, the linking api_key, and employee
+    password hashes never appear in the result.
+
+    Returns a JSON-serialisable dict:
+        {store, conversations, contacts, bot_orders, bot_training,
+         abandoned_carts, wa_campaigns, wa_campaign_recipients, employees,
+         llm_usage, uploads}
+    `uploads` is metadata only — the file bytes are streamed separately by
+    fetch_store_upload_blobs() so a huge attachment can't blow up memory here.
+    """
+    if not _pool:
+        return {}
+
+    export: dict = {}
+    try:
+        async with _pool.acquire() as conn:
+            # stores — single row, secrets stripped, linking api_key omitted.
+            srow = await conn.fetchrow(
+                "SELECT store_id, tokens, ai_config, owner_email, integrations, updated_at "
+                "FROM stores WHERE store_id = $1",
+                store_id,
+            )
+            if srow:
+                export["store"] = {
+                    "store_id":    srow["store_id"],
+                    "owner_email": srow["owner_email"],
+                    "tokens":      _redact_store_blob(srow["tokens"]),
+                    "ai_config":   _redact_store_blob(srow["ai_config"]),
+                    "integrations": _coerce_jsonb(srow["integrations"]),
+                    "updated_at":  _iso_z(srow["updated_at"]),
+                }
+
+            # Generic per-store tables: SELECT * filtered by store_id.
+            # (table, drop-columns) — drop secret/binary columns per table.
+            simple = [
+                ("conversations",   ()),
+                ("contacts",        ()),
+                ("bot_orders",      ()),
+                ("bot_training",    ()),
+                ("abandoned_carts", ()),
+                ("wa_campaigns",    ()),
+                ("llm_usage",       ()),
+                ("employees",       ("password_hash",)),
+                ("uploads",         ("data",)),  # metadata only; bytes bundled separately
+            ]
+            for table, drop in simple:
+                try:
+                    rows = await conn.fetch(
+                        f"SELECT * FROM {table} WHERE store_id = $1 ORDER BY 1", store_id
+                    )
+                    export[table] = [_json_row(r, drop=drop) for r in rows]
+                except Exception as te:
+                    print(f"[db] export_store {table} error: {te}")
+                    export[table] = []
+
+            # Campaign recipients are keyed by campaign_id → join through the
+            # store's campaigns.
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT r.* FROM wa_campaign_recipients r
+                    JOIN wa_campaigns c ON c.id = r.campaign_id
+                    WHERE c.store_id = $1
+                    ORDER BY r.id
+                    """,
+                    store_id,
+                )
+                export["wa_campaign_recipients"] = [_json_row(r) for r in rows]
+            except Exception as te:
+                print(f"[db] export_store wa_campaign_recipients error: {te}")
+                export["wa_campaign_recipients"] = []
+    except Exception as e:
+        print(f"[db] export_store({store_id!r}) error: {e}")
+    return export
+
+
+async def fetch_store_upload_blobs(store_id: str, max_total_bytes: int,
+                                   skipped_out: list | None = None):
+    """
+    Async-generator yielding (file_id, filename, content_type, data) for a
+    store's uploads, one row at a time so a huge attachment never forces the
+    whole set into memory. Files are included in created order until the
+    cumulative size would exceed `max_total_bytes`; remaining file_ids are
+    appended to `skipped_out` (if provided) so the export can record them.
+    """
+    if not _pool:
+        return
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT file_id, filename, content_type, size_bytes FROM uploads "
+            "WHERE store_id = $1 ORDER BY created_at",
+            store_id,
+        )
+    total = 0
+    for r in rows:
+        size = int(r["size_bytes"] or 0)
+        if total + size > max_total_bytes:
+            if skipped_out is not None:
+                skipped_out.append(r["file_id"])
+            continue
+        blob = await load_upload(r["file_id"])
+        if not blob:
+            continue
+        total += size
+        yield (r["file_id"], blob["filename"], blob["content_type"], blob["data"])
 
 
 async def clear_whatsapp_phone_id(phone_id: str, keep_store_id: str = "") -> list[str]:

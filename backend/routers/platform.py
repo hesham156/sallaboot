@@ -299,3 +299,43 @@ async def update_llm_budget(store_id: str, request: Request):
         "daily_token_budget": applied,
         "effective_budget":   daily_token_budget(store_id),
     }
+
+
+# ── Off-site encrypted backups (super-admin only) ───────────────────────────
+# Backups cover the whole database (every tenant), so only the platform
+# super-admin may inspect or trigger them — never a single store owner.
+
+def _require_super(request: Request) -> dict:
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token) or {}
+    if not claims.get("su"):
+        raise HTTPException(403, "هذه الصفحة متاحة للمدير العام فقط")
+    return claims
+
+
+@router.get("/admin/backups")
+async def backups_status(request: Request):
+    """Backup configuration + the most recent stored artifacts."""
+    _require_super(request)
+    import backup as _bk
+    return {"status": _bk.get_status(), "backups": await _bk.list_backups(limit=50)}
+
+
+@router.post("/admin/backups/run")
+async def backups_run(request: Request):
+    """Trigger an on-demand backup now (in addition to the daily loop)."""
+    _require_super(request)
+    import backup as _bk
+    if not _bk.enabled():
+        raise HTTPException(
+            400,
+            "الباكب غير مُهيّأ — اضبط متغيّرات R2_* و BACKUP_ENCRYPTION_KEY أولاً",
+        )
+    res = await _bk.run_backup()
+    await audit(request, "backup_run_manual", details={
+        "ok": res["ok"], "key": res["key"], "size_bytes": res["size_bytes"],
+        "error": res["error"][:200],
+    })
+    if not res["ok"]:
+        raise HTTPException(502, f"فشل الباكب: {res['error']}")
+    return res

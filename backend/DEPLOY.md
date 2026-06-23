@@ -116,13 +116,64 @@ value in Railway env vars + an offline backup (1Password / Bitwarden).
 2. Set `ENCRYPTION_KEYS_OLD=<current-key>` on every Railway service.
 3. Set `ENCRYPTION_KEY=<new-key>` on every Railway service.
 4. Redeploy — old ciphertexts still decrypt via `ENCRYPTION_KEYS_OLD`; new writes use the new key.
-5. Run `alembic upgrade head` if you authored a "rotate" migration (or wait for natural rewrites via `save_store` over a few days).
-6. Once `SELECT * FROM stores` shows no `enc:v1:...` blobs that decrypt with only the old key (audit query in `crypto.py`), remove `ENCRYPTION_KEYS_OLD`.
+5. Rewrite every existing row onto the new key: `python rotate_encryption_key.py`
+   (preview first with `--dry-run`). This is **required** — `crypto.encrypt()`
+   is idempotent on ciphertext, so rows are NOT re-keyed by normal saves; without
+   this step the old key can never be retired.
+6. Confirm a re-run reports `rotated=0 errors=0`, then remove `ENCRYPTION_KEYS_OLD`
+   from every service and redeploy.
 
 ### First-deploy migration
 - Migration `0002_encrypt_existing_secrets` reads every `stores` row, encrypts any plaintext field, writes it back.
 - It **errors loudly** if `ENCRYPTION_KEY` is unset — deploy will halt before serving traffic. This is intentional: encrypting with an ephemeral key would render every row unreadable on the next restart.
 - The migration is idempotent — re-running on an already-encrypted DB is a no-op.
+
+## Off-site encrypted backups
+
+Railway's managed Postgres snapshots live on the same provider — a billing
+lapse, account compromise, or region incident takes the DB *and* its
+snapshots together. `backup.py` adds an independent copy: a daily,
+leader-elected `pg_dump -Fc` that is encrypted and uploaded to S3-compatible
+object storage (Cloudflare R2 recommended). See `BACKUP.md` for the full
+setup + restore runbook.
+
+| Var                     | Required | Purpose                                                                 |
+| ----------------------- | -------- | ----------------------------------------------------------------------- |
+| `R2_ENDPOINT_URL`       | for backups | e.g. `https://<account>.r2.cloudflarestorage.com`                    |
+| `R2_ACCESS_KEY_ID`      | for backups | R2 / S3 access key id.                                               |
+| `R2_SECRET_ACCESS_KEY`  | for backups | R2 / S3 secret.                                                     |
+| `R2_BUCKET`             | for backups | Existing bucket name.                                                |
+| `R2_PREFIX`             | no       | Object key prefix (default `backups`).                                  |
+| `BACKUP_ENCRYPTION_KEY` | strongly recommended | Dedicated Fernet key for the dump artifact (separate from `ENCRYPTION_KEY` so rotating one doesn't break the other). Falls back to `ENCRYPTION_KEY` if unset. |
+| `BACKUP_RETENTION_DAYS` | no       | Delete copies older than this (default `30`).                           |
+| `BACKUP_INTERVAL_HOURS` | no       | Backup cadence (default `24`).                                          |
+
+⚠️ The pipeline **fails closed**: if neither `BACKUP_ENCRYPTION_KEY` nor
+`ENCRYPTION_KEY` is set, it refuses to upload rather than ship a plaintext
+DB dump. Keep an offline copy of `BACKUP_ENCRYPTION_KEY` — a lost key makes
+every stored backup unrecoverable.
+
+- Status + manual run (super-admin): `GET /admin/backups`, `POST /admin/backups/run`.
+- Restore: `python restore_backup.py --latest --out restore.dump` then `pg_restore`.
+
+## Database & network hardening
+
+- **Use Railway's private network for `DATABASE_URL`.** Link the Postgres
+  service to the app via the private (`*.railway.internal`) host, not the
+  public proxy. Internal traffic never leaves Railway's network, so the DB
+  isn't reachable from the public internet. Only switch to the public proxy
+  temporarily for an admin task (e.g. running `rotate_encryption_key.py`
+  from your laptop), then switch back.
+- **Don't expose Postgres publicly by default.** If a public endpoint is
+  enabled for a one-off, disable it again afterward. The encrypted secret
+  fields limit blast radius, but customer PII (conversations, contacts) is
+  plaintext in the DB — network isolation is the primary control for it.
+- **Keep TLS on** for any non-private connection (asyncpg negotiates SSL
+  with Railway's managed PG automatically; don't pin `sslmode=disable`).
+- **Least-privilege object-storage tokens.** The R2 token used for backups
+  needs Object Read & Write on the backup bucket only — not account-wide.
+- **Rotate `BACKUP_ENCRYPTION_KEY` and `ENCRYPTION_KEY` on a schedule** (and
+  immediately if a key may have leaked). See the rotation procedure above.
 
 ## Observability
 

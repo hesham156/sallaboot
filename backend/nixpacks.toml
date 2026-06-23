@@ -1,5 +1,8 @@
 [phases.setup]
-nixPkgs = ["python312"]
+# postgresql_16 is included only for its client binaries (pg_dump / pg_restore)
+# used by backup.py to take logical dumps for the off-site encrypted backups.
+# It does NOT run a Postgres server in the container.
+nixPkgs = ["python312", "postgresql_16"]
 
 [phases.install]
 cmds = [

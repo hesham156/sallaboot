@@ -606,6 +606,28 @@ export const api = {
   exportContactsUrl: (storeId: string, search = '') =>
     `/admin/${storeId}/contacts/export${search ? `?search=${encodeURIComponent(search)}` : ''}`,
 
+  // Full store data export (ZIP). Fetched as a blob WITH the bearer header
+  // (window.open can't attach it), then handed to the browser as a download.
+  downloadStoreExport: async (storeId: string): Promise<void> => {
+    const token = getToken()
+    const res = await fetch(`/admin/${storeId}/export`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+      throw new ApiError(res.status, err.detail || `HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `export_${storeId}_${new Date().toISOString().slice(0, 10)}.zip`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+
   // ── WhatsApp Campaigns ──────────────────────────────────────────────────
   listCampaigns: (storeId: string) =>
     get<{ campaigns: Campaign[]; count: number }>(`/admin/${storeId}/campaigns`),

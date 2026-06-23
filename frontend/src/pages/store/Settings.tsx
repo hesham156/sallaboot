@@ -166,6 +166,8 @@ export default function Settings({ storeId }: Props) {
   const [confirmPass, setConfirmPass] = useState('')
   const [passLoading, setPassLoading] = useState(false)
   const [passMsg, setPassMsg]       = useState('')
+  const [exporting, setExporting]   = useState(false)
+  const [exportMsg, setExportMsg]   = useState('')
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null)
   const [refreshing, setRefreshing]   = useState(false)
   const [tokenMsg, setTokenMsg]       = useState('')
@@ -488,6 +490,13 @@ export default function Settings({ storeId }: Props) {
     try { await api.changePassword(storeId, curPass, newPass); setPassMsg('✅ تم التغيير'); setCurPass(''); setNewPass(''); setConfirmPass('') }
     catch (e: unknown) { setPassMsg(e instanceof Error ? e.message : 'خطأ') }
     finally { setPassLoading(false) }
+  }
+
+  async function exportData() {
+    setExporting(true); setExportMsg('')
+    try { await api.downloadStoreExport(storeId); setExportMsg('✅ بدأ تنزيل ملف بياناتك') }
+    catch (e: unknown) { setExportMsg(e instanceof Error ? e.message : 'تعذّر التصدير') }
+    finally { setExporting(false) }
   }
 
   async function refreshTok() {
@@ -1425,6 +1434,23 @@ export default function Settings({ storeId }: Props) {
                 isDisabled={!curPass || !newPass || !confirmPass}
                 className="w-full font-semibold h-10 mt-3">
                 {passLoading ? '' : 'تغيير كلمة المرور'}
+              </Button>
+            </section>
+
+            {/* Data export (data portability) */}
+            <section>
+              <label className="text-xs font-bold text-default-500 block mb-2">تصدير بياناتي</label>
+              <p className="text-xs text-default-400 mb-3 leading-relaxed">
+                نزّل نسخة كاملة من بيانات متجرك (المحادثات، جهات الاتصال، الطلبات،
+                التدريب، الملفات المرفوعة) في ملف ZIP واحد. لا يتضمّن الملف أي أسرار
+                (توكنات أو مفاتيح API).
+              </p>
+              <InlineAlert text={exportMsg} />
+              <Button color="default" variant="bordered" isLoading={exporting}
+                onPress={exportData}
+                startContent={!exporting && <Icon d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" size={14} />}
+                className="w-full font-semibold h-10 mt-1">
+                {exporting ? 'جارٍ تجهيز الملف…' : 'تصدير بياناتي (ZIP)'}
               </Button>
             </section>
           </div>

@@ -209,6 +209,69 @@ def test_store_blob_handles_empty_inputs(crypto_mod):
     assert crypto_mod.decrypt_store_blob({})   == {}
 
 
+# ── Key rotation (reencrypt onto the active key) ───────────────────────────
+
+def test_reencrypt_moves_ciphertext_onto_new_key(reset_crypto):
+    """The core rotation guarantee: a value encrypted with the OLD key, once
+    reencrypt()'d under (new + old), must decrypt with the NEW key ALONE.
+    Plain encrypt() can't do this — it's idempotent on ciphertext."""
+    old = Fernet.generate_key().decode()
+    new = Fernet.generate_key().decode()
+
+    crypto_old = reset_crypto(old)
+    ct_old = crypto_old.encrypt("salla-token")
+
+    crypto_rot = reset_crypto(new, old)            # active=new, fallback=old
+    # encrypt() is a no-op on ciphertext → would NOT rotate:
+    assert crypto_rot.encrypt(ct_old) == ct_old
+    # reencrypt() decrypts (via old) then re-encrypts (via new):
+    ct_new = crypto_rot.reencrypt(ct_old)
+    assert crypto_rot.decrypt(ct_new) == "salla-token"
+
+    # After dropping the old key, the rotated value still reads; the original
+    # would not — proving the rewrite was necessary and effective.
+    crypto_new_only = reset_crypto(new)
+    assert crypto_new_only.decrypt(ct_new) == "salla-token"
+    with pytest.raises(ValueError):
+        crypto_new_only.decrypt(ct_old)
+
+
+def test_reencrypt_store_blob_rotates_all_secrets(reset_crypto):
+    old = Fernet.generate_key().decode()
+    new = Fernet.generate_key().decode()
+
+    crypto_old = reset_crypto(old)
+    enc = crypto_old.encrypt_store_blob({
+        "access_token":  "tok",
+        "refresh_token": "ref",
+        "store_name":    "متجر",
+        "ai_config": {"groq_api_key": "gsk", "bot_name": "Sara"},
+    })
+
+    crypto_rot = reset_crypto(new, old)
+    rot = crypto_rot.reencrypt_store_blob(enc)
+
+    crypto_new_only = reset_crypto(new)
+    dec = crypto_new_only.decrypt_store_blob(rot)
+    assert dec["access_token"] == "tok"
+    assert dec["refresh_token"] == "ref"
+    assert dec["ai_config"]["groq_api_key"] == "gsk"
+    assert dec["store_name"] == "متجر"            # non-secret preserved
+    assert dec["ai_config"]["bot_name"] == "Sara"
+
+
+def test_reencrypt_missing_old_key_raises(reset_crypto):
+    """If the matching old key isn't configured, reencrypt must raise rather
+    than silently corrupt/drop the secret."""
+    old = Fernet.generate_key().decode()
+    new = Fernet.generate_key().decode()
+    ct_old = reset_crypto(old).encrypt("secret")
+
+    crypto_new_only = reset_crypto(new)            # old key NOT provided
+    with pytest.raises(ValueError):
+        crypto_new_only.reencrypt(ct_old)
+
+
 def test_dev_key_fallback_emits_warning(reset_crypto, capsys, monkeypatch):
     """When ENCRYPTION_KEY is unset, dev fallback must scream so the
     operator notices BEFORE shipping to prod."""
