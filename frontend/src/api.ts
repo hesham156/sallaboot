@@ -642,6 +642,17 @@ export const api = {
   deleteCampaign: (storeId: string, id: number) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/campaigns/${id}`),
 
+  // ── Broadcasts (omni-channel free-text bulk send) ─────────────────────────
+  broadcastAudience: (storeId: string) =>
+    get<{ channels: string[]; counts: Record<string, number> }>(`/admin/${storeId}/broadcasts/audience`),
+  listBroadcasts: (storeId: string) =>
+    get<{ broadcasts: Broadcast[]; count: number }>(`/admin/${storeId}/broadcasts`),
+  getBroadcast: (storeId: string, id: number) =>
+    get<Broadcast>(`/admin/${storeId}/broadcasts/${id}`),
+  createBroadcast: (storeId: string, message: string, channels: string[]) =>
+    post<{ id: number; status: string; channels: string[]; message: string }>(
+      `/admin/${storeId}/broadcasts`, { message, channels }),
+
   // ── Integrations ──────────────────────────────────────────────────────────
   listIntegrations: (storeId: string) =>
     get<{ integrations: Record<string, IntegrationData> }>(`/admin/${storeId}/integrations`),
@@ -1273,6 +1284,19 @@ export interface Campaign {
   sent_count: number
   failed_count: number
   created_at: string
+}
+
+export interface Broadcast {
+  id: number
+  message: string
+  channels: string[]
+  status: 'draft' | 'sending' | 'sent' | 'failed'
+  total_count: number
+  sent_count: number
+  failed_count: number
+  per_channel: Record<string, { sent: number; failed: number }>
+  created_at: string
+  sent_at?: string
 }
 
 // ── Contacts (CRM) ─────────────────────────────────────────────────────

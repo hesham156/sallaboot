@@ -506,6 +506,27 @@ async def _create_tables():
                 ON contacts USING gin (to_tsvector('simple',
                     coalesce(name,'') || ' ' || coalesce(phone,'') || ' ' || coalesce(email,'')))
                 WHERE store_id IS NOT NULL;
+
+            -- ── Omni-channel broadcasts (free-text bulk send) ───────────────
+            -- One row per broadcast. Unlike wa_campaigns (WhatsApp template
+            -- only), this fans a free-text message out to every CONNECTED
+            -- channel's active users (widget, telegram, messenger, instagram,
+            -- email, and WhatsApp within the 24h customer-care window).
+            CREATE TABLE IF NOT EXISTS broadcasts (
+                id            BIGSERIAL PRIMARY KEY,
+                store_id      TEXT NOT NULL,
+                message       TEXT NOT NULL,
+                channels      JSONB NOT NULL DEFAULT '[]',   -- ['widget','telegram',…]
+                status        TEXT NOT NULL DEFAULT 'draft',  -- draft|sending|sent|failed
+                total_count   INT NOT NULL DEFAULT 0,
+                sent_count    INT NOT NULL DEFAULT 0,
+                failed_count  INT NOT NULL DEFAULT 0,
+                per_channel   JSONB NOT NULL DEFAULT '{}',    -- {channel:{sent,failed}}
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                sent_at       TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_broadcasts_store_ts
+                ON broadcasts (store_id, created_at DESC);
         """)
 
         # Separate idempotent migrations — run independently so a failure
@@ -1303,6 +1324,181 @@ async def rotate_encryption() -> dict:
     except Exception as e:
         result["errors"].append({"store_id": "*", "error": f"{type(e).__name__}: {e}"[:200]})
     return result
+
+
+# ── Broadcasts (omni-channel free-text bulk send) ───────────────────────────
+
+async def broadcast_create(store_id: str, message: str, channels: list[str]) -> int | None:
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO broadcasts (store_id, message, channels)
+                VALUES ($1, $2, $3::jsonb)
+                RETURNING id
+                """,
+                store_id, message, json.dumps(channels, ensure_ascii=False),
+            )
+        return int(row["id"]) if row else None
+    except Exception as e:
+        print(f"[db] broadcast_create error: {e}")
+        return None
+
+
+def _broadcast_row(r) -> dict:
+    return {
+        "id":           int(r["id"]),
+        "store_id":     r["store_id"],
+        "message":      r["message"],
+        "channels":     _coerce_jsonb(r["channels"]) if not isinstance(r["channels"], list) else r["channels"],
+        "status":       r["status"],
+        "total_count":  int(r["total_count"] or 0),
+        "sent_count":   int(r["sent_count"] or 0),
+        "failed_count": int(r["failed_count"] or 0),
+        "per_channel":  _coerce_jsonb(r["per_channel"]),
+        "created_at":   _iso_z(r["created_at"]),
+        "sent_at":      _iso_z(r["sent_at"]) if r["sent_at"] else "",
+    }
+
+
+async def broadcast_get(store_id: str, broadcast_id: int) -> dict | None:
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.fetchrow(
+                "SELECT * FROM broadcasts WHERE id = $1 AND store_id = $2",
+                int(broadcast_id), store_id,
+            )
+        return _broadcast_row(r) if r else None
+    except Exception as e:
+        print(f"[db] broadcast_get error: {e}")
+        return None
+
+
+async def broadcast_list(store_id: str, limit: int = 50) -> list[dict]:
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM broadcasts WHERE store_id = $1 "
+                "ORDER BY created_at DESC LIMIT $2",
+                store_id, int(limit),
+            )
+        return [_broadcast_row(r) for r in rows]
+    except Exception as e:
+        print(f"[db] broadcast_list error: {e}")
+        return []
+
+
+async def broadcast_update(broadcast_id: int, *, status: str | None = None,
+                           total: int | None = None, sent: int | None = None,
+                           failed: int | None = None, per_channel: dict | None = None,
+                           sent_at=None) -> None:
+    if not _pool:
+        return
+    sets, args = [], []
+    if status is not None:
+        sets.append(f"status = ${len(args)+1}"); args.append(status)
+    if total is not None:
+        sets.append(f"total_count = ${len(args)+1}"); args.append(int(total))
+    if sent is not None:
+        sets.append(f"sent_count = ${len(args)+1}"); args.append(int(sent))
+    if failed is not None:
+        sets.append(f"failed_count = ${len(args)+1}"); args.append(int(failed))
+    if per_channel is not None:
+        sets.append(f"per_channel = ${len(args)+1}::jsonb")
+        args.append(json.dumps(per_channel, ensure_ascii=False))
+    if sent_at is not None:
+        sets.append(f"sent_at = ${len(args)+1}"); args.append(sent_at)
+    if not sets:
+        return
+    args.append(int(broadcast_id))
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                f"UPDATE broadcasts SET {', '.join(sets)} WHERE id = ${len(args)}", *args,
+            )
+    except Exception as e:
+        print(f"[db] broadcast_update error: {e}")
+
+
+async def broadcast_channel_recipients(store_id: str, channel: str,
+                                       within_hours: int | None = None,
+                                       limit: int = 5000) -> list[dict]:
+    """
+    Resolve the recipients of a chat CHANNEL from the conversations table.
+    Returns [{recipient, session_id, name}] where `recipient` is the
+    channel-native id (phone / chat_id / psid) parsed from the session_id
+    (`{wa|tg|msgr|ig}:{store_id}:{recipient}`). For the website widget the
+    recipient IS the session_id (used to enqueue into widget_outbox).
+
+    `within_hours` limits to conversations active in that window — required
+    for WhatsApp / Messenger / Instagram free-text sends (Meta's 24h
+    customer-care window). None = no time limit (telegram / widget).
+    """
+    if not _pool:
+        return []
+    args: list = [store_id]
+    if channel in ("widget", "web"):
+        # Website widget sessions don't carry an explicit channel tag (the
+        # external channels do). Identify them as "no external channel" — i.e.
+        # channel is NULL or web/widget — and their session_id is the random
+        # widget id, used directly as the widget_outbox key.
+        where = ["store_id = $1",
+                 "(data->>'channel' IS NULL OR data->>'channel' IN ('web','widget'))"]
+    else:
+        where = ["store_id = $1", "data->>'channel' = $2"]
+        args.append(channel)
+    if within_hours is not None:
+        where.append(f"updated_at >= NOW() - INTERVAL '{int(within_hours)} hours'")
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT session_id, data->>'customer_name' AS name
+                FROM conversations
+                WHERE {' AND '.join(where)}
+                ORDER BY updated_at DESC
+                LIMIT ${len(args)+1}
+                """,
+                *args, int(limit),
+            )
+        out = []
+        for r in rows:
+            sid = r["session_id"]
+            recipient = sid if channel in ("widget", "web") else sid.rsplit(":", 1)[-1]
+            if recipient:
+                out.append({"recipient": recipient, "session_id": sid,
+                            "name": r["name"] or ""})
+        return out
+    except Exception as e:
+        print(f"[db] broadcast_channel_recipients({channel}) error: {e}")
+        return []
+
+
+async def broadcast_email_recipients(store_id: str, limit: int = 5000) -> list[dict]:
+    """Distinct contact emails for the email broadcast channel."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT email, name FROM contacts
+                WHERE store_id = $1 AND email <> ''
+                ORDER BY email
+                LIMIT $2
+                """,
+                store_id, int(limit),
+            )
+        return [{"recipient": r["email"], "name": r["name"] or ""} for r in rows]
+    except Exception as e:
+        print(f"[db] broadcast_email_recipients error: {e}")
+        return []
 
 
 def _log_task_error(task: asyncio.Task):
