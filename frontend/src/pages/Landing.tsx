@@ -575,11 +575,7 @@ export default function Landing() {
       {/* ═══════════════ PARTNERS MARQUEE ═══════════════ */}
       <section className="bg-slate-50 border-y border-slate-200 py-10 overflow-hidden">
         <p className="text-center text-xs font-bold text-slate-500 tracking-widest mb-7">يثق به أصحاب المتاجر الكبرى</p>
-        {/* Edge fade */}
-        <div
-          className="relative overflow-hidden"
-          style={{ maskImage: 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)', WebkitMaskImage: 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)' }}
-        >
+        <div className="relative overflow-hidden">
           {/* dir="ltr" ensures flex flows left→right inside the RTL page so translateX(-50%) animates correctly */}
           <div dir="ltr" className="flex items-center gap-8 animate-marquee" style={{ width: 'max-content' }}>
             {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map(({ domain, name }, i) => (
