@@ -150,11 +150,17 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
             await sm.reassign_owner_email(owner_email, store_id) if is_new else ("", "")
         )
 
+        import datetime as _dt_o
+        _expires_in = int(tokens.get("expires_in", 1_209_600))
+        _expires_at = (_dt_o.datetime.utcnow() + _dt_o.timedelta(seconds=_expires_in)).isoformat()
+        _store_meta: dict = {"expires_at": _expires_at}
+        if store_name:
+            _store_meta["store_name"] = store_name
         await sm.register_store(
             store_id      = store_id,
             access_token  = access_token,
             refresh_token = refresh_token,
-            store_info    = {"store_name": store_name} if store_name else None,
+            store_info    = _store_meta,
             owner_email   = owner_email,
         )
 

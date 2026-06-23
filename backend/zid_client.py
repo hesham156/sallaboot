@@ -59,10 +59,65 @@ class ZidClient:
                 if r.status_code == 429:
                     await asyncio.sleep(float(r.headers.get("Retry-After", "2")))
                     continue
+                if r.status_code == 401 and attempt == 0:
+                    try:
+                        await self._refresh_tokens()
+                        headers = self._prd_headers if use_prd_auth else self._mgr_headers
+                        continue
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Zid token refresh failed for store {self.store_id!r}: {exc}"
+                        ) from exc
                 r.raise_for_status()
                 return r.json()
         r.raise_for_status()
         return {}
+
+    async def _refresh_tokens(self) -> None:
+        """Exchange the stored refresh_token for new Zid credentials and persist them."""
+        import os
+        import database as _db
+
+        integ    = await _db.get_integrations(self.store_id)
+        zid_data = integ.get("zid") or {}
+        rt       = zid_data.get("refresh_token", "")
+        if not rt:
+            raise RuntimeError(f"No Zid refresh_token for store {self.store_id!r}")
+
+        async with httpx.AsyncClient(timeout=15) as rc:
+            tr = await rc.post(
+                "https://oauth.zid.sa/oauth/token",
+                data={
+                    "grant_type":    "refresh_token",
+                    "client_id":     os.getenv("ZID_CLIENT_ID", ""),
+                    "client_secret": os.getenv("ZID_CLIENT_SECRET", ""),
+                    "refresh_token": rt,
+                    "redirect_uri":  f"{os.getenv('BASE_URL', '')}/integrations/zid/callback",
+                },
+            )
+            tr.raise_for_status()
+            td = tr.json()
+
+        new_access = td.get("access_token", "")
+        new_jwt    = td.get("Authorization", "")
+        new_rt     = td.get("refresh_token") or rt
+        if not new_access or not new_jwt:
+            raise RuntimeError("Zid token refresh response missing access_token/Authorization")
+
+        self._access_token = new_access
+        self._jwt          = new_jwt
+        self._mgr_headers.update({
+            "Authorization":   f"Bearer {new_jwt}",
+            "X-Manager-Token": new_access,
+        })
+        self._prd_headers["Access-Token"] = new_access
+
+        await _db.save_integration(self.store_id, "zid", {
+            **zid_data,
+            "access_token":      new_access,
+            "authorization_jwt": new_jwt,
+            "refresh_token":     new_rt,
+        })
 
     # ── Store info ────────────────────────────────────────────────────────────
 

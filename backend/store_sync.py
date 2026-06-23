@@ -30,12 +30,17 @@ async def _fetch_all_pages(
     page = 1
     while True:
         try:
-            r = await client.get(
-                url,
-                headers=headers,
-                params={"per_page": 50, "page": page},
-                timeout=20,
-            )
+            r = None
+            for _retry in range(3):
+                r = await client.get(
+                    url,
+                    headers=headers,
+                    params={"per_page": 50, "page": page},
+                    timeout=20,
+                )
+                if r.status_code != 429:
+                    break
+                await asyncio.sleep(float(r.headers.get("Retry-After", "2")))
             if r.status_code == 401:
                 return items, f"401 Unauthorized — token expired or invalid (url={url})"
             if r.status_code != 200:
