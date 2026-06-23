@@ -1,6 +1,7 @@
 import os
 import re as _re
 import json
+import asyncio
 import anthropic
 from anthropic import AsyncAnthropic
 from groq import AsyncGroq
@@ -3249,7 +3250,14 @@ class PrintingAgent:
     # ── Groq (Llama 3.3-70b) ──────────────────────────────────────────────────
     async def _chat_groq(self, message: str, session_id: str,
                          identity: "SessionIdentity | None" = None) -> str:
-        await cs.add_message(session_id, "user", message, self.store_id)
+        # Guard: if this is an inbox retry the user message may already be
+        # persisted from the first (failed) attempt. Only add it once.
+        await cs.restore_to_memory(session_id)
+        existing = cs.all_conversations().get(session_id) or {}
+        existing_msgs = existing.get("messages", [])
+        last_user = next((m for m in reversed(existing_msgs) if m.get("role") == "user"), None)
+        if not (last_user and last_user.get("content") == message):
+            await cs.add_message(session_id, "user", message, self.store_id)
         history = cs.get_groq_history(session_id)
 
         groq_tools = [
@@ -3271,14 +3279,30 @@ class PrintingAgent:
         messages = [{"role": "system", "content": _sys_prompt}] + history
 
         tool_rounds = 0
+        _groq_retries = 0
         while True:
-            response = await self.groq_client.chat.completions.create(
-                model=self._groq_model,
-                messages=messages,
-                tools=groq_tools,
-                tool_choice="auto",
-                max_tokens=1024,
-            )
+            try:
+                response = await self.groq_client.chat.completions.create(
+                    model=self._groq_model,
+                    messages=messages,
+                    tools=groq_tools,
+                    tool_choice="auto",
+                    max_tokens=1024,
+                )
+            except Exception as exc:
+                # Groq 429 rate-limit — honour Retry-After and retry up to 3×
+                retry_after = 0.0
+                exc_str = str(exc)
+                if "429" in exc_str or "rate_limit" in exc_str.lower():
+                    import re as _re2
+                    m = _re2.search(r"retry.after['\"]?\s*:\s*([0-9.]+)", exc_str, _re2.I)
+                    retry_after = float(m.group(1)) if m else 10.0
+                    if _groq_retries < 3:
+                        _groq_retries += 1
+                        print(f"[agent] Groq 429 — waiting {retry_after}s then retry {_groq_retries}/3")
+                        await asyncio.sleep(retry_after)
+                        continue
+                raise
 
             _u = getattr(response, "usage", None)
             if _u:

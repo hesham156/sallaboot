@@ -1695,6 +1695,7 @@ async def handle_whatsapp_message(msg: dict):
         print(f"[whatsapp] ↩ replied to {sender} (store {store_id})")
     except Exception as exc:
         print(f"[whatsapp] handle error: {exc}")
+        raise  # let the inbox drainer retry this message
 
 
 async def handle_messenger_message(msg: dict):
@@ -1985,3 +1986,4 @@ async def handle_telegram_message(msg: dict):
         print(f"[telegram] ↩ replied to {chat_id} (store {store_id})")
     except Exception as exc:
         print(f"[telegram] handle error: {exc}")
+        raise  # let the inbox drainer retry this message
