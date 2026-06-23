@@ -580,8 +580,8 @@ export default function Landing() {
           className="relative overflow-hidden"
           style={{ maskImage: 'linear-gradient(to right, transparent, black 12%, black 88%, transparent)', WebkitMaskImage: 'linear-gradient(to right, transparent, black 12%, black 88%, transparent)' }}
         >
-          {/* Two identical lists side-by-side — animate slides left by 50% (= one list width) so it loops seamlessly */}
-          <div className="flex gap-10 animate-marquee" style={{ width: 'max-content' }}>
+          {/* dir="ltr" overrides the page's RTL so translateX(-50%) animates left→right as expected */}
+          <div dir="ltr" className="flex gap-10 animate-marquee" style={{ width: 'max-content' }}>
             {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map(({ domain, name }, i) => (
               <div key={i} className="flex items-center justify-center w-28 h-14 shrink-0">
                 <img
