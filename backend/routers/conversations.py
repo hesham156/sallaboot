@@ -173,7 +173,7 @@ async def store_admin_reply(
                 store_id = store_id,
                 payload  = {
                     "phone_id": wa_phone_id,
-                    "to":       session_id[3:],
+                    "to":       session_id.split(":", 2)[2],
                     "text":     text,
                 },
             )
@@ -185,7 +185,7 @@ async def store_admin_reply(
                 kind     = "telegram_send",
                 store_id = store_id,
                 payload  = {
-                    "chat_id": session_id[3:],
+                    "chat_id": session_id.split(":", 2)[2],
                     "text":    text,
                 },
             )
@@ -371,7 +371,7 @@ async def store_end_conversation(
         import whatsapp as wa
         wa_token    = (cfg.get("whatsapp_token") or "").strip()
         wa_phone_id = (cfg.get("whatsapp_phone_id") or "").strip()
-        to          = session_id[3:]
+        to          = session_id.split(":", 2)[2]
         if wa_token and wa_phone_id and to:
             async def _deliver_to_whatsapp():
                 try:
@@ -411,7 +411,7 @@ async def store_end_conversation(
     elif session_id.startswith("tg:"):
         import telegram as tg
         tg_token = (cfg.get("telegram_bot_token") or "").strip()
-        chat_id  = session_id[3:]
+        chat_id  = session_id.split(":", 2)[2]
         if tg_token and chat_id:
             async def _deliver_to_telegram():
                 try:

@@ -1637,9 +1637,12 @@ async def handle_whatsapp_message(msg: dict):
             print(f"[whatsapp] ⛔ disabled or no token — skipping")
             return
 
-        # Stable per-customer session keyed by phone — thread persists
+        # Stable per-customer session keyed by store + phone — thread persists
         # and shows in the admin inbox just like a widget chat.
-        session_id = f"wa:{sender}"
+        # store_id is REQUIRED in the key: without it, the same phone number
+        # would reuse an old session if a merchant reassigns the WhatsApp
+        # number to a different Hayyak store.
+        session_id = f"wa:{store_id}:{sender}"
         await cs.restore_to_memory(session_id)
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}
@@ -1730,9 +1733,10 @@ async def handle_messenger_message(msg: dict):
             print(f"[{channel}] ⛔ disabled or no page_token for store {store_id!r}")
             return
 
-        # Stable per-customer session keyed by PSID/IGSID — persists and shows
-        # in the admin inbox just like a widget or WhatsApp chat.
-        session_id = f"{'ig' if channel == 'instagram' else 'msgr'}:{sender}"
+        # Stable per-customer session keyed by store + PSID/IGSID — persists and
+        # shows in the admin inbox just like a widget or WhatsApp chat.
+        # store_id is REQUIRED: same PSID could be linked to different stores.
+        session_id = f"{'ig' if channel == 'instagram' else 'msgr'}:{store_id}:{sender}"
         await cs.restore_to_memory(session_id)
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}
@@ -1896,9 +1900,11 @@ async def handle_telegram_message(msg: dict):
             print(f"[telegram] ⛔ disabled or no token for store {store_id!r}")
             return
 
-        # Stable per-customer session keyed by chat id — persists and shows in the
-        # admin inbox just like a widget / WhatsApp / Messenger chat.
-        session_id = f"tg:{sender}"
+        # Stable per-customer session keyed by store + chat id — persists and shows
+        # in the admin inbox just like a widget / WhatsApp / Messenger chat.
+        # store_id is REQUIRED: same Telegram chat_id could be linked to a
+        # different store after the bot token is reassigned.
+        session_id = f"tg:{store_id}:{sender}"
 
         # Any attachment becomes an inline link so it renders in the inbox; the bot
         # can't read media content, so it's handled (acknowledge + escalate) below.

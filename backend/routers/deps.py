@@ -281,13 +281,14 @@ async def budget_exhausted(store_id: str) -> tuple[bool, int, int]:
 
 
 # ── Public widget session safety ───────────────────────────────────────────────
-# Channel-owned conversations (WhatsApp / Messenger / Instagram) use
-# deterministic, enumerable session ids (wa:<phone>, msgr:<psid>, ig:<igsid>).
+# Channel-owned conversations use deterministic, enumerable session ids:
+#   wa:{store_id}:{phone}   msgr:{store_id}:{psid}
+#   ig:{store_id}:{igsid}   tg:{store_id}:{chat_id}
 # The PUBLIC widget endpoints (/chat/history, /chat/poll, /chat/stream,
 # /chat/rate) must never expose those by id — only the random-uuid widget
-# sessions. Without this, anyone could read a customer's WhatsApp transcript
-# (or live-tap their replies) by guessing their phone number (finding H-1).
-_INTERNAL_SESSION_PREFIXES = ("wa:", "msgr:", "ig:")
+# sessions. Without this, anyone could read a customer's WhatsApp/Telegram
+# transcript by guessing their phone/chat_id (finding H-1).
+_INTERNAL_SESSION_PREFIXES = ("wa:", "msgr:", "ig:", "tg:")
 
 
 def is_internal_session_id(session_id: str) -> bool:
