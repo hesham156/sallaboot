@@ -573,7 +573,7 @@ export default function Landing() {
       </section>
 
       {/* ═══════════════ PARTNERS MARQUEE ═══════════════ */}
-      <section className="bg-slate-50 border-y border-slate-200 py-10 overflow-hidden">
+      <section className="bg-green-200 border-y border-slate-200 py-10 overflow-hidden">
         <p className="text-center text-xs font-bold text-slate-500 tracking-widest mb-7">يثق به أصحاب المتاجر الكبرى</p>
         <div className="relative overflow-hidden">
           {/* dir="ltr" ensures flex flows left→right inside the RTL page so translateX(-50%) animates correctly */}
