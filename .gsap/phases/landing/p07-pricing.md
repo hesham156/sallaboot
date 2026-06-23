@@ -14,8 +14,7 @@ Make the Pricing section feel intentional, modern, and aligned with the page hie
 ## Tasks
 
 - [ ] Inspect the current code and selectors for the Pricing section before editing.
-- [ ] Preserve any good existing Pricing motion and remove duplicate or noisy effects first.
-- [ ] Align the Pricing motion with the inferred product type: Marketing Site, Dashboard, Booking Platform.
+- [ ] Align the Pricing motion with the inferred product type: Marketing Site, Booking Platform, Dashboard.
 - [ ] Document the motion goal, hierarchy, and fallback behavior for Pricing in the page artifact.
 - [ ] Implement the Pricing animation with transform/opacity-first properties.
 - [ ] Verify reduced-motion behavior for Pricing.

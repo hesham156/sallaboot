@@ -14,8 +14,7 @@ Make the Logos section feel intentional, modern, and aligned with the page hiera
 ## Tasks
 
 - [ ] Inspect the current code and selectors for the Logos section before editing.
-- [ ] Preserve any good existing Logos motion and remove duplicate or noisy effects first.
-- [ ] Align the Logos motion with the inferred product type: Marketing Site, Dashboard, Booking Platform.
+- [ ] Align the Logos motion with the inferred product type: Marketing Site, Booking Platform, Dashboard.
 - [ ] Document the motion goal, hierarchy, and fallback behavior for Logos in the page artifact.
 - [ ] Implement the Logos animation with transform/opacity-first properties.
 - [ ] Verify reduced-motion behavior for Logos.

@@ -14,8 +14,7 @@ Make the Testimonials section feel intentional, modern, and aligned with the pag
 ## Tasks
 
 - [ ] Inspect the current code and selectors for the Testimonials section before editing.
-- [ ] Preserve any good existing Testimonials motion and remove duplicate or noisy effects first.
-- [ ] Align the Testimonials motion with the inferred product type: Marketing Site, Dashboard, Booking Platform.
+- [ ] Align the Testimonials motion with the inferred product type: Marketing Site, Booking Platform, Dashboard.
 - [ ] Document the motion goal, hierarchy, and fallback behavior for Testimonials in the page artifact.
 - [ ] Implement the Testimonials animation with transform/opacity-first properties.
 - [ ] Verify reduced-motion behavior for Testimonials.

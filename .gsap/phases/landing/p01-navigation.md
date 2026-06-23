@@ -5,18 +5,24 @@
 - Page: landing
 - Section: Navigation
 - Recipe Direction: navbar polish on scroll
-- Status: Done (2026-06-15)
+- Status: Planned
 
-## What Shipped
+## Objective
 
-- Inline `<style>` block adds `.site-nav.is-scrolled` rules (deeper bg, soft shadow, transparent bottom border).
-- `ScrollTrigger.create({ trigger: '.hero-section', start: 'top -60', onEnter, onLeaveBack })` toggles the class.
-- 250ms CSS transition on `background-color`, `box-shadow`, and `border-color` for a smooth state change.
+Make the Navigation section feel intentional, modern, and aligned with the page hierarchy.
 
-## Reduced Motion
+## Tasks
 
-The `is-scrolled` class still gets toggled — it's a CSS state change, not a JS animation. The transition itself is short (250ms) and unobtrusive. Reduced-motion users still see the visual contrast without parallax noise.
+- [ ] Inspect the current code and selectors for the Navigation section before editing.
+- [ ] Align the Navigation motion with the inferred product type: Marketing Site, Booking Platform, Dashboard.
+- [ ] Document the motion goal, hierarchy, and fallback behavior for Navigation in the page artifact.
+- [ ] Implement the Navigation animation with transform/opacity-first properties.
+- [ ] Verify reduced-motion behavior for Navigation.
+- [ ] Verify mobile downgrade behavior for Navigation.
+- [ ] Update the Navigation status and notes in .gsap artifacts.
 
-## Files Touched
+## Validation
 
-- `frontend/src/pages/Landing.tsx` — `.site-nav` class on `<header>`, inline `<style>` block, ScrollTrigger inside the page's `useGSAP`.
+- Reduced Motion:
+- Mobile Downgrade:
+- Notes:

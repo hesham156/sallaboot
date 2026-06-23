@@ -2,7 +2,7 @@
 
 ## Workflow State
 
-- Owner Workflow: gsap-refactor
+- Owner Workflow: gsap-new
 - Source Of Truth: .gsap artifacts
 - Resume Rule: Read these files before asking new questions
 
@@ -34,24 +34,25 @@
 
 ## Project Intelligence
 
-- Inferred Archetypes: Marketing Site, Dashboard, Booking Platform
+- Inferred Archetypes: Marketing Site, Booking Platform, Dashboard
 - Supporting Infrastructure:
   - None strongly inferred
 - Project Constraints:
+  - 3D surfaces need strong mobile fallbacks.
   - Data-heavy screens need clarity-first motion and low distraction.
   - Forms and auth flows need utility-first motion, not theatrical timing.
 
 ## Interview Strategy
 
 - Interview Mode: targeted-discovery
-- Priority Categories: Technical Stack, Section Behavior, Creative Direction, Workflow Clarification
+- Priority Categories: Section Behavior, Creative Direction
 - Priority Questions:
-  - Should the workflow install GSAP now, or only prepare the spec and phased plan?
   - Should charts and metrics animate softly for readability, or should they feel more dramatic and presentational?
   - Should the hero motion feel premium and cinematic, or quiet and product-focused?
-  - Do you want smooth scrolling like Lenis, or should native scrolling stay untouched?
   - Should forms use only subtle focus polish, or do you want stronger field and success-state motion?
   - Should partner or client logos stay subtle, or should they get motion emphasis as social proof?
+  - Should pricing cards feel calm and trustworthy, or more high-conversion and attention-grabbing?
+  - Should repeated cards share one reveal system, or should featured cards feel more premium than the rest?
 
 ## Spec-Driven Rules
 
@@ -65,9 +66,12 @@
 - Framework: react
 - Package Manager: npm
 - Packages:
+  - gsap@^3.15.0
+  - @gsap/react@^2.1.2
   - react@^18.3.1
   - tailwindcss@^3.4.9
   - framer-motion@^11.3.0
+  - lenis@^1.3.23
   - typescript@^5.5.3
 - Routes Detected: None detected
 
@@ -99,16 +103,16 @@
 
 ## Questions To Resolve
 
-- Should the workflow install GSAP now, or only prepare the spec and phased plan?
 - Should charts and metrics animate softly for readability, or should they feel more dramatic and presentational?
 - Should the hero motion feel premium and cinematic, or quiet and product-focused?
-- Do you want smooth scrolling like Lenis, or should native scrolling stay untouched?
 - Should forms use only subtle focus polish, or do you want stronger field and success-state motion?
 - Should partner or client logos stay subtle, or should they get motion emphasis as social proof?
+- Should pricing cards feel calm and trustworthy, or more high-conversion and attention-grabbing?
+- Should repeated cards share one reveal system, or should featured cards feel more premium than the rest?
 
 ## Phase Strategy
 
-- Active Page: landing
+- Active Page: Landing
 - Rule: implement one major section per phase.
-- Planned Phase Count: 12
+- Planned Phase Count: 13
 - First Phase: P01 - Navigation

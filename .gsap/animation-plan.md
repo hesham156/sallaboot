@@ -2,7 +2,7 @@
 
 ## Workflow State
 
-- Current Mode: gsap-refactor
+- Current Mode: gsap-new
 - Resume State: Discovery complete, phased execution pending
 - Last Updated By:
 - Suggested Next Command: Implement P01 only, then update all .gsap artifacts.
@@ -35,6 +35,7 @@
 | landing | FAQ | accordion timing polish | Planned | Make the FAQ section feel intentional, modern, and aligned with the page hierarchy. |
 | landing | Pricing | pricing-card emphasis + trust hierarchy | Planned | Make the Pricing section feel intentional, modern, and aligned with the page hierarchy. |
 | landing | Logos | logo cloud drift + credibility polish | Planned | Make the Logos section feel intentional, modern, and aligned with the page hierarchy. |
+| landing | Team | profile stagger + soft hover depth | Planned | Make the Team section feel intentional, modern, and aligned with the page hierarchy. |
 | landing | Form | field-focus polish + success transitions | Planned | Make the Form section feel intentional, modern, and aligned with the page hierarchy. |
 | landing | CTA | cta emphasis + magnetic hover | Planned | Make the CTA section feel intentional, modern, and aligned with the page hierarchy. |
 | landing | Hero | hero-text-reveal + layered media parallax | Planned | Make the Hero section feel intentional, modern, and aligned with the page hierarchy. |
@@ -52,10 +53,11 @@
 | P06 | landing | FAQ | Make the FAQ section feel intentional, modern, and aligned with the page hierarchy. | accordion timing polish | Planned |
 | P07 | landing | Pricing | Make the Pricing section feel intentional, modern, and aligned with the page hierarchy. | pricing-card emphasis + trust hierarchy | Planned |
 | P08 | landing | Logos | Make the Logos section feel intentional, modern, and aligned with the page hierarchy. | logo cloud drift + credibility polish | Planned |
-| P09 | landing | Form | Make the Form section feel intentional, modern, and aligned with the page hierarchy. | field-focus polish + success transitions | Planned |
-| P10 | landing | CTA | Make the CTA section feel intentional, modern, and aligned with the page hierarchy. | cta emphasis + magnetic hover | Planned |
-| P11 | landing | Hero | Make the Hero section feel intentional, modern, and aligned with the page hierarchy. | hero-text-reveal + layered media parallax | Planned |
-| P12 | landing | Showcase | Make the Showcase section feel intentional, modern, and aligned with the page hierarchy. | parallax showcase or marquee | Planned |
+| P09 | landing | Team | Make the Team section feel intentional, modern, and aligned with the page hierarchy. | profile stagger + soft hover depth | Planned |
+| P10 | landing | Form | Make the Form section feel intentional, modern, and aligned with the page hierarchy. | field-focus polish + success transitions | Planned |
+| P11 | landing | CTA | Make the CTA section feel intentional, modern, and aligned with the page hierarchy. | cta emphasis + magnetic hover | Planned |
+| P12 | landing | Hero | Make the Hero section feel intentional, modern, and aligned with the page hierarchy. | hero-text-reveal + layered media parallax | Planned |
+| P13 | landing | Showcase | Make the Showcase section feel intentional, modern, and aligned with the page hierarchy. | parallax showcase or marquee | Planned |
 
 ## Validation Checklist
 
@@ -69,12 +71,12 @@
 
 ## Workflow Snapshot - landing
 
-- Mode: gsap-refactor
+- Mode: gsap-new
 - Framework: react
 - Package Manager: npm
-- Existing Motion Stack: Framer Motion
-- Matched Files: api.ts, App.tsx, ErrorBoundary.tsx, useSEO.ts, main.tsx, BlogPost.tsx, ErrorPage.tsx, Landing.tsx
-- Inferred Product Type: Marketing Site, Dashboard, Booking Platform
+- Existing Motion Stack: Framer Motion, GSAP, Lenis, Three.js
+- Matched Files: api.ts, App.tsx, ErrorBoundary.tsx, ui.tsx, useSEO.ts, main.tsx, BlogPost.tsx, ErrorPage.tsx
+- Inferred Product Type: Marketing Site, Booking Platform, Dashboard
 
 ## Implementation Plan - landing
 
@@ -86,9 +88,9 @@
 
 ## Detected Project Signals - landing
 
-- Sections: Navigation, Feature Grid, Stats, Testimonials, Timeline, FAQ, Pricing, Logos, Form, CTA, Hero, Showcase
-- Structure Patterns: Data visualization, Data table, Search and filtering, Auth surface, Calendar or booking flow, Repeated collection render, Sticky positioning, Modal interactions, Sidebar or drawer
-- Selector Samples: flex items-center justify-center min-h-screen bg-background, light text-foreground bg-background min-h-screen font-arabic, min-h-screen bg-white flex items-center justify-center text-slate-400, min-h-screen bg-white text-slate-800 font-sans pb-20 overflow-x-hidden, sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100, max-w-4xl mx-auto px-6 h-16 flex items-center justify-between, flex items-center gap-2.5, inline-flex items-center gap-2 text-sm font-bold text-slate-700 bg-white border border-slate-200 rounded-full px-5 py-2 hover:border-teal-300 hover:text-teal-600 shadow-sm transition-all, rotate-180, max-w-3xl mx-auto px-6 pt-12 sm:pt-16 pb-8
+- Sections: Navigation, Feature Grid, Stats, Testimonials, Timeline, FAQ, Pricing, Logos, Team, Form, CTA, Hero, Showcase
+- Structure Patterns: Data visualization, Data table, Search and filtering, Auth surface, Calendar or booking flow, Repeated collection render, Overlay interactions, Sticky positioning, Video surface, Tabbed interface
+- Selector Samples: flex items-center justify-center min-h-screen bg-background, space-y-1.5, flex items-center gap-1 text-sm font-semibold text-default-700 px-0.5, text-danger text-sm leading-none, text-[11px] font-normal text-default-400 mr-0.5, flex items-center gap-1 text-[11px] text-danger px-0.5, flex items-start gap-3, min-w-0 flex-1, font-bold text-sm text-foreground leading-tight, text-[11px] text-default-400 mt-0.5 leading-relaxed
 - Infrastructure: None strongly inferred
 - Recommendations:
   - Use a staged hero reveal with headline, supporting copy, and CTA arriving in deliberate sequence.
@@ -102,12 +104,13 @@
   - Animate charts and dashboards for clarity first, spectacle second.
   - Use fast, low-friction transitions for search and filter changes so the UI stays responsive.
 - Open Questions:
-  - Should the workflow install GSAP now, or only prepare the spec and phased plan?
   - Should charts and metrics animate softly for readability, or should they feel more dramatic and presentational?
   - Should the hero motion feel premium and cinematic, or quiet and product-focused?
-  - Do you want smooth scrolling like Lenis, or should native scrolling stay untouched?
   - Should forms use only subtle focus polish, or do you want stronger field and success-state motion?
   - Should partner or client logos stay subtle, or should they get motion emphasis as social proof?
+  - Should pricing cards feel calm and trustworthy, or more high-conversion and attention-grabbing?
+  - Should repeated cards share one reveal system, or should featured cards feel more premium than the rest?
 - Constraints:
+  - 3D surfaces need strong mobile fallbacks.
   - Data-heavy screens need clarity-first motion and low distraction.
   - Forms and auth flows need utility-first motion, not theatrical timing.

@@ -80,3 +80,16 @@ label:has(> input[role="switch"]:not(:checked)) > span {
 .dark label:has(> input[role="switch"]:not(:checked)) > span {
   background-color: #475569 !important;   /* slate-600 reads better on dark */
 }
+
+/* ── Partners marquee ── */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee 28s linear infinite;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee { animation-play-state: paused; }
+}
