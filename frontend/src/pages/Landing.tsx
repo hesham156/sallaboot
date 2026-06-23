@@ -573,11 +573,10 @@ export default function Landing() {
       </section>
 
       {/* ═══════════════ PARTNERS MARQUEE ═══════════════ */}
-      <section className="bg-green-200 border-y border-slate-200 py-10 overflow-hidden">
+      <section className="bg-slate-50 border-y border-slate-200 py-10 overflow-hidden">
         <p className="text-center text-xs font-bold text-slate-500 tracking-widest mb-7">يثق به أصحاب المتاجر الكبرى</p>
-        <div className="relative overflow-hidden">
-          {/* dir="ltr" ensures flex flows left→right inside the RTL page so translateX(-50%) animates correctly */}
-          <div dir="ltr" className="flex items-center gap-8 animate-marquee" style={{ width: 'max-content' }}>
+        <div dir="ltr" className="relative overflow-hidden">
+          <div className="flex items-center gap-8 animate-marquee" style={{ width: 'max-content' }}>
             {[...PARTNER_LOGOS, ...PARTNER_LOGOS].map(({ domain, name }, i) => (
               <div key={i} className="flex flex-col items-center gap-2 w-24 shrink-0 select-none">
                 <div className="w-16 h-10 flex items-center justify-center">
