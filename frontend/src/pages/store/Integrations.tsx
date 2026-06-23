@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Chip, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Input, Spinner } from '@heroui/react'
 import { api, IntegrationData } from '../../api'
-import { PageHeader, StatusPill } from '../../components/ui'
+import { BrandLogo, PageHeader, StatusPill } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -21,79 +21,6 @@ function Icon({ paths, size = 16, className = '' }: {
   )
 }
 
-/* ── Logos ── */
-function SallaLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#6B3FA0" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="14" fontFamily="system-ui">س</text>
-    </svg>
-  )
-}
-function ShopifyLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#96BF48" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="13" fontFamily="system-ui">S</text>
-    </svg>
-  )
-}
-function MyFatoorahLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#00B0A6" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="11" fontFamily="system-ui">MF</text>
-    </svg>
-  )
-}
-function TabbyLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#3DBFA3" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="11" fontFamily="system-ui">tab</text>
-    </svg>
-  )
-}
-function TamaraLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#EB4C60" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="11" fontFamily="system-ui">تم</text>
-    </svg>
-  )
-}
-function ZidLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#1C3553" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="14" fontFamily="system-ui">ز</text>
-    </svg>
-  )
-}
-function WooLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#7F54B3" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="10" fontFamily="system-ui">Woo</text>
-    </svg>
-  )
-}
-function PayfortLogo({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill="#003087" />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize="9" fontFamily="system-ui">FORT</text>
-    </svg>
-  )
-}
 
 /* ── Types ── */
 type Status = 'connected' | 'disconnected' | 'coming_soon'
@@ -112,14 +39,14 @@ interface IntegrationDef {
 }
 
 const INTEGRATIONS_DEF: Omit<IntegrationDef, 'status' | 'data'>[] = [
-  { id: 'salla',       name: 'سلّة',            nameEn: 'Salla',        category: 'ecommerce', logo: <SallaLogo />,        description: 'متجرك على سلّة — الطلبات والمنتجات والعملاء تظهر مباشرةً في المحادثات.' },
-  { id: 'shopify',     name: 'شوبيفاي',          nameEn: 'Shopify',      category: 'ecommerce', logo: <ShopifyLogo />,      description: 'اربط متجر شوبيفاي لإدارة الطلبات والمنتجات من لوحة تحكم واحدة.' },
-  { id: 'zid',         name: 'زد',               nameEn: 'Zid',          category: 'ecommerce', logo: <ZidLogo />,          description: 'اربط متجرك على منصة زد — الطلبات والمنتجات والعملاء تظهر في المحادثات.' },
-  { id: 'woocommerce', name: 'ووكومرس',           nameEn: 'WooCommerce',  category: 'ecommerce', logo: <WooLogo />,          description: 'ربط موقع ووردبريس/ووكومرس لمتابعة الطلبات.', comingSoon: true },
-  { id: 'myfatoorah',  name: 'ماي فاتوره',       nameEn: 'MyFatoorah',   category: 'payment',   logo: <MyFatoorahLogo />,   description: 'إرسال روابط دفع مباشرة للعميل داخل المحادثة.', comingSoon: true },
-  { id: 'tabby',       name: 'تابي',              nameEn: 'Tabby',        category: 'payment',   logo: <TabbyLogo />,        description: 'عرض خيار الدفع بالتقسيط عبر تابي.', comingSoon: true },
-  { id: 'tamara',      name: 'تمارا',             nameEn: 'Tamara',       category: 'payment',   logo: <TamaraLogo />,       description: 'الشراء الآن والدفع لاحقاً عبر تمارا.', comingSoon: true },
-  { id: 'payfort',     name: 'بيفورت',            nameEn: 'Payfort',      category: 'payment',   logo: <PayfortLogo />,      description: 'قبول مدفوعات البطاقات عبر بوابة Amazon Payment Services.', comingSoon: true },
+  { id: 'salla',       name: 'سلّة',       nameEn: 'Salla',       category: 'ecommerce', logo: <BrandLogo domain="salla.sa"        fallbackColor="#6B3FA0" fallbackLabel="س"   />, description: 'متجرك على سلّة — الطلبات والمنتجات والعملاء تظهر مباشرةً في المحادثات.' },
+  { id: 'shopify',     name: 'شوبيفاي',    nameEn: 'Shopify',     category: 'ecommerce', logo: <BrandLogo domain="shopify.com"     fallbackColor="#96BF48" fallbackLabel="S"   />, description: 'اربط متجر شوبيفاي لإدارة الطلبات والمنتجات من لوحة تحكم واحدة.' },
+  { id: 'zid',         name: 'زد',         nameEn: 'Zid',         category: 'ecommerce', logo: <BrandLogo domain="zid.sa"          fallbackColor="#1C3553" fallbackLabel="ز"   />, description: 'اربط متجرك على منصة زد — الطلبات والمنتجات والعملاء تظهر في المحادثات.' },
+  { id: 'woocommerce', name: 'ووكومرس',    nameEn: 'WooCommerce', category: 'ecommerce', logo: <BrandLogo domain="woocommerce.com" fallbackColor="#7F54B3" fallbackLabel="Woo" />, description: 'ربط موقع ووردبريس/ووكومرس لمتابعة الطلبات.', comingSoon: true },
+  { id: 'myfatoorah',  name: 'ماي فاتوره', nameEn: 'MyFatoorah',  category: 'payment',   logo: <BrandLogo domain="myfatoorah.com" fallbackColor="#00B0A6" fallbackLabel="MF"  />, description: 'إرسال روابط دفع مباشرة للعميل داخل المحادثة.', comingSoon: true },
+  { id: 'tabby',       name: 'تابي',        nameEn: 'Tabby',       category: 'payment',   logo: <BrandLogo domain="tabby.ai"       fallbackColor="#3DBFA3" fallbackLabel="tab" />, description: 'عرض خيار الدفع بالتقسيط عبر تابي.', comingSoon: true },
+  { id: 'tamara',      name: 'تمارا',       nameEn: 'Tamara',      category: 'payment',   logo: <BrandLogo domain="tamara.co"      fallbackColor="#EB4C60" fallbackLabel="تم"  />, description: 'الشراء الآن والدفع لاحقاً عبر تمارا.', comingSoon: true },
+  { id: 'payfort',     name: 'بيفورت',      nameEn: 'Payfort',     category: 'payment',   logo: <BrandLogo domain="payfort.com"    fallbackColor="#003087" fallbackLabel="APS" />, description: 'قبول مدفوعات البطاقات عبر بوابة Amazon Payment Services.', comingSoon: true },
 ]
 
 /* ── Card ── */
@@ -258,7 +185,7 @@ function SallaConnectModal({ isOpen, onClose, storeId, onToast }: {
           <>
             <ModalHeader dir="rtl">
               <div className="flex items-center gap-3">
-                <SallaLogo size={30} />
+                <BrandLogo domain="salla.sa" fallbackColor="#6B3FA0" fallbackLabel="س" size={30} />
                 <div>
                   <p className="text-sm font-bold">ربط متجر سلّة</p>
                   <p className="text-xs font-normal text-default-500">عبر سوق تطبيقات سلة باستخدام مفتاح الربط</p>
@@ -566,7 +493,7 @@ export default function Integrations({ storeId }: Props) {
             <>
               <ModalHeader dir="rtl">
                 <div className="flex items-center gap-3">
-                  <ShopifyLogo size={30} />
+                  <BrandLogo domain="shopify.com" fallbackColor="#96BF48" fallbackLabel="S" size={30} />
                   <div>
                     <p className="text-sm font-bold">ربط متجر Shopify</p>
                     <p className="text-xs font-normal text-default-500">أدخل رابط متجرك على شوبيفاي</p>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Input, Spinner, Chip } from '@heroui/react'
 import { api, ChannelData } from '../../api'
-import { PageHeader, StatusPill } from '../../components/ui'
+import { BrandLogo, PageHeader, StatusPill } from '../../components/ui'
 
 interface Props { storeId: string }
 
@@ -20,25 +20,6 @@ function Icon({ paths, size = 16, className = '' }: {
   )
 }
 
-/* ── Logos (simple brand-tile style, matching the Integrations page) ── */
-function Tile({ color, label, size = 36, fontSize = 13 }: {
-  color: string; label: string; size?: number; fontSize?: number
-}) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width={40} height={40} rx={10} fill={color} />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
-        fill="white" fontWeight="bold" fontSize={fontSize} fontFamily="system-ui">{label}</text>
-    </svg>
-  )
-}
-const TelegramLogo  = ({ size = 36 }: { size?: number }) => <Tile color="#229ED9" label="✈" size={size} fontSize={16} />
-const TikTokLogo    = ({ size = 36 }: { size?: number }) => <Tile color="#010101" label="TT"  size={size} fontSize={13} />
-const MessengerLogo = ({ size = 36 }: { size?: number }) => <Tile color="#0084FF" label="m"   size={size} fontSize={18} />
-const InstagramLogo = ({ size = 36 }: { size?: number }) => <Tile color="#C13584" label="ig"  size={size} fontSize={13} />
-const XLogo         = ({ size = 36 }: { size?: number }) => <Tile color="#111827" label="X"   size={size} fontSize={16} />
-const SnapLogo      = ({ size = 36 }: { size?: number }) => <Tile color="#FFFC00" label="👻"  size={size} fontSize={14} />
-const DiscordLogo   = ({ size = 36 }: { size?: number }) => <Tile color="#5865F2" label="D"   size={size} fontSize={15} />
 
 /* ── Types ── */
 type Status = 'connected' | 'disconnected' | 'coming_soon'
@@ -58,13 +39,13 @@ interface ChannelDef {
 }
 
 const CHANNELS_DEF: Omit<ChannelDef, 'status' | 'data'>[] = [
-  { id: 'telegram',  name: 'تيليجرام',  nameEn: 'Telegram',  category: 'messaging', logo: <TelegramLogo />,  manageable: true, description: 'اربط بوت تيليجرام وسيرد المساعد الذكي على رسائل عملائك تلقائياً.' },
-  { id: 'messenger', name: 'ماسنجر',    nameEn: 'Messenger', category: 'messaging', logo: <MessengerLogo />, description: 'محادثات صفحة فيسبوك يرد عليها البوت تلقائياً.', comingSoon: true },
-  { id: 'instagram', name: 'إنستجرام',  nameEn: 'Instagram', category: 'messaging', logo: <InstagramLogo />, description: 'رسائل الـ Direct على إنستجرام يرد عليها البوت تلقائياً.', comingSoon: true },
-  { id: 'tiktok',    name: 'تيك توك',   nameEn: 'TikTok',    category: 'social',    logo: <TikTokLogo />,    description: 'الرد الآلي على رسائل تيك توك للأعمال.', comingSoon: true },
-  { id: 'x',         name: 'إكس',       nameEn: 'X',         category: 'social',    logo: <XLogo />,         description: 'الرد على الرسائل المباشرة في منصة X.', comingSoon: true },
-  { id: 'snapchat',  name: 'سناب شات',  nameEn: 'Snapchat',  category: 'social',    logo: <SnapLogo />,      description: 'محادثات سناب شات للأعمال.', comingSoon: true },
-  { id: 'discord',   name: 'ديسكورد',   nameEn: 'Discord',   category: 'social',    logo: <DiscordLogo />,   description: 'الرد الآلي داخل سيرفر ديسكورد متجرك.', comingSoon: true },
+  { id: 'telegram',  name: 'تيليجرام', nameEn: 'Telegram',  category: 'messaging', logo: <BrandLogo domain="telegram.org"  fallbackColor="#229ED9" fallbackLabel="TG" />, manageable: true, description: 'اربط بوت تيليجرام وسيرد المساعد الذكي على رسائل عملائك تلقائياً.' },
+  { id: 'messenger', name: 'ماسنجر',   nameEn: 'Messenger', category: 'messaging', logo: <BrandLogo domain="messenger.com" fallbackColor="#0084FF" fallbackLabel="m"  />, description: 'محادثات صفحة فيسبوك يرد عليها البوت تلقائياً.', comingSoon: true },
+  { id: 'instagram', name: 'إنستجرام', nameEn: 'Instagram', category: 'messaging', logo: <BrandLogo domain="instagram.com" fallbackColor="#C13584" fallbackLabel="ig" />, description: 'رسائل الـ Direct على إنستجرام يرد عليها البوت تلقائياً.', comingSoon: true },
+  { id: 'tiktok',    name: 'تيك توك',  nameEn: 'TikTok',    category: 'social',    logo: <BrandLogo domain="tiktok.com"    fallbackColor="#010101" fallbackLabel="TT" />, description: 'الرد الآلي على رسائل تيك توك للأعمال.', comingSoon: true },
+  { id: 'x',         name: 'إكس',      nameEn: 'X',         category: 'social',    logo: <BrandLogo domain="x.com"         fallbackColor="#111827" fallbackLabel="X"  />, description: 'الرد على الرسائل المباشرة في منصة X.', comingSoon: true },
+  { id: 'snapchat',  name: 'سناب شات', nameEn: 'Snapchat',  category: 'social',    logo: <BrandLogo domain="snapchat.com"  fallbackColor="#FFFC00" fallbackLabel="SC" />, description: 'محادثات سناب شات للأعمال.', comingSoon: true },
+  { id: 'discord',   name: 'ديسكورد',  nameEn: 'Discord',   category: 'social',    logo: <BrandLogo domain="discord.com"   fallbackColor="#5865F2" fallbackLabel="D"  />, description: 'الرد الآلي داخل سيرفر ديسكورد متجرك.', comingSoon: true },
 ]
 
 /* ── Toast ── */
@@ -184,7 +165,7 @@ function TelegramConnectModal({ isOpen, onClose, storeId, onDone, onToast }: {
           <>
             <ModalHeader dir="rtl">
               <div className="flex items-center gap-3">
-                <TelegramLogo size={30} />
+                <BrandLogo domain="telegram.org" fallbackColor="#229ED9" fallbackLabel="TG" size={30} />
                 <div>
                   <p className="text-sm font-bold">ربط بوت تيليجرام</p>
                   <p className="text-xs font-normal text-default-500">عبر توكن البوت من BotFather</p>

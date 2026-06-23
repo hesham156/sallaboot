@@ -16,9 +16,58 @@
  *   OptionCard  — selection card (tone / language / length pickers)
  *   SaveBtn     — consistent full-width primary save button
  *   FIELD_INPUT / FIELD_TEXTAREA — raw classNames if you need raw HeroUI
+ *   BrandLogo   — company logo via logo.dev CDN with initials fallback
  */
 import { Input, Textarea, Select, SelectItem, Button, Spinner } from '@heroui/react'
 import type { ReactNode, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useState } from 'react'
+
+// ── BrandLogo ─────────────────────────────────────────────────────────────────
+// Fetches a company logo from logo.dev CDN. Falls back to a colored initials
+// tile on error (network failure, unknown domain, etc.).
+
+const LOGO_DEV_TOKEN = 'pk_X2A7SSz4RzO6g8lQo6EwdA'
+
+export function BrandLogo({
+  domain,
+  fallbackColor = '#64748b',
+  fallbackLabel = '',
+  size = 36,
+  rounded = 10,
+}: {
+  domain: string
+  fallbackColor?: string
+  fallbackLabel?: string
+  size?: number
+  rounded?: number
+}) {
+  const [failed, setFailed] = useState(false)
+  const url = `https://img.logo.dev/${domain}?token=${LOGO_DEV_TOKEN}&size=80&format=png`
+
+  if (failed) {
+    const label = fallbackLabel || domain.split('.')[0].slice(0, 3).toUpperCase()
+    return (
+      <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
+        <rect width={40} height={40} rx={rounded} fill={fallbackColor} />
+        <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle"
+          fill="white" fontWeight="bold" fontSize="12" fontFamily="system-ui">
+          {label}
+        </text>
+      </svg>
+    )
+  }
+
+  return (
+    <img
+      src={url}
+      alt={domain}
+      width={size}
+      height={size}
+      onError={() => setFailed(true)}
+      style={{ borderRadius: rounded, objectFit: 'contain', background: '#f8fafc' }}
+    />
+  )
+}
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 export const FIELD_INPUT = {
