@@ -476,28 +476,36 @@ async def chat_rate(req: RateRequest):
     if is_internal_session_id(req.session_id):
         raise HTTPException(404, "الجلسة غير موجودة")
     await cs.restore_to_memory(req.session_id)
+
+    conv = cs.all_conversations().get(req.session_id)
+    if not conv:
+        raise HTTPException(404, "الجلسة غير موجودة")
+
+    # Derive store_id from the persisted session record — never trust the caller.
+    store_id = conv.get("store_id") or ""
+    if not store_id or store_id == "default":
+        raise HTTPException(404, "الجلسة غير موجودة")
+
     await cs.set_rating(req.session_id, req.rating, req.comment)
 
-    await realtime.publish(f"store:{req.store_id}", "rating", {
+    await realtime.publish(f"store:{store_id}", "rating", {
         "session_id": req.session_id,
         "rating":     req.rating,
     })
 
-    conv = cs.all_conversations().get(req.session_id)
-    if conv:
-        for m in reversed(conv.get("messages", [])):
-            meta = m.get("meta") if isinstance(m, dict) else None
-            if isinstance(meta, dict) and meta.get("kind") == "csat":
-                conv["rating_employee_id"]   = meta.get("target_agent_id")
-                conv["rating_employee_name"] = meta.get("target_agent_name", "")
-                conv["rated_at"]             = _dt.datetime.utcnow().isoformat()
-                cs.mark_dirty(req.session_id)
-                await cs.flush(req.session_id)
-                break
+    for m in reversed(conv.get("messages", [])):
+        meta = m.get("meta") if isinstance(m, dict) else None
+        if isinstance(meta, dict) and meta.get("kind") == "csat":
+            conv["rating_employee_id"]   = meta.get("target_agent_id")
+            conv["rating_employee_name"] = meta.get("target_agent_name", "")
+            conv["rated_at"]             = _dt.datetime.utcnow().isoformat()
+            cs.mark_dirty(req.session_id)
+            await cs.flush(req.session_id)
+            break
 
-    if req.rating <= 2 and conv:
+    if req.rating <= 2:
         cust_name = conv.get("customer_name") or conv.get("customer", {}).get("name", "")
-        asyncio.create_task(_notif.notify(req.store_id, "low_rating", {
+        asyncio.create_task(_notif.notify(store_id, "low_rating", {
             "customer_name": cust_name,
             "rating":        req.rating,
             "comment":       req.comment or "",

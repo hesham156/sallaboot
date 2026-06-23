@@ -745,7 +745,7 @@ async def get_employee_by_email(store_id: str, email: str) -> dict | None:
         return None
 
 
-async def update_employee(emp_id: int, *, name: str | None = None,
+async def update_employee(emp_id: int, store_id: str, *, name: str | None = None,
                           email: str | None = None,
                           password_hash: str | None = None,
                           role: str | None = None,
@@ -767,25 +767,29 @@ async def update_employee(emp_id: int, *, name: str | None = None,
     if not sets:
         return True
     args.append(int(emp_id))
+    args.append(store_id)
     try:
         async with _pool.acquire() as conn:
-            await conn.execute(
-                f"UPDATE employees SET {', '.join(sets)} WHERE id = ${len(args)}",
+            result = await conn.execute(
+                f"UPDATE employees SET {', '.join(sets)} WHERE id = ${len(args)-1} AND store_id = ${len(args)}",
                 *args,
             )
-        return True
+        return result != "UPDATE 0"
     except Exception as e:
         print(f"[db] update_employee error: {e}")
         return False
 
 
-async def delete_employee(emp_id: int) -> bool:
+async def delete_employee(emp_id: int, store_id: str) -> bool:
     if not _pool:
         return False
     try:
         async with _pool.acquire() as conn:
-            await conn.execute("DELETE FROM employees WHERE id = $1", int(emp_id))
-        return True
+            result = await conn.execute(
+                "DELETE FROM employees WHERE id = $1 AND store_id = $2",
+                int(emp_id), store_id,
+            )
+        return result != "DELETE 0"
     except Exception as e:
         print(f"[db] delete_employee error: {e}")
         return False
