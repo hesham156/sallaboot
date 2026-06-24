@@ -26,6 +26,7 @@ class _DBStub:
         self.owner_email_set: dict = {}
         self.api_key_set: dict = {}
         self.merged: list = []
+        self.forwards: list = []
 
     async def find_store_by_api_key(self, key):
         return self._by_key.get((key or "").strip())
@@ -46,6 +47,9 @@ class _DBStub:
     async def merge_placeholder_into(self, placeholder_id, target_id):
         self.merged.append((placeholder_id, target_id))
         return True
+
+    async def record_account_forward(self, old_store_id, new_store_id):
+        self.forwards.append((old_store_id, new_store_id))
 
 
 class _SMStub:
@@ -160,6 +164,9 @@ async def test_placeholder_merged_and_deleted(patched):
     )
     assert db.merged == [("home_acct", "merchant_99")]
     assert sm.unregistered == ["home_acct"]
+    # A forwarding breadcrumb is left so the merchant's still-open session
+    # migrates from the deleted placeholder to the Salla store without re-login.
+    assert db.forwards == [("home_acct", "merchant_99")]
 
 
 async def test_home_with_access_token_is_not_deleted(patched):

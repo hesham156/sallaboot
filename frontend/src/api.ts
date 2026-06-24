@@ -95,6 +95,36 @@ export class ApiError extends Error {
   }
 }
 
+// A 403 right after signup→Salla linking usually means our token still points
+// at the placeholder store that was merged into the Salla store and deleted.
+// Ask the backend to migrate the session; on success persist the new token and
+// hard-navigate to the canonical store (the failing URL embedded the old id, so
+// retrying it in place would 403 again). This recovers the dashboard WITHOUT a
+// re-login. Guarded so it runs at most once per page load and never recurses
+// into itself.
+let _linkMigrationTried = false
+
+async function tryResolveLink(): Promise<string | null> {
+  const token = getToken()
+  if (!token) return null
+  try {
+    const res = await fetch('/auth/resolve-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return null
+    const s = (await res.json()) as SessionResponse
+    if (!s?.token || !s?.store_id) return null
+    setToken(s.token)
+    setStoreId(s.store_id)
+    setIsSuper(false)
+    setEmployee(null)
+    return s.store_id
+  } catch {
+    return null
+  }
+}
+
 async function req<T>(
   method: string,
   url: string,
@@ -113,6 +143,20 @@ async function req<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
+    if (
+      res.status === 403 &&
+      !_linkMigrationTried &&
+      !url.startsWith('/auth/resolve-link')
+    ) {
+      _linkMigrationTried = true
+      const newStore = await tryResolveLink()
+      if (newStore) {
+        // Remount the whole app on the canonical store. Return a pending promise
+        // so the original caller doesn't flash an error during the redirect.
+        window.location.assign(`/store/${newStore}`)
+        return new Promise<T>(() => {})
+      }
+    }
     const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
     throw new ApiError(res.status, err.detail || `HTTP ${res.status}`)
   }

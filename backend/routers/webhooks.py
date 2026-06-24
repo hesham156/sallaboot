@@ -225,6 +225,9 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
     if placeholder_id:
         if await db.merge_placeholder_into(placeholder_id, store_id):
             sm.unregister(placeholder_id)
+            # Breadcrumb so the merchant's still-open session (token bound to the
+            # now-deleted placeholder) migrates to this store without a re-login.
+            await db.record_account_forward(placeholder_id, store_id)
 
     # Directly await the DB save for this critical event so data is never
     # lost even if the server restarts seconds after the webhook.
@@ -364,6 +367,9 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
     if not sm.get_access_token(home):
         if await db.merge_placeholder_into(home, store_id):
             sm.unregister(home)
+            # Breadcrumb so the merchant's still-open session (token bound to the
+            # now-deleted placeholder) migrates to this store without a re-login.
+            await db.record_account_forward(home, store_id)
             merged = " (placeholder merged + removed)"
 
     return True, f"linked to 7ayak account (was {home!r}){merged}"
