@@ -72,9 +72,12 @@ async def test_admin_has_frame_options_and_csp(client):
     assert "object-src 'none'" in csp
 
 
-async def test_admin_csp_has_no_script_src(client):
-    """Guard against accidentally adding a script-src that would break the
-    Salla OAuth callback's inline <script>. Removing this needs a nonce pass."""
+async def test_admin_csp_locks_script_src_to_self(client):
+    """The dashboard CSP must pin script-src to 'self' so an injected inline or
+    externally-hosted <script> can't run and steal the bearer token (M4). This
+    is safe because the inline-<script> pages (Salla OAuth callback, /snippet)
+    are NOT dashboard paths and never receive this CSP; the SPA loads only its
+    own /assets bundle, and inline JSON-LD is a non-executable data block."""
     r = await client.get("/admin/stores")
     csp = r.headers.get("content-security-policy", "")
-    assert "script-src" not in csp
+    assert "script-src 'self'" in csp

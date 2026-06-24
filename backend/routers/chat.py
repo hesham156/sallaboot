@@ -476,6 +476,12 @@ async def chat(req: ChatRequest, request: Request):
         bot_enabled= True,
         components = [component] if component else None,
         cart_count = cart_count,
+        # Echo the signed session token so the widget can persist it and prove
+        # identity on the next turn. Every other return path already does this;
+        # omitting it here silently broke signed-session continuity (anonymous
+        # sessions were re-issued every turn, and any in-turn verification
+        # upgrade never reached the widget). See identity/ (M2).
+        session_token = out_token,
     )
 
 
