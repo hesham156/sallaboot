@@ -265,9 +265,17 @@ def _apply_security_headers(response, path: str) -> None:
     )
     if is_dashboard:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        # `script-src 'self'` is the core anti-XSS control for the dashboard:
+        # it blocks BOTH injected inline <script> and externally-hosted scripts,
+        # so a stored/reflected XSS can no longer execute to exfiltrate the
+        # bearer token from localStorage. The SPA loads only its own bundle from
+        # /assets (same-origin → 'self'); inline JSON-LD is a non-executable
+        # data block and is unaffected. This is safe here because the inline
+        # <script> pages (Salla OAuth callback, /snippet) are NOT dashboard
+        # paths and never receive this CSP. (M4)
         response.headers.setdefault(
             "Content-Security-Policy",
-            "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
+            "script-src 'self'; frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
         )
 
 

@@ -106,10 +106,24 @@ def _verify_signature(body: bytes, headers) -> tuple:
         auth = headers.get("Authorization", "")
         token = auth[7:].strip() if auth[:7].lower() == "bearer " else auth.strip()
         if token:
-            # A dedicated token can be set via SALLA_WEBHOOK_TOKEN; otherwise
-            # the same SALLA_WEBHOOK_SECRET doubles as the Token value, which
-            # is how Salla pre-fills it for App Market apps.
-            expected_token = os.getenv("SALLA_WEBHOOK_TOKEN", "") or secret
+            # Token strategy: Salla sends the webhook credential in the
+            # Authorization header instead of signing the body. That credential
+            # MUST be a DEDICATED value (SALLA_WEBHOOK_TOKEN), separate from the
+            # HMAC signing secret. Reusing the signing secret as a bearer token
+            # leaks it to anything that captures request headers (proxies, log
+            # shippers, APM) — and the same secret then forges signatures (M3).
+            #
+            # Backward-compat: when SALLA_WEBHOOK_TOKEN is unset we still accept
+            # the signing secret as the token so existing installs keep working,
+            # but warn loudly so the operator provisions a separate token and
+            # updates it in Salla's webhook settings. Set SALLA_WEBHOOK_TOKEN to
+            # complete the separation.
+            dedicated = os.getenv("SALLA_WEBHOOK_TOKEN", "").strip()
+            if dedicated:
+                expected_token = dedicated
+            else:
+                expected_token = secret
+                log.warning("webhook_token_uses_signing_secret_deprecated")
             if hmac.compare_digest(expected_token, token):
                 return True, "token_ok"
             log.warning("webhook_token_mismatch", extra={"got_prefix": token[:16]})

@@ -269,18 +269,7 @@ async def env_check(request: Request):
     are ONLY returned to authenticated super-admins to avoid leaking the
     security posture to unauthenticated callers.
     """
-    stores    = sm.list_stores()
     db_status = db.get_status()
-    store_agents = []
-    for s in stores:
-        sid = s["store_id"]
-        a   = sm.get_agent(sid)
-        store_agents.append({
-            "store_id":   sid,
-            "store_name": s.get("store_name", ""),
-            "agent_ok":   a is not None,
-            "has_ai_cfg": s.get("has_ai_config", False),
-        })
 
     if not db_status["connected"]:
         if not db_status["database_url"]:
@@ -288,24 +277,43 @@ async def env_check(request: Request):
         else:
             print("[startup] ⚠️  DATABASE_URL is set but DB connection failed — check Railway logs")
 
+    # Public surface: only coarse health flags a widget needs to self-diagnose.
+    # The tenant inventory (store ids + names) and the security posture (which
+    # providers/secrets are configured) are NOT public — an unauthenticated
+    # caller must never be able to enumerate every merchant on the platform or
+    # probe its configuration (M1). Those move behind the super-admin gate below.
     result: dict = {
-        "GROQ_API_KEY":           bool(os.getenv("GROQ_API_KEY")),
-        "ANTHROPIC_API_KEY":      bool(os.getenv("ANTHROPIC_API_KEY")),
-        "SALLA_ACCESS_TOKEN":     bool(os.getenv("SALLA_ACCESS_TOKEN")),
-        "SALLA_WEBHOOK_SECRET":   bool(os.getenv("SALLA_WEBHOOK_SECRET")),
-        "DATABASE_URL":           db_status["database_url"],
-        "DB_CONNECTED":           db_status["connected"],
-        "BASE_URL":               os.getenv("BASE_URL", "not set"),
-        "stores_registered":      len(stores),
-        "stores":                 store_agents,
+        "DATABASE_URL":  db_status["database_url"],
+        "DB_CONNECTED":  db_status["connected"],
+        "BASE_URL":      os.getenv("BASE_URL", "not set"),
     }
 
     token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     claims = _auth.verify_token(token)
     if claims and claims.get("su"):
+        stores = sm.list_stores()
+        store_agents = []
+        for s in stores:
+            sid = s["store_id"]
+            a   = sm.get_agent(sid)
+            store_agents.append({
+                "store_id":   sid,
+                "store_name": s.get("store_name", ""),
+                "agent_ok":   a is not None,
+                "has_ai_cfg": s.get("has_ai_config", False),
+            })
+
         super_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin")
-        result["ADMIN_SECRET_STABLE"]             = _auth.ADMIN_SECRET_STABLE
-        result["SUPER_ADMIN_PASSWORD_IS_DEFAULT"] = (super_pass == "admin")
+        result.update({
+            "GROQ_API_KEY":         bool(os.getenv("GROQ_API_KEY")),
+            "ANTHROPIC_API_KEY":    bool(os.getenv("ANTHROPIC_API_KEY")),
+            "SALLA_ACCESS_TOKEN":   bool(os.getenv("SALLA_ACCESS_TOKEN")),
+            "SALLA_WEBHOOK_SECRET": bool(os.getenv("SALLA_WEBHOOK_SECRET")),
+            "stores_registered":    len(stores),
+            "stores":               store_agents,
+            "ADMIN_SECRET_STABLE":             _auth.ADMIN_SECRET_STABLE,
+            "SUPER_ADMIN_PASSWORD_IS_DEFAULT": (super_pass == "admin"),
+        })
         try:
             import backup as _bk
             result["BACKUP"] = _bk.get_status()
