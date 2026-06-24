@@ -402,42 +402,51 @@ export default function Settings({ storeId }: Props) {
   }
 
   // ── Messenger + Instagram connect (Facebook Page) ──
-  async function startPagesConnect() {
+  function startPagesConnect() {
     if (!window.FB) { setMetaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة وحاول'); return }
     setMetaConnecting(true); setMetaMsg('')
 
-    // Watchdog: FB.login normally fires its callback even when the user
-    // cancels (with `authResponse: null`). But if the popup is blocked, if
-    // the FB App is in Development mode and the visitor isn't a tester,
-    // or if the popup gets stuck on an error page, the callback never
-    // fires and the spinner spins forever. After 60s assume the flow is
-    // wedged and surface a clear hint pointing at the usual culprits.
-    let settled = false
-    const watchdog = setTimeout(() => {
-      if (settled) return
-      settled = true
-      setMetaConnecting(false)
-      setMetaMsg(
-        '❌ تعذّر إكمال تسجيل دخول Facebook (انتهى الوقت). الأسباب الشائعة: ' +
-        'الـ popup مغلق من المتصفح • تطبيق Facebook لسه في Development Mode • ' +
-        'الـ domain ‎7ayak.app‎ غير مضاف في App Settings • الصلاحيات المطلوبة ' +
-        '(pages_messaging, instagram_basic, إلخ) محتاجة Facebook App Review.'
-      )
-    }, 60_000)
+    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,instagram_basic,instagram_manage_messages,business_management'
 
-    window.FB.login(async (res: { authResponse?: { accessToken: string } }) => {
-      if (settled) return
-      settled = true
-      clearTimeout(watchdog)
-      if (!res.authResponse) { setMetaConnecting(false); setMetaMsg('❌ تم إلغاء الربط'); return }
-      try {
-        const data = await api.metaConnectPages(storeId, { user_token: res.authResponse.accessToken })
-        await handlePagesResponse(data)
-      } catch (e: unknown) {
-        setMetaMsg(e instanceof Error ? e.message : '❌ فشل الاتصال')
-      } finally { setMetaConnecting(false) }
-    }, {
-      scope: 'pages_messaging,pages_show_list,pages_manage_metadata,instagram_basic,instagram_manage_messages,business_management',
+    function doConnect(token: string) {
+      api.metaConnectPages(storeId, { user_token: token })
+        .then(handlePagesResponse)
+        .catch((e: unknown) => setMetaMsg(e instanceof Error ? e.message : '❌ فشل الاتصال'))
+        .finally(() => setMetaConnecting(false))
+    }
+
+    // FB SDK requires plain (non-async) callbacks — async callbacks throw
+    // "Expression is of type asyncfunction, not function".
+    // Check existing session first; if connected skip the popup entirely.
+    window.FB.getLoginStatus((statusRes: { status: string; authResponse?: { accessToken: string } }) => {
+      if (statusRes.status === 'connected' && statusRes.authResponse?.accessToken) {
+        doConnect(statusRes.authResponse.accessToken)
+        return
+      }
+
+      // Not connected — open the login popup.
+      // Watchdog: if the popup is blocked, the FB App is in Development mode,
+      // or the popup gets stuck, the callback never fires. After 60s surface a hint.
+      let settled = false
+      const watchdog = setTimeout(() => {
+        if (settled) return
+        settled = true
+        setMetaConnecting(false)
+        setMetaMsg(
+          '❌ تعذّر إكمال تسجيل دخول Facebook (انتهى الوقت). الأسباب الشائعة: ' +
+          'الـ popup مغلق من المتصفح • تطبيق Facebook لسه في Development Mode • ' +
+          'الـ domain ‎7ayak.app‎ غير مضاف في App Settings • الصلاحيات المطلوبة ' +
+          '(pages_messaging, instagram_basic, إلخ) محتاجة Facebook App Review.'
+        )
+      }, 60_000)
+
+      window.FB.login((res: { authResponse?: { accessToken: string } }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(watchdog)
+        if (!res.authResponse) { setMetaConnecting(false); setMetaMsg('❌ تم إلغاء الربط'); return }
+        doConnect(res.authResponse.accessToken)
+      }, { scope: REQUIRED_SCOPE })
     })
   }
 
