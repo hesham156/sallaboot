@@ -3308,6 +3308,10 @@ class PrintingAgent:
             if _u:
                 self._add_usage(getattr(_u, "prompt_tokens", 0), getattr(_u, "completion_tokens", 0))
 
+            if not hasattr(response, "choices") or not response.choices:
+                raw = str(response) if not isinstance(response, str) else response
+                raise RuntimeError(f"groq returned no choices: {raw[:200]}")
+
             msg = response.choices[0].message
 
             if msg.tool_calls and tool_rounds < 5:
@@ -3413,6 +3417,14 @@ class PrintingAgent:
             _u = getattr(response, "usage", None)
             if _u:
                 self._add_usage(getattr(_u, "prompt_tokens", 0), getattr(_u, "completion_tokens", 0))
+
+            # Some provider routers (e.g. Naraya) return a plain string or a
+            # non-OpenAI-shaped object for unsupported models. Guard before
+            # accessing .choices so we surface a readable error instead of
+            # AttributeError: 'str' object has no attribute 'choices'.
+            if not hasattr(response, "choices") or not response.choices:
+                raw = str(response) if not isinstance(response, str) else response
+                raise RuntimeError(f"provider={self.provider} model={_oai_model} returned no choices: {raw[:200]}")
 
             msg = response.choices[0].message
 

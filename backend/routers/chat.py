@@ -228,6 +228,12 @@ async def _fetch_salla_customer(store_id: str, customer_id: str,
     if not token:
         return base
 
+    # Salla customer IDs are numeric integers; Messenger/Instagram IDs are
+    # opaque strings (e.g. "ioXXmsTXXH…"). Skip the Salla lookup when the
+    # ID isn't a plain integer to avoid a guaranteed ValueError.
+    if not customer_id.isdigit():
+        return base
+
     try:
         from salla_client import SallaClient
         client = SallaClient(token, store_id=store_id)
