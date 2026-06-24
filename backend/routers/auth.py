@@ -502,6 +502,65 @@ async def verify_store_token(store_id: str, request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Seamless session migration after signup → Salla linking
+# ─────────────────────────────────────────────────────────────────────────
+
+@router.post("/auth/resolve-link")
+async def resolve_link(request: Request):
+    """
+    Trade a session token bound to a just-merged signup placeholder for a fresh
+    token on the canonical Salla store — so the merchant's dashboard recovers
+    WITHOUT a re-login after they link Salla.
+
+    Flow it fixes: /auth/signup creates a placeholder store keyed by an email
+    slug, and the browser's token is bound to that id. When the merchant links
+    Salla (app-settings API key / authorize webhook), the placeholder is merged
+    into the Salla merchant store and deleted — leaving the still-open token
+    pointing at a dead store (→ 403 "no access"). This endpoint follows the
+    forwarding breadcrumb (db.record_account_forward) and mints a new token.
+
+    Authorization: the presented token must be a cryptographically valid OWNER
+    token (signature + unexpired) whose store no longer exists locally AND has a
+    recorded forward. That triple-binds it to the legitimate signer — the only
+    party that ever held this token — so it cannot be used to jump between live
+    stores (a token for a still-registered store is rejected).
+    """
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims:
+        raise HTTPException(401, "يرجى تسجيل الدخول")
+
+    no_pending = HTTPException(404, "لا يوجد ربط معلّق لهذه الجلسة")
+
+    # Super + employee tokens are never placeholder owners — nothing to migrate.
+    if claims.get("su") or "eid" in claims:
+        raise no_pending
+
+    old_store = (claims.get("s") or "").strip()
+    if not old_store:
+        raise no_pending
+    # A token for a STILL-LIVE store must not be forwarded (prevents using a
+    # valid token to hop to another store). Only a deleted placeholder qualifies.
+    if sm.is_registered(old_store):
+        raise no_pending
+
+    new_store = await db.resolve_account_forward(old_store)
+    if not new_store or not sm.is_registered(new_store):
+        raise no_pending
+
+    info      = sm.get_store_info(new_store)
+    new_token = _auth.create_token(new_store)
+    print(f"[auth] 🔁 seamless link migration: {old_store!r} → {new_store!r}")
+    return {
+        "token":      new_token,
+        "store_id":   new_store,
+        "store_name": info.get("store_name", f"متجر {new_store}"),
+        "is_super":   False,
+        "employee":   None,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Forgot / Reset password
 # ─────────────────────────────────────────────────────────────────────────
 

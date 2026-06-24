@@ -1176,6 +1176,41 @@ async def set_app_setting(key: str, value) -> None:
         print(f"[db] set_app_setting({key!r}) error: {e}")
 
 
+# ── Account-link forwarding (seamless session migration) ─────────────────────
+# When a signup placeholder store is merged into the canonical Salla store and
+# deleted, the merchant's browser still holds a session token bound to the dead
+# placeholder id. These breadcrumbs let /auth/resolve-link trade that token for
+# a fresh one on the new store WITHOUT a re-login. Stored in app_settings (JSONB
+# KV) so there's no schema migration; the row is tiny and self-expiring in
+# practice (the old token it serves expires within the 7-day session window).
+
+_LINK_FORWARD_PREFIX = "link_forward:"
+
+
+async def record_account_forward(old_store_id: str, new_store_id: str) -> None:
+    """Leave an old_store_id → new_store_id breadcrumb after a placeholder merge."""
+    old_store_id = str(old_store_id)
+    new_store_id = str(new_store_id)
+    if not old_store_id or not new_store_id or old_store_id == new_store_id:
+        return
+    import time as _t
+    await set_app_setting(
+        f"{_LINK_FORWARD_PREFIX}{old_store_id}",
+        {"to": new_store_id, "at": int(_t.time())},
+    )
+
+
+async def resolve_account_forward(old_store_id: str) -> Optional[str]:
+    """Return the canonical store a merged placeholder was forwarded to, or None."""
+    old_store_id = str(old_store_id)
+    if not old_store_id:
+        return None
+    rec = await get_app_setting(f"{_LINK_FORWARD_PREFIX}{old_store_id}")
+    if isinstance(rec, dict) and rec.get("to"):
+        return str(rec["to"])
+    return None
+
+
 # ── Uploads (persistent file storage in PostgreSQL) ──────────────────────────
 
 async def save_upload(file_id: str, filename: str, content_type: str,
