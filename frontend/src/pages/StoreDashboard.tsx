@@ -27,6 +27,8 @@ const Contacts           = lazy(() => import('./store/Contacts'))
 const Integrations       = lazy(() => import('./store/Integrations'))
 const Channels           = lazy(() => import('./store/Channels'))
 const Broadcast          = lazy(() => import('./store/Broadcast'))
+const CommentInbox       = lazy(() => import('./store/CommentInbox'))
+const CommentAutomation  = lazy(() => import('./store/CommentAutomation'))
 
 /* ── Icon helper ── */
 function Icon({ paths, size = 16, className = '' }: {
@@ -210,6 +212,24 @@ const NAV_ITEMS: Array<{
     activeColor: 'text-sky-400',
     activeBg: 'bg-sky-500/10',
     activeBorder: 'border-r-sky-500',
+    roles: ['owner', 'manager'],
+  },
+  {
+    key: 'comment-inbox',
+    label: 'صندوق التعليقات',
+    icon: ['M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'],
+    activeColor: 'text-pink-400',
+    activeBg: 'bg-pink-500/10',
+    activeBorder: 'border-r-pink-500',
+    roles: ['owner', 'manager', 'agent'],
+  },
+  {
+    key: 'comment-automation',
+    label: 'أتمتة التعليقات',
+    icon: ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
+    activeColor: 'text-fuchsia-400',
+    activeBg: 'bg-fuchsia-500/10',
+    activeBorder: 'border-r-fuchsia-500',
     roles: ['owner', 'manager'],
   },
   {
@@ -688,6 +708,8 @@ export default function StoreDashboard() {
             <Route path="conversations/*" element={<Conversations storeId={storeId} />} />
             <Route path="orders"          element={<Orders storeId={storeId} />} />
             <Route path="carts"           element={<AbandonedCarts storeId={storeId} />} />
+            {/* Smart Inbox — agents reply, viewers read (backend enforces) */}
+            <Route path="comment-inbox"   element={<CommentInbox storeId={storeId} />} />
 
             {/* Manager + owner only */}
             {(role === 'owner' || role === 'manager') && <>
@@ -702,6 +724,7 @@ export default function StoreDashboard() {
               <Route path="broadcast"          element={<Broadcast         storeId={storeId} />} />
               <Route path="integrations"      element={<Integrations      storeId={storeId} />} />
               <Route path="channels"          element={<Channels          storeId={storeId} />} />
+              <Route path="comment-automation" element={<CommentAutomation storeId={storeId} />} />
               <Route path="campaigns"          element={<Campaigns         storeId={storeId} />} />
               <Route path="whatsapp-templates" element={<WhatsAppTemplates storeId={storeId} />} />
               <Route path="whatsapp-events" element={<WhatsAppEvents    storeId={storeId} />} />

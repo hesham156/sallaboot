@@ -94,6 +94,9 @@ async def _process_inbox_row(row: dict) -> None:
     if source in ("messenger", "instagram"):
         await _webhooks_router.handle_messenger_message(payload)
         return
+    if source in ("fb_comment", "ig_comment"):
+        await _webhooks_router.handle_comment_event(payload)
+        return
     if source == "telegram":
         await _webhooks_router.handle_telegram_message(payload)
         return
@@ -139,6 +142,30 @@ async def _deliver_outbox_row(row: dict) -> None:
         ok = await tg.send_text(token, chat_id, text)
         if not ok:
             raise RuntimeError("telegram send failed (see telegram.py log)")
+        return
+
+    if kind == "comment_reply":
+        import comments as cm
+        import store_manager as sm
+        import database as db
+        import datetime as _dt
+        cfg        = sm.get_ai_config(store_id) or {}
+        token      = (cfg.get("page_token") or "").strip()
+        comment_id = payload.get("comment_id", "")
+        platform   = payload.get("platform", "facebook")
+        text       = payload.get("text", "")
+        comment_pk = payload.get("comment_pk")
+        if not (token and comment_id and text):
+            print(f"[outbox] comment_reply skipped (store={store_id}): missing config")
+            return
+        ok = await cm.reply_to_comment(token, comment_id, text, platform=platform)
+        if not ok:
+            raise RuntimeError("comment reply failed (see comments.py log)")
+        if comment_pk:
+            await db.update_social_comment(
+                store_id, int(comment_pk), status="replied", final_reply=text,
+                replied_by="ai", replied_at=_dt.datetime.now(_dt.timezone.utc),
+            )
         return
 
     raise ValueError(f"unknown outbox kind: {kind!r}")
@@ -227,6 +254,7 @@ from routers import contacts      as _contacts_router
 from routers import integrations  as _integrations_router
 from routers import channels      as _channels_router
 from routers import broadcasts     as _broadcasts_router
+from routers import comments       as _comments_router
 
 # Wire lifecycle.sync_task into routers that need it.
 _stores_router.set_sync_task(_lc.sync_task)
@@ -253,6 +281,7 @@ app.include_router(_contacts_router.router)
 app.include_router(_integrations_router.router)
 app.include_router(_channels_router.router)
 app.include_router(_broadcasts_router.router)
+app.include_router(_comments_router.router)
 
 # Backward-compat aliases for tests that import from main
 _process_salla_event     = _webhooks_router.process_salla_event
