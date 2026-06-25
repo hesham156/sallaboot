@@ -1,0 +1,73 @@
+"""
+deps.resolve_store_id — the storefront widget addresses the bot by Salla's
+merchant_id, but account-preserving linking moves the bot onto the owning 7ayak
+account and deletes the merchant store row. Public widget endpoints must map the
+merchant_id back to the account or the widget gets "orphan store refused".
+"""
+from __future__ import annotations
+
+import pytest
+
+from routers import deps
+
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    deps._merchant_map_cache.clear()
+    yield
+    deps._merchant_map_cache.clear()
+
+
+@pytest.fixture
+def patched(monkeypatch):
+    def _apply(mapping: dict, available: bool = True):
+        class _DB:
+            def available(self):
+                return available
+
+            async def resolve_merchant_to_account(self, mid):
+                return mapping.get(str(mid))
+
+        monkeypatch.setattr(deps, "db", _DB())
+    return _apply
+
+
+async def test_maps_merchant_id_to_account(patched):
+    patched({"19314436": "h123asham"})
+    assert await deps.resolve_store_id("19314436") == "h123asham"
+
+
+async def test_unmapped_id_passes_through(patched):
+    """Salla-first / non-Salla stores have no mapping → unchanged."""
+    patched({})
+    assert await deps.resolve_store_id("salla_first_store") == "salla_first_store"
+
+
+async def test_blank_becomes_default(patched):
+    patched({})
+    assert await deps.resolve_store_id("") == "default"
+
+
+async def test_no_db_passes_through(patched):
+    patched({"19314436": "h123asham"}, available=False)
+    assert await deps.resolve_store_id("19314436") == "19314436"
+
+
+async def test_result_is_cached(patched, monkeypatch):
+    calls = {"n": 0}
+
+    class _DB:
+        def available(self):
+            return True
+
+        async def resolve_merchant_to_account(self, mid):
+            calls["n"] += 1
+            return "h123asham"
+
+    monkeypatch.setattr(deps, "db", _DB())
+    assert await deps.resolve_store_id("19314436") == "h123asham"
+    assert await deps.resolve_store_id("19314436") == "h123asham"
+    assert calls["n"] == 1   # second call served from the TTL cache

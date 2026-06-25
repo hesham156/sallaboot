@@ -20,7 +20,8 @@ import realtime
 import notifications as _notif
 from models import ChatRequest, ChatResponse, RateRequest
 from salla_oauth import get_auth_url, exchange_code, get_user_info, save_tokens
-from routers.deps import chat_rate_limited, budget_exhausted, daily_token_budget, is_internal_session_id
+from routers.deps import (chat_rate_limited, budget_exhausted, daily_token_budget,
+                          is_internal_session_id, resolve_store_id)
 from identity import identity_service
 import log as _logmod
 
@@ -309,6 +310,11 @@ async def chat(req: ChatRequest, request: Request):
     store_id = req.store_id or "default"
     if "{{" in store_id or "}}" in store_id:
         store_id = "default"
+    # The storefront widget addresses the bot by the Salla merchant_id. Under the
+    # account-preserving model the merchant store row is gone and its bot lives on
+    # the owning 7ayak account, so map merchant_id → account here or the widget
+    # gets "orphan store refused". No-op for Salla-first / non-Salla stores.
+    store_id = await resolve_store_id(store_id)
 
     ip = request.client.host if request.client else "unknown"
     rl_session_key = (req.session_id or "no-session")[:64]
@@ -568,6 +574,7 @@ async def widget_config(store_id: str = "default"):
     needs to render itself correctly (greeting message, bot name).
     Called by widget.js on first load so merchants can customize these values
     from the dashboard without touching the Salla theme code."""
+    store_id   = await resolve_store_id(store_id)   # Salla merchant_id → account
     ai_cfg     = sm.get_ai_config(store_id) or {}
     store_info = sm.get_store_info(store_id) or {}
     return {
