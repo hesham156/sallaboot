@@ -154,6 +154,7 @@ async def clean_db(db_pool):
         "bot_training", "bot_orders", "employees",
         "app_settings", "stores", "llm_usage", "audit_log",
         "support_access_grants", "widget_outbox",
+        "social_comments", "comment_rules", "store_entitlements",
     ]
     async with db._pool.acquire() as conn:
         await conn.execute(
