@@ -196,22 +196,17 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         or (store_info.get("email") or "").strip().lower()
     )
 
-    # Account-preserving model: if this merchant is ALREADY attached to a 7ayak
-    # account (the merchant→account map exists from an earlier app-settings link),
-    # the account is the canonical store — write the refreshed tokens THERE, not
-    # onto a separate merchant row. This is the re-install / re-authorize path.
-    mapped = await db.resolve_merchant_to_account(store_id)
-    if mapped:
-        store_id    = mapped
-        owner_email = ""   # never touch the account's existing login identity
-
-    # First-time install with no mapping yet → the merchant store is created
-    # under merchant_id and the merchant links it to their 7ayak account via the
-    # App-Settings API key (link_store_via_app_settings), which moves these tokens
-    # onto the account. To avoid a duplicate email-login during that short window,
-    # don't claim an email already owned by another account.
-    elif owner_email and await db.find_store_by_owner_email(owner_email):
-        owner_email = ""
+    # Canonical model: store_id IS the Salla merchant_id everywhere (the widget,
+    # webhooks, and the agent all key on it), so there's ONE store per merchant —
+    # no parallel account, no merchant→account map, no duplicates. If this
+    # merchant's owner already signed up on 7ayak (a placeholder keyed by their
+    # email), fold that placeholder INTO this Salla store: carry its chosen
+    # password + email, then delete it, so the merchant ends with ONE account
+    # they log into by email. Only on first install.
+    is_new = not sm.is_registered(store_id)
+    carried_pwd, placeholder_id = (
+        await sm.reassign_owner_email(owner_email, store_id) if is_new else ("", "")
+    )
 
     await sm.register_store(
         store_id=store_id,
@@ -220,6 +215,16 @@ async def _handle_store_authorize(merchant_id: str, data: dict):
         store_info=merged_info,
         owner_email=owner_email,
     )
+
+    if carried_pwd:
+        await sm.set_admin_password(store_id, carried_pwd)
+        print(f"[webhook] 🔗 carried 7ayak password onto Salla store {store_id!r}")
+
+    if placeholder_id and await db.merge_placeholder_into(placeholder_id, store_id):
+        sm.unregister(placeholder_id)
+        # Seamless: the merchant's open session (token bound to the deleted
+        # placeholder) migrates to this store without a re-login.
+        await db.record_account_forward(placeholder_id, store_id)
 
     # Directly await the DB save for this critical event so data is never
     # lost even if the server restarts seconds after the webhook.
@@ -245,23 +250,9 @@ async def _handle_app_uninstalled(merchant_id: str, data: dict):
         print("[webhook] app.uninstalled for 'default' — skipping purge (env store)")
         return
     try:
-        # Account-preserving: if this merchant is attached to a 7ayak account,
-        # uninstalling Salla must NOT delete the account — only disconnect Salla.
-        # Clear the Salla tokens from the account (so it stops using the revoked
-        # token and the integration shows disconnected) and drop the mapping.
-        mapped = await db.resolve_merchant_to_account(store_id)
-        if mapped:
-            sm.clear_salla_token(mapped)
-            if db.available():
-                await db.save_store(mapped, sm.get_store_info(mapped))
-                await db.clear_salla_merchant_map(store_id)
-            _log_event(store_id, "app.uninstalled", "ok",
-                       f"salla disconnected from account {mapped!r}")
-            print(f"[webhook] 🔌 Salla uninstalled — disconnected from account {mapped!r}")
-            return
-        # Salla-first install (account IS the merchant store) → purge as before.
         if db.available():
             await db.purge_store(store_id)
+            await db.clear_salla_merchant_map(store_id)   # drop any legacy breadcrumb
         sm.unregister_store(store_id)
         _log_event(store_id, "app.uninstalled", "ok", "store data purged")
         print(f"[webhook] 🗑️ Store {store_id!r} uninstalled — data purged")
@@ -311,96 +302,64 @@ def extract_app_settings_fields(settings) -> tuple:
 
 async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -> tuple:
     """
-    Attach a Salla store to its 7ayak account WITHOUT changing the account's
-    identity. Returns (ok: bool, detail: str).
+    Bind a signup-first 7ayak account to its Salla store. Returns (ok, detail).
 
-    Account-preserving model: the 7ayak account (resolved by the SECRET API key)
-    keeps its own store_id, email, and password forever. We move the Salla OAuth
-    tokens from the just-installed Salla store (keyed by Salla's merchant_id) onto
-    the account, record a merchant_id → account map so every future Salla webhook
-    routes to the account, then delete the redundant merchant store row. The
-    account never disappears, its id never changes, and the merchant never has to
-    re-login. Shared by the app.settings.updated webhook and the validation URL.
-
-    `store_id` here is Salla's merchant_id (the just-installed Salla store).
+    Canonical model: `store_id` IS the Salla merchant_id, and that is the ONE
+    store for this merchant (widget, webhooks, and agent all key on it). The
+    7ayak account is resolved by the SECRET API key, then its login identity
+    (email + chosen password) is moved onto the Salla store and the now-duplicate
+    placeholder account is merged in + deleted. The merchant ends with ONE store,
+    logged into by email — no parallel account, no merchant→account map, no
+    duplicates. Shared by the app.settings.updated webhook and the validation URL.
     """
-    # Resolve the account ONLY by the API key — it is the secret proof of
-    # ownership. Email is non-secret and must never be the lookup credential
-    # (finding C-4).
+    # Resolve the account ONLY by the API key — the secret proof of ownership.
+    # Email is non-secret and must never be the lookup credential (finding C-4).
     home = await db.find_store_by_api_key(api_key) if api_key else None
     if not home:
         return False, "no 7ayak account matched the API key provided"
     if str(home) == str(store_id):
-        return True, "already linked"   # Salla-first: the account already IS this merchant store
+        return True, "already linked"   # Salla-first: the account already IS this store
 
-    # Idempotent fast-path: already mapped → authorize writes fresh tokens
-    # straight to the account, so there's nothing to move here.
-    if await db.resolve_merchant_to_account(store_id):
-        return True, "already linked"
-
-    # An account may bind exactly ONE Salla store. Refuse a DIFFERENT merchant.
-    existing_mid = str((sm.get_store_info(home) or {}).get("salla_merchant_id") or "")
-    if existing_mid and existing_mid != str(store_id):
-        return False, f"home account {home!r} already linked to a different Salla store"
-
-    # Never attach to an account already on a different e-commerce platform.
-    home_integrations = await db.get_integrations(home)
-    if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
-        return False, f"home account {home!r} already has another platform"
-
-    # Is the freshly-installed Salla store present? It holds the OAuth tokens from
-    # app.store.authorize. Reconcile from the shared DB in case it registered on
-    # another process.
+    # The Salla store must exist (created by app.store.authorize). Reconcile from
+    # the shared DB in case it registered on another web replica / the worker.
     if not sm.is_registered(store_id):
         await sm.sync_one_from_db(store_id)
-
     if not sm.is_registered(store_id):
-        # No fresh merchant store to move. If the account already has Salla (or a
-        # recorded merchant id), just SELF-HEAL the merchant→account map so the
-        # storefront widget — which addresses the bot by merchant_id — resolves.
-        # Otherwise the install hasn't completed yet (validation treats this as a
-        # non-blocking timing race).
-        if home_integrations.get("salla") or existing_mid:
-            await db.set_salla_merchant_map(store_id, home)
-            if not existing_mid:
-                ht = dict(sm.get_store_info(home) or {})
-                ht["salla_merchant_id"] = str(store_id)
-                sm.update_store_info(home, ht)
-                await db.save_store(home, ht)
-            return True, "already linked"
         return False, "salla_store_not_ready"
 
-    # ── A fresh Salla store exists → move its connection onto the account ──
-    # ALWAYS move, even if the account already carried an older/revoked Salla
-    # token: a reinstall delivers a new token on the merchant store that must
-    # replace the stale one on the account. The account keeps its own identity.
-    merchant_tokens = dict(sm.get_store_info(store_id) or {})   # Salla store row (tokens)
-    home_tokens     = dict(sm.get_store_info(home) or {})       # account row (preserve login)
+    # Never hijack a home account that is itself already a live store on any
+    # e-commerce platform (incl. Salla) — a signup placeholder has none.
+    home_integrations = await db.get_integrations(home)
+    if any(home_integrations.get(p) for p in ("salla", "shopify", "zid", "woocommerce")):
+        return False, f"home account {home!r} already has another platform"
 
-    for f in ("access_token", "refresh_token", "expires_at"):
-        if merchant_tokens.get(f):
-            home_tokens[f] = merchant_tokens[f]
-    if merchant_tokens.get("store_name"):
-        home_tokens["store_name"] = merchant_tokens["store_name"]
-    home_tokens["salla_merchant_id"] = str(store_id)
+    # Move the login identity (email + password + API key) from the placeholder
+    # account onto the canonical Salla store.
+    link_email = email or (sm.get_store_info(home) or {}).get("owner_email", "")
+    pwd        = sm.get_admin_password_hash(home)
+    if link_email:
+        await db.set_store_owner_email(store_id, link_email)
+        await db.set_store_owner_email(home, "")
+    if pwd:
+        await sm.set_admin_password(store_id, pwd)
+    await db.set_api_key(home, None)        # clear first to satisfy the unique index
+    if api_key:
+        await db.set_api_key(store_id, api_key)
+    sm.reset_agent(store_id)
 
-    sm.update_store_info(home, home_tokens)
-    await db.save_store(home, home_tokens)
-    # Carry the already-synced catalogue so the bot answers immediately.
-    merchant_cache = sm.get_cache(store_id)
-    if merchant_cache:
-        sm.set_cache(home, merchant_cache)
-    sm.reset_agent(home)
+    # Merge the placeholder's bot config/training into the Salla store and delete
+    # it — but only when it's a pure signup placeholder (no Salla token of its
+    # own). The merchant is then left with ONE account.
+    merged = ""
+    if not sm.get_access_token(home):
+        if await db.merge_placeholder_into(home, store_id):
+            sm.unregister(home)
+            # Seamless: migrate the merchant's open session off the deleted
+            # placeholder to this store (resolve-link / "تحديث الربط" button).
+            await db.record_account_forward(home, store_id)
+            merged = " (placeholder merged + removed)"
 
-    # Route every future Salla webhook for this merchant to the account.
-    await db.set_salla_merchant_map(store_id, home)
-
-    # The merchant store row is now redundant (its tokens live on the account and
-    # webhooks resolve to the account) — remove it so there's no ghost store.
-    await db.purge_store(store_id)
-    sm.unregister(store_id)
-
-    return True, f"salla attached to account {home!r} (merchant {store_id!r})"
+    return True, f"linked to 7ayak account (was {home!r}){merged}"
 
 
 async def _handle_app_settings_updated(merchant_id: str, data: dict):
@@ -891,8 +850,8 @@ async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:
     Returns normally on success (including unhandled events, which are
     acknowledged silently).
     """
-    # Lifecycle events need the REAL merchant_id (they create the store and own
-    # the merchant→account mapping); they must NOT be pre-resolved.
+    # Canonical model: store_id IS the Salla merchant_id everywhere, so every
+    # handler keys on merchant_id directly — no resolution needed.
     if event == "app.store.authorize":
         await _handle_store_authorize(merchant_id, data)
         return
@@ -909,10 +868,7 @@ async def process_salla_event(event: str, merchant_id: str, data: dict) -> None:
         await _handle_app_lifecycle(event, merchant_id, data)
         return
 
-    # Data events route to the ACCOUNT that owns this Salla merchant, so a
-    # signup-first account keeps its own store_id. Salla-first installs have no
-    # mapping → store_id falls through to merchant_id unchanged.
-    store_id = (await db.resolve_merchant_to_account(merchant_id)) or merchant_id
+    store_id = merchant_id
 
     if event.startswith("product."):
         await _handle_product_event(event, store_id, data)

@@ -510,6 +510,24 @@ async def salla_diag(request: Request, merchant: str = ""):
     }
 
 
+@router.post("/admin/stores/purge")
+async def purge_store_admin(request: Request):
+    """Delete one store row + its dependent data. Cleanup for leftover duplicate
+    placeholders from the old two-id model. Body: {"store_id": "..."}."""
+    _require_super(request)
+    body     = await request.json()
+    store_id = str(body.get("store_id", "")).strip()
+    if not store_id:
+        raise HTTPException(400, "store_id is required")
+    counts = await db.purge_store(store_id)
+    try:
+        sm.unregister_store(store_id)
+    except Exception:
+        sm.unregister(store_id)
+    print(f"[admin] 🗑️ purged store {store_id!r}: {counts}")
+    return {"ok": True, "store_id": store_id, "purged": counts}
+
+
 @router.post("/admin/salla/bind")
 async def salla_bind(request: Request):
     """Force-bind a Salla merchant_id to a 7ayak account: write the KV map AND
