@@ -1248,6 +1248,46 @@ async def set_salla_merchant_map(merchant_id: str, account_store_id: str) -> Non
     await set_app_setting(f"{_SALLA_MERCHANT_PREFIX}{merchant_id}", {"store": account_store_id})
 
 
+async def list_salla_stores() -> list[dict]:
+    """Diagnostic: every store that looks Salla-connected, with the merchant id it
+    advertises. salla_merchant_id is plaintext; access_token is just a presence flag."""
+    if not _pool:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT store_id,
+                       tokens->>'salla_merchant_id' AS salla_merchant_id,
+                       (tokens->>'access_token') IS NOT NULL
+                         AND tokens->>'access_token' <> '' AS has_token
+                FROM stores
+                WHERE (tokens->>'access_token') IS NOT NULL
+                   OR (tokens->>'salla_merchant_id') IS NOT NULL
+                """
+            )
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[db] list_salla_stores error: {e}")
+        return []
+
+
+async def set_store_salla_merchant_id(store_id: str, merchant_id: str) -> None:
+    """Stamp salla_merchant_id onto a store's tokens JSONB (plaintext, queryable)."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE stores SET tokens = jsonb_set(COALESCE(tokens,'{}'::jsonb), "
+                "'{salla_merchant_id}', to_jsonb($2::text)), updated_at = NOW() "
+                "WHERE store_id = $1",
+                str(store_id), str(merchant_id),
+            )
+    except Exception as e:
+        print(f"[db] set_store_salla_merchant_id error: {e}")
+
+
 async def find_account_by_salla_merchant(merchant_id: str) -> Optional[str]:
     """Find the account that carries this Salla merchant id on its tokens.
 
