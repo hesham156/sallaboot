@@ -483,6 +483,60 @@ window.SallaChatConfig = {{
 </html>""")
 
 
+# ── Super-admin: Salla merchant↔account diagnostics + repair ─────────────
+# Account-preserving linking maps a Salla merchant_id → a 7ayak account and
+# deletes the merchant store row; the storefront widget resolves through that
+# map. These let a super admin SEE the current binding and force-repair it when
+# a merchant got orphaned (e.g. the map write didn't land during linking).
+
+def _require_super(request: Request) -> None:
+    token  = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    claims = _auth.verify_token(token)
+    if not claims or not claims.get("su"):
+        raise HTTPException(403, "مصرح للمدير العام فقط")
+
+
+@router.get("/admin/salla/diag")
+async def salla_diag(request: Request, merchant: str = ""):
+    """What does the platform think owns this Salla merchant_id?"""
+    _require_super(request)
+    merchant = (merchant or "").strip()
+    return {
+        "merchant":            merchant,
+        "kv_map":              await db.get_app_setting(f"salla_merchant:{merchant}") if merchant else None,
+        "by_salla_merchant_id": await db.find_account_by_salla_merchant(merchant) if merchant else None,
+        "resolved":            await db.resolve_merchant_to_account(merchant) if merchant else None,
+        "salla_stores":        await db.list_salla_stores(),
+    }
+
+
+@router.post("/admin/salla/bind")
+async def salla_bind(request: Request):
+    """Force-bind a Salla merchant_id to a 7ayak account: write the KV map AND
+    stamp salla_merchant_id on the account so the widget resolves. Body:
+    {"merchant": "...", "account": "..."}."""
+    _require_super(request)
+    body     = await request.json()
+    merchant = str(body.get("merchant", "")).strip()
+    account  = str(body.get("account", "")).strip()
+    if not merchant or not account:
+        raise HTTPException(400, "merchant and account are required")
+    if not sm.is_registered(account):
+        await sm.sync_one_from_db(account)
+    if not sm.is_registered(account):
+        raise HTTPException(404, f"account {account!r} not found")
+    await db.set_salla_merchant_map(merchant, account)
+    await db.set_store_salla_merchant_id(account, merchant)
+    # Keep the in-memory registry coherent on this process.
+    info = dict(sm.get_store_info(account) or {})
+    info["salla_merchant_id"] = merchant
+    sm.update_store_info(account, info)
+    sm.reset_agent(account)
+    print(f"[admin] 🔗 force-bound salla merchant {merchant!r} → account {account!r}")
+    return {"ok": True, "merchant": merchant, "account": account,
+            "resolved": await db.resolve_merchant_to_account(merchant)}
+
+
 # ── Super-admin: force DB sync ───────────────────────────────────────────
 # Kept on the public router because it shares the bearer-auth-check style
 # of /env-check rather than the middleware-protected /admin/{id}/* pattern.
