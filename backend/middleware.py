@@ -21,6 +21,7 @@ import time
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.datastructures import MutableHeaders
 
 import auth as _auth
 import log as _logmod
@@ -79,11 +80,14 @@ _OWNER_ONLY_RE = re.compile(
 )
 
 
-async def admin_auth_middleware(request: Request, call_next):
+async def _auth_reject(request: Request):
     """
-    Bearer-token enforcement for per-store admin routes + role-based
-    gating for employees. Adds defensive security headers to all
-    responses on the way back.
+    Bearer-token enforcement for per-store admin routes + role-based gating for
+    employees. Returns a Response to REJECT the request, or None to allow it.
+    Also performs the best-effort cross-process registry sync side-effect.
+
+    Pure decision function (no call_next) so it can run inside the pure-ASGI
+    GatewayMiddleware below.
     """
     path = request.url.path
 
@@ -194,11 +198,8 @@ async def admin_auth_middleware(request: Request, call_next):
                 return RedirectResponse(url="/admin", status_code=302)
             return JSONResponse({"detail": "يرجى تسجيل الدخول كمدير عام"}, status_code=401)
 
-    # Security headers are applied by cors_middleware (the OUTERMOST layer) so
-    # that EVERY response — including the auth-rejection 401/403s returned above
-    # — carries them. See _apply_security_headers.
-    response = await call_next(request)
-    return response
+    # Allowed — GatewayMiddleware applies CORS + security headers on the way out.
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -243,27 +244,24 @@ _CORS_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 _CORS_HEADERS = "Authorization, Content-Type, X-Salla-Signature, X-Requested-With"
 
 
-def _apply_security_headers(response, path: str) -> None:
-    """Defensive response headers (finding M-18). Applied from the outermost
-    middleware so EVERY response carries them — including the auth middleware's
-    early 401/403 rejections.
+def _apply_security_headers(headers, path: str) -> None:
+    """Defensive response headers (finding M-18). Applied to EVERY response —
+    including the auth-rejection 401/403s and streaming responses. `headers` is a
+    MutableHeaders (a Response.headers or one built over a raw ASGI header list).
 
     nosniff + referrer + HSTS + Permissions-Policy are safe everywhere. The
     clickjacking/CSP set is scoped to the dashboard only (never the
     script-injected widget or the /chat API, so storefront embedding keeps
-    working). The CSP intentionally omits script-src/style-src: a strict
-    script-src would break the inline <script> in the Salla OAuth callback +
-    /snippet pages — a full nonce-based document CSP is a separate, tested
-    follow-up.
+    working).
     """
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    headers.setdefault("X-Content-Type-Options", "nosniff")
+    headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     # HSTS — pin clients to HTTPS for a year (incl. subdomains). Browsers honour
     # it only over HTTPS, so it's safe to send everywhere (Railway terminates TLS).
-    response.headers.setdefault(
+    headers.setdefault(
         "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
     )
-    response.headers.setdefault(
+    headers.setdefault(
         "Permissions-Policy",
         "camera=(), microphone=(), geolocation=(), browsing-topics=()",
     )
@@ -278,62 +276,25 @@ def _apply_security_headers(response, path: str) -> None:
         or path.startswith("/store/")
     )
     if is_dashboard:
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-        # `script-src 'self'` is the core anti-XSS control for the dashboard:
-        # it blocks BOTH injected inline <script> and externally-hosted scripts,
-        # so a stored/reflected XSS can no longer execute to exfiltrate the
-        # bearer token from localStorage. The SPA loads only its own bundle from
-        # /assets (same-origin → 'self'); inline JSON-LD is a non-executable
-        # data block and is unaffected. This is safe here because the inline
-        # <script> pages (Salla OAuth callback, /snippet) are NOT dashboard
-        # paths and never receive this CSP. (M4)
-        response.headers.setdefault(
+        headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        # `script-src 'self'` is the core anti-XSS control for the dashboard (M4):
+        # blocks injected inline + externally-hosted scripts from exfiltrating the
+        # bearer token. The SPA loads only its own /assets bundle (same-origin);
+        # inline JSON-LD is a non-executable data block; the inline-<script> pages
+        # (OAuth callback, /snippet) aren't dashboard paths and never get this CSP.
+        headers.setdefault(
             "Content-Security-Policy",
             "script-src 'self'; frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
         )
 
 
-async def cors_middleware(request: Request, call_next):
-    """
-    Outermost middleware (declared last → wraps everything). Echoes
-    Origin selectively depending on path. CORS-preflight (OPTIONS) is
-    short-circuited without invoking downstream handlers.
-    """
+def _cors_allowed_origin(request: Request, path: str) -> str:
+    """The Origin to echo in Access-Control-Allow-Origin, or '' to omit it."""
     origin = request.headers.get("Origin", "")
-    path   = request.url.path
-    is_admin_path = bool(_ADMIN_CORS_PATH_RE.match(path))
-
-    if is_admin_path:
-        allow = origin in _ADMIN_ORIGIN_ALLOWLIST
-        allowed_origin = origin if allow else ""
-    else:
-        # Public widget surface — any origin OK.
-        allowed_origin = origin if origin else "*"
-
-    if request.method == "OPTIONS":
-        # Preflight — answer directly so an unauthenticated OPTIONS
-        # doesn't trip auth middleware.
-        headers = {
-            "Access-Control-Allow-Methods": _CORS_METHODS,
-            "Access-Control-Allow-Headers": request.headers.get(
-                "Access-Control-Request-Headers", _CORS_HEADERS
-            ),
-            "Access-Control-Max-Age": "600",
-            "Vary": "Origin",
-        }
-        if allowed_origin:
-            headers["Access-Control-Allow-Origin"] = allowed_origin
-        return JSONResponse({}, status_code=204, headers=headers)
-
-    response = await call_next(request)
-    if allowed_origin:
-        response.headers["Access-Control-Allow-Origin"] = allowed_origin
-        response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Expose-Headers"] = "*"
-    # Defense-in-depth headers on EVERY response (incl. auth 401/403 rejections,
-    # which the auth middleware returns before reaching its own response path).
-    _apply_security_headers(response, path)
-    return response
+    if _ADMIN_CORS_PATH_RE.match(path):
+        return origin if origin in _ADMIN_ORIGIN_ALLOWLIST else ""
+    # Public widget surface — any origin OK.
+    return origin if origin else "*"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -363,68 +324,101 @@ def _is_quiet_path(path: str) -> bool:
     return False
 
 
-async def request_id_middleware(request: Request, call_next):
+class GatewayMiddleware:
     """
-    Generate or echo X-Request-ID so every log line during this request
-    carries the same correlation id. Logs one summary line at the end
-    with method/path/status/duration_ms.
+    Single PURE-ASGI middleware: request-id + auth gating + CORS + security
+    headers + request logging, in one pass.
 
-    Honours an incoming X-Request-ID header so an upstream proxy / mobile
-    client can stitch its own logs to ours.
+    Why pure ASGI (not BaseHTTPMiddleware / @app.middleware("http")):
+    BaseHTTPMiddleware buffers the response through an anyio memory stream and
+    re-emits it, which is incompatible with streaming responses and intermittently
+    raised `RuntimeError: Response content longer than Content-Length` on the SSE
+    endpoints (/chat/stream, /admin/{store}/stream) and other paths. A pure ASGI
+    middleware instead injects headers on the `http.response.start` message and
+    forwards every `http.response.body` chunk untouched, so streaming works and
+    the Content-Length the downstream set is never invalidated.
     """
-    rid = request.headers.get("X-Request-ID", "").strip() or _logmod.new_request_id()
-    _logmod.set_request_id(rid)
 
-    started = time.perf_counter()
-    status_code = 500   # in case the handler crashes before returning
-    try:
-        response = await call_next(request)
-        status_code = response.status_code
-    except Exception:
-        # Re-raise so the exception_handler in main.py builds the proper
-        # error response; we just want to log the failure here.
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-        _log.exception(
-            "request_failed",
-            extra={
-                "method":      request.method,
-                "path":        request.url.path,
-                "duration_ms": elapsed_ms,
-            },
-        )
-        raise
-    else:
-        # Echo the id back so clients (or curl -v) can grep their logs
-        # against ours.
-        response.headers.setdefault("X-Request-ID", rid)
+    def __init__(self, app):
+        self.app = app
 
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-        # Log every request EXCEPT high-volume noise (health/assets) AND
-        # successful 2xx GETs that finished fast — those add little value
-        # vs. their cost in log volume. Errors and slow requests always
-        # log so an oncall can find them.
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
         path = request.url.path
-        is_quiet = _is_quiet_path(path)
-        is_error = status_code >= 400
-        is_slow  = elapsed_ms >= 500
-        if is_error or is_slow or not is_quiet:
-            _log.info(
-                "request_finished",
-                extra={
-                    "method":      request.method,
-                    "path":        path,
-                    "status":      status_code,
-                    "duration_ms": elapsed_ms,
-                },
-            )
-        return response
+        allowed_origin = _cors_allowed_origin(request, path)
+
+        rid = request.headers.get("X-Request-ID", "").strip() or _logmod.new_request_id()
+        _logmod.set_request_id(rid)
+
+        # ── CORS preflight — answer directly (an unauthenticated OPTIONS must not
+        #    trip the auth gate). ───────────────────────────────────────────────
+        if request.method == "OPTIONS":
+            headers = {
+                "Access-Control-Allow-Methods": _CORS_METHODS,
+                "Access-Control-Allow-Headers": request.headers.get(
+                    "Access-Control-Request-Headers", _CORS_HEADERS
+                ),
+                "Access-Control-Max-Age": "600",
+                "Vary": "Origin",
+            }
+            if allowed_origin:
+                headers["Access-Control-Allow-Origin"] = allowed_origin
+            resp = JSONResponse({}, status_code=204, headers=headers)
+            _apply_security_headers(resp.headers, path)
+            resp.headers.setdefault("X-Request-ID", rid)
+            await resp(scope, receive, send)
+            return
+
+        # ── Auth gate — reject early with a fully-decorated response. ───────────
+        reject = await _auth_reject(request)
+        if reject is not None:
+            if allowed_origin:
+                reject.headers["Access-Control-Allow-Origin"] = allowed_origin
+                reject.headers["Vary"] = "Origin"
+                reject.headers["Access-Control-Expose-Headers"] = "*"
+            _apply_security_headers(reject.headers, path)
+            reject.headers.setdefault("X-Request-ID", rid)
+            await reject(scope, receive, send)
+            return
+
+        # ── Pass through, injecting headers on response.start. ──────────────────
+        started = time.perf_counter()
+        status_holder = {"code": 500}
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                status_holder["code"] = message["status"]
+                headers = MutableHeaders(raw=message["headers"])
+                if allowed_origin:
+                    headers["Access-Control-Allow-Origin"] = allowed_origin
+                    headers["Vary"] = "Origin"
+                    headers["Access-Control-Expose-Headers"] = "*"
+                _apply_security_headers(headers, path)
+                headers.setdefault("X-Request-ID", rid)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            _log.exception("request_failed", extra={
+                "method": request.method, "path": path, "duration_ms": elapsed_ms,
+            })
+            raise
+        else:
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            code = status_holder["code"]
+            if code >= 400 or elapsed_ms >= 500 or not _is_quiet_path(path):
+                _log.info("request_finished", extra={
+                    "method": request.method, "path": path,
+                    "status": code, "duration_ms": elapsed_ms,
+                })
 
 
 def register(app) -> None:
-    """
-    Register middlewares in the correct order. Starlette wraps in reverse
-    registration order: first registered = innermost, last = outermost.
-    """
-    app.middleware("http")(request_id_middleware)
-    app.middleware("http")(admin_auth_middleware)
-    app.middleware("http")(cors_middleware)
+    """Install the single pure-ASGI gateway middleware."""
+    app.add_middleware(GatewayMiddleware)

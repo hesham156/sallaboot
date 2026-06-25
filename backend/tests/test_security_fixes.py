@@ -488,9 +488,11 @@ def test_webhook_url_public_hostname_allowed(monkeypatch):
 
 def _headers_for(path: str) -> dict:
     import middleware
-    resp = types.SimpleNamespace(headers={})
-    middleware._apply_security_headers(resp, path)
-    return resp.headers
+    # _apply_security_headers takes a MutableHeaders-like object; a plain dict has
+    # the .setdefault/.get/__contains__ it uses, so it's a fine stand-in here.
+    headers: dict = {}
+    middleware._apply_security_headers(headers, path)
+    return headers
 
 
 @pytest.mark.parametrize("path", ["/admin", "/admin/x", "/store", "/store/abc", "/login"])
