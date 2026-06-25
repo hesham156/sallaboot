@@ -298,35 +298,11 @@ _INTERNAL_SESSION_PREFIXES = ("wa:", "msgr:", "ig:", "tg:")
 # map that merchant_id back to the owning account or it gets "orphan store
 # refused". Non-mapped ids (Salla-first installs, non-Salla stores) pass through
 # unchanged. Cached briefly so high-frequency polling doesn't hit the DB each time.
-_merchant_map_cache: dict[str, tuple[float, str]] = {}
-# A real mapping is stable → cache it long. A "no mapping" (pass-through) result
-# is cached only briefly so a store that gets linked while its widget is polling
-# starts resolving within seconds instead of orphaning for a full minute.
-_MERCHANT_MAP_TTL = 60.0
-_MERCHANT_MISS_TTL = 5.0
-
-
 async def resolve_store_id(requested: str) -> str:
-    """Map a storefront-supplied store id (often a Salla merchant_id) to the
-    account that owns it. Returns the input unchanged when there's no mapping."""
-    import time as _t
-    requested = requested or "default"
-    if not db.available():
-        return requested
-    now = _t.time()
-    hit = _merchant_map_cache.get(requested)
-    if hit:
-        resolved = hit[1]
-        ttl = _MERCHANT_MAP_TTL if resolved != requested else _MERCHANT_MISS_TTL
-        if (now - hit[0]) < ttl:
-            return resolved
-    try:
-        mapped = await db.resolve_merchant_to_account(requested)
-    except Exception:
-        return requested
-    resolved = mapped or requested
-    _merchant_map_cache[requested] = (now, resolved)
-    return resolved
+    """Pass-through. In the canonical model store_id IS the Salla merchant_id, so
+    the storefront widget already addresses the right store — there is nothing to
+    map. Kept as a thin seam so callers don't change if remapping is ever needed."""
+    return requested or "default"
 
 
 def is_internal_session_id(session_id: str) -> bool:
