@@ -446,7 +446,12 @@ async def meta_connect_pages(store_id: str, request: Request):
     if not (page_token and page_id):
         raise HTTPException(400, "تعذّر الحصول على توكن الصفحة — أعد المحاولة ومنح الصلاحيات كاملة.")
 
-    subscribed = await _ms.subscribe_page(page_token, page_id)
+    import comments as _cm
+    subscribed     = await _ms.subscribe_page(page_token, page_id)
+    # Also subscribe the comment webhook fields (feed/comments/mentions) so public
+    # comments flow into the Smart Inbox. Comment AUTOMATION stays off until the
+    # merchant enables it in the panel + the feature is entitled — see Phase C.
+    subscribed_cm  = await _cm.subscribe_page_comments(page_token, page_id)
 
     existing = sm.get_ai_config(store_id)
     config = dict(existing)
@@ -458,6 +463,9 @@ async def meta_connect_pages(store_id: str, request: Request):
         "ig_id":             ig_id,
         "ig_username":       page.get("ig_username", ""),
         "instagram_enabled": bool(ig_id),
+        # Comment automation defaults — opt-in via the Automation panel.
+        "comments_fb_enabled": config.get("comments_fb_enabled", False),
+        "comments_ig_enabled": config.get("comments_ig_enabled", False),
     })
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
@@ -485,8 +493,10 @@ async def meta_disconnect_pages(store_id: str, request: Request):
     config = dict(sm.get_ai_config(store_id))
     for k in ("page_id", "page_name", "page_token", "ig_id", "ig_username"):
         config.pop(k, None)
-    config["messenger_enabled"] = False
-    config["instagram_enabled"] = False
+    config["messenger_enabled"]   = False
+    config["instagram_enabled"]   = False
+    config["comments_fb_enabled"] = False
+    config["comments_ig_enabled"] = False
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
     await audit(request, "meta_pages_disconnect", target_store=store_id)
