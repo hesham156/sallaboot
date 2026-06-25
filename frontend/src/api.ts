@@ -197,6 +197,12 @@ export const api = {
     purpose: 'login' | 'signup'; name?: string; remember_device?: boolean
   }) => post<SessionResponse>('/auth/otp/verify', body),
 
+  // Poll/trigger seamless session migration after signup→Salla linking. Returns
+  // the new canonical store_id (and persists the swapped token) when the merged
+  // placeholder has been forwarded, or null while nothing is pending. Shares the
+  // exact persist logic the 403 auto-recovery uses, so there's one code path.
+  resolveLinkedSession: (): Promise<string | null> => tryResolveLink(),
+
   forgotPassword: (email: string) =>
     post<{ ok: boolean; message: string }>('/auth/forgot-password', { email }),
 

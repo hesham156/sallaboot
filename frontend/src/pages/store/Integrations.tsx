@@ -217,7 +217,7 @@ function SallaConnectModal({ isOpen, onClose, storeId, onToast }: {
               </div>
 
               <div className="bg-content2 rounded-xl p-3 text-[11px] text-default-500 leading-relaxed">
-                بعد الحفظ في لوحة سلة سيظهر المتجر «متصل» خلال لحظات — حدّث الصفحة إذا لم يظهر فوراً.
+                بعد الحفظ في لوحة سلة، ارجع إلى هذه الصفحة وسيتم ربط المتجر وتحديث اللوحة تلقائياً خلال لحظات — دون الحاجة لتحديث الصفحة.
               </div>
             </ModalBody>
             <ModalFooter>
@@ -249,6 +249,10 @@ export default function Integrations({ storeId }: Props) {
 
   // Salla connect modal — Salla links ONLY via the App-Settings API key.
   const [sallaModal, setSallaModal]     = useState(false)
+  // Set once the merchant opens the Salla modal (intent to link). While true and
+  // Salla isn't connected yet, the page polls for the link to complete so the
+  // dashboard updates itself — no manual refresh after saving the key in Salla.
+  const [awaitingSallaLink, setAwaitingSallaLink] = useState(false)
 
   // Disconnect confirmation modal
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null)
@@ -318,6 +322,68 @@ export default function Integrations({ storeId }: Props) {
     } finally { setLoading(false) }
   }
 
+  // ── Auto-detect Salla linking completion (no manual refresh) ──────────────
+  // After the merchant pastes the API key in Salla and saves, the link arrives
+  // server-side via the app.settings.updated webhook. The merchant is still
+  // sitting on this page (often having tabbed away to Salla and back), so we
+  // poll for completion instead of making them refresh. Two outcomes:
+  //   1. Signup placeholder merged into the Salla store → /auth/resolve-link
+  //      returns a fresh session → swap token + hard-navigate to the new store.
+  //   2. Store linked in place (already canonical) → the integration status
+  //      flips to connected → refresh the UI and toast.
+  // Runs only after the merchant opened the Salla modal (intent), only while
+  // Salla isn't connected, and only checks when the tab is visible — so an
+  // unrelated user without Salla never polls.
+  const sallaConnected = integrations.find(i => i.id === 'salla')?.status === 'connected'
+
+  useEffect(() => {
+    if (!awaitingSallaLink || sallaConnected || loading) return
+
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    async function check() {
+      if (stopped || document.hidden) return
+      // 1. Did our own account migrate onto a Salla store? (placeholder flow)
+      const newStore = await api.resolveLinkedSession()
+      if (stopped) return
+      if (newStore) {
+        window.location.assign(`/store/${newStore}`)
+        return
+      }
+      // 2. Same store linked in place — has Salla just become connected?
+      try {
+        const res = await api.listIntegrations(storeId)
+        if (!stopped && (res.integrations || {})['salla']) {
+          setAwaitingSallaLink(false)
+          showToast('تم ربط متجر سلّة بنجاح! 🎉', 'success')
+          loadIntegrations()
+        }
+      } catch { /* keep polling */ }
+    }
+
+    function schedule() {
+      timer = setTimeout(async () => {
+        await check()
+        if (!stopped) schedule()
+      }, 5000)
+    }
+
+    // Check immediately when the merchant returns to this tab from Salla.
+    const onVisible = () => { if (!document.hidden) check() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    schedule()
+
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awaitingSallaLink, sallaConnected, loading, storeId])
+
   const ECOMMERCE_IDS = ['salla', 'shopify', 'zid', 'woocommerce']
 
   function handleConnect(id: string) {
@@ -332,7 +398,7 @@ export default function Integrations({ storeId }: Props) {
       }
     }
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
-    else if (id === 'salla') { setSallaModal(true) }   // API-key linking is the only Salla method
+    else if (id === 'salla') { setSallaModal(true); setAwaitingSallaLink(true) }   // API-key linking is the only Salla method
     else if (id === 'zid') { handleZidConnect() }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
