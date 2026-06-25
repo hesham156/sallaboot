@@ -347,6 +347,17 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
     if home_integrations.get("salla"):
         existing_mid = str((sm.get_store_info(home) or {}).get("salla_merchant_id") or "")
         if not existing_mid or existing_mid == str(store_id):
+            # Self-heal: ensure the merchant→account map AND salla_merchant_id
+            # exist so the storefront widget (which addresses the bot by
+            # merchant_id) resolves to this account. Older links — or accounts
+            # connected before the mapping existed — would otherwise leave the
+            # widget orphaned forever even though the dashboard shows "connected".
+            await db.set_salla_merchant_map(store_id, home)
+            if not existing_mid:
+                ht = dict(sm.get_store_info(home) or {})
+                ht["salla_merchant_id"] = str(store_id)
+                sm.update_store_info(home, ht)
+                await db.save_store(home, ht)
             return True, "already linked"
         return False, f"home account {home!r} already linked to a different Salla store"
     # Never attach to an account that already runs a different e-commerce platform.
