@@ -148,6 +148,51 @@ async def load_from_db():
     )
 
 
+async def sync_one_from_db(store_id: str) -> bool:
+    """
+    Reconcile a SINGLE store's in-memory state against the shared DB and return
+    whether it exists in the DB afterwards.
+
+    The registry is per-process: a store created or deleted on another web
+    replica / the worker is invisible here until reload. This lets a request
+    handler make the local registry agree with the DB for one id on demand:
+
+      • DB has the row  → (re)load it into the registry (picks up a store this
+        process never saw, or a fresh token).
+      • DB has no row   → evict it from the registry (drops a placeholder that
+        was merged + deleted elsewhere — the stale entry that made
+        is_registered() lie).
+
+    Best-effort: returns False (and leaves the registry untouched) when the DB
+    is unreachable, so a transient outage can't wrongly evict a live store.
+    """
+    store_id = str(store_id)
+    if not store_id or not db.available():
+        return is_registered(store_id)
+    try:
+        row = await db.load_one_store(store_id)
+    except Exception:
+        return is_registered(store_id)
+
+    if not row or (not row.get("tokens") and not row.get("ai_config")):
+        # Gone from the DB → drop the stale local entry.
+        _registry.pop(store_id, None)
+        return False
+
+    tokens = row.get("tokens") or {}
+    ai_cfg = row.get("ai_config") or {}
+    cache  = row.get("cache") or {}
+    if ai_cfg:
+        tokens["ai_config"] = ai_cfg
+    if store_id in _registry:
+        _registry[store_id]["tokens"] = tokens
+        _registry[store_id]["cache"]  = cache or _registry[store_id].get("cache", {})
+        _registry[store_id]["agent"]  = None  # reset so a new token is picked up
+    else:
+        _registry[store_id] = {"tokens": tokens, "cache": cache, "agent": None}
+    return True
+
+
 # ── Registration ───────────────────────────────────────────────────────────────
 
 def _register_memory(store_id: str, access_token: str, refresh_token: str = "", store_info: dict = None):

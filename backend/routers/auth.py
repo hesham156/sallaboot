@@ -539,13 +539,26 @@ async def resolve_link(request: Request):
     old_store = (claims.get("s") or "").strip()
     if not old_store:
         raise no_pending
-    # A token for a STILL-LIVE store must not be forwarded (prevents using a
-    # valid token to hop to another store). Only a deleted placeholder qualifies.
-    if sm.is_registered(old_store):
+
+    # DB-authoritative — the in-memory registry is PER-PROCESS, so on a multi
+    # web-replica / worker deploy the merge+unregister can happen on a different
+    # process than the one serving this request. Relying on sm.is_registered()
+    # here returned a false 404 ("h123asham still registered locally") even
+    # though the placeholder was already merged + deleted in the shared DB. The
+    # forwarding breadcrumb lives in the DB, so it's the source of truth.
+    new_store = await db.resolve_account_forward(old_store)
+    if not new_store:
         raise no_pending
 
-    new_store = await db.resolve_account_forward(old_store)
-    if not new_store or not sm.is_registered(new_store):
+    # A token for a STILL-LIVE store must not be forwarded (reused-slug guard):
+    # the old placeholder must be GONE from the shared DB. sync_one_from_db also
+    # evicts the stale local registry entry as a side effect. True ⇒ still live.
+    if await sm.sync_one_from_db(old_store):
+        raise no_pending
+
+    # Load the canonical store into THIS process so the minted token works here
+    # immediately; refuse if it doesn't actually exist in the DB.
+    if not await sm.sync_one_from_db(new_store):
         raise no_pending
 
     info      = sm.get_store_info(new_store)

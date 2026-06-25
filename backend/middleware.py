@@ -165,6 +165,20 @@ async def admin_auth_middleware(request: Request, call_next):
                     {"detail": "صلاحيتك لا تسمح بهذا الإجراء"}, status_code=403,
                 )
 
+        # ── Cross-process registry coherence ───────────────────────────
+        # The in-memory store registry is PER-PROCESS. A store registered (new
+        # install) or re-pointed (signup→Salla link migration) on another web
+        # replica / the worker is invisible here until reload — so the handler
+        # would see an empty/stale store. If it's missing locally but lives in
+        # the shared DB, load it now. Best-effort and only on a miss: one DB
+        # read per unknown store per process lifetime, never blocks the request.
+        try:
+            import store_manager as _sm
+            if not _sm.is_registered(store_id):
+                await _sm.sync_one_from_db(store_id)
+        except Exception:
+            pass
+
     # Super admin: protect store list
     elif _SUPER_PROTECTED_RE.match(path):
         token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()

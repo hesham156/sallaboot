@@ -29,8 +29,9 @@ class _Req:
 
 @pytest.fixture
 def patched(monkeypatch):
-    """Patch the sm/db the endpoint reads. `registered` is the set of live store
-    ids; `forwards` maps old_store_id → new_store_id."""
+    """Patch the sm/db the endpoint reads. `registered` is the set of store ids
+    that exist in the shared DB (what sync_one_from_db reconciles against);
+    `forwards` maps old_store_id → new_store_id."""
     def _apply(registered: set, forwards: dict):
         class _SM:
             def is_registered(self, sid):
@@ -38,6 +39,10 @@ def patched(monkeypatch):
 
             def get_store_info(self, sid):
                 return {"store_name": f"متجر {sid}"}
+
+            async def sync_one_from_db(self, sid):
+                # DB-authoritative: True iff the row exists in the shared DB.
+                return sid in registered
 
         class _DB:
             async def resolve_account_forward(self, old):
