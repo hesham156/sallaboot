@@ -25,6 +25,21 @@ from routers.deps import require_store_member
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _fail_open_revocation(monkeypatch):
+    """Keep these as pure auth/tenant-binding unit tests.
+
+    require_store_member()'s H-2 revocation step does a DB read for employee
+    tokens. In the full suite an earlier integration test initialises the
+    shared session pool, so db.available() becomes True and the fake employees
+    (ids 7/9, never inserted) read back as "deleted" → revoked → 401, which is
+    not what these tests are exercising. Force the documented no-DB fail-open
+    path so the result is independent of suite ordering.
+    """
+    import database as _db
+    monkeypatch.setattr(_db, "available", lambda: False)
+
+
 class _Req:
     def __init__(self, token: str = ""):
         self.headers = {"Authorization": f"Bearer {token}"} if token else {}

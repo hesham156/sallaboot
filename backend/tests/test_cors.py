@@ -50,13 +50,17 @@ async def test_public_path_without_origin_uses_wildcard(cors_client):
 # ── Admin surface: allowlist only ────────────────────────────────────────
 
 async def test_admin_path_allowed_from_base_url(cors_client):
-    """BASE_URL is implicitly in the allowlist (set in conftest)."""
+    """BASE_URL is implicitly in the allowlist. Read it from the env rather
+    than hardcoding — CI sets a different BASE_URL than conftest's default,
+    and the middleware builds its allowlist from whatever BASE_URL is set."""
+    import os
+    base = os.environ["BASE_URL"].strip().rstrip("/")
     r = await cors_client.get(
         "/admin/stores",
-        headers={"Origin": "https://test.sallabot.example"},
+        headers={"Origin": base},
     )
     # Returns 401 (no auth), but CORS header must be present.
-    assert r.headers.get("access-control-allow-origin") == "https://test.sallabot.example"
+    assert r.headers.get("access-control-allow-origin") == base
 
 
 async def test_admin_path_allowed_from_csv_origin(cors_client):
