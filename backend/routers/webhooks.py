@@ -333,25 +333,34 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
     if str(home) == str(store_id):
         return True, "already linked"   # Salla-first: the account already IS this merchant store
 
-    # Idempotent: a second app.settings.updated (Salla retries) for an
-    # already-attached merchant is a no-op — the mapping is the source of truth.
+    # Idempotent fast-path: already mapped → authorize writes fresh tokens
+    # straight to the account, so there's nothing to move here.
     if await db.resolve_merchant_to_account(store_id):
         return True, "already linked"
 
-    # Already on Salla? A re-save with the same secret api_key is just the legit
-    # owner saving again — idempotent success. Only refuse a DIFFERENT Salla
-    # store. This is checked BEFORE the store-ready guard below because once the
-    # account is linked the separate merchant store row is already gone, so
-    # is_registered() would wrongly report "not ready" and block the save.
+    # An account may bind exactly ONE Salla store. Refuse a DIFFERENT merchant.
+    existing_mid = str((sm.get_store_info(home) or {}).get("salla_merchant_id") or "")
+    if existing_mid and existing_mid != str(store_id):
+        return False, f"home account {home!r} already linked to a different Salla store"
+
+    # Never attach to an account already on a different e-commerce platform.
     home_integrations = await db.get_integrations(home)
-    if home_integrations.get("salla"):
-        existing_mid = str((sm.get_store_info(home) or {}).get("salla_merchant_id") or "")
-        if not existing_mid or existing_mid == str(store_id):
-            # Self-heal: ensure the merchant→account map AND salla_merchant_id
-            # exist so the storefront widget (which addresses the bot by
-            # merchant_id) resolves to this account. Older links — or accounts
-            # connected before the mapping existed — would otherwise leave the
-            # widget orphaned forever even though the dashboard shows "connected".
+    if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
+        return False, f"home account {home!r} already has another platform"
+
+    # Is the freshly-installed Salla store present? It holds the OAuth tokens from
+    # app.store.authorize. Reconcile from the shared DB in case it registered on
+    # another process.
+    if not sm.is_registered(store_id):
+        await sm.sync_one_from_db(store_id)
+
+    if not sm.is_registered(store_id):
+        # No fresh merchant store to move. If the account already has Salla (or a
+        # recorded merchant id), just SELF-HEAL the merchant→account map so the
+        # storefront widget — which addresses the bot by merchant_id — resolves.
+        # Otherwise the install hasn't completed yet (validation treats this as a
+        # non-blocking timing race).
+        if home_integrations.get("salla") or existing_mid:
             await db.set_salla_merchant_map(store_id, home)
             if not existing_mid:
                 ht = dict(sm.get_store_info(home) or {})
@@ -359,27 +368,19 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
                 sm.update_store_info(home, ht)
                 await db.save_store(home, ht)
             return True, "already linked"
-        return False, f"home account {home!r} already linked to a different Salla store"
-    # Never attach to an account that already runs a different e-commerce platform.
-    if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
-        return False, f"home account {home!r} already has another platform"
-
-    # The Salla store (holding the OAuth tokens from app.store.authorize) must
-    # exist. It may have been registered on another process — reconcile from the
-    # shared DB before giving up.
-    if not sm.is_registered(store_id):
-        await sm.sync_one_from_db(store_id)
-    if not sm.is_registered(store_id):
         return False, "salla_store_not_ready"
 
-    # ── Move the Salla connection onto the account (keep the account's identity) ──
+    # ── A fresh Salla store exists → move its connection onto the account ──
+    # ALWAYS move, even if the account already carried an older/revoked Salla
+    # token: a reinstall delivers a new token on the merchant store that must
+    # replace the stale one on the account. The account keeps its own identity.
     merchant_tokens = dict(sm.get_store_info(store_id) or {})   # Salla store row (tokens)
     home_tokens     = dict(sm.get_store_info(home) or {})       # account row (preserve login)
 
     for f in ("access_token", "refresh_token", "expires_at"):
         if merchant_tokens.get(f):
             home_tokens[f] = merchant_tokens[f]
-    if merchant_tokens.get("store_name") and not home_tokens.get("store_name"):
+    if merchant_tokens.get("store_name"):
         home_tokens["store_name"] = merchant_tokens["store_name"]
     home_tokens["salla_merchant_id"] = str(store_id)
 
