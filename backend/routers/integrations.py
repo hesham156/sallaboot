@@ -271,6 +271,41 @@ async def salla_app_settings_validation(request: Request):
     })
 
 
+# ── Salla: repair the merchant↔account binding (owner-initiated) ──────────────
+# The storefront widget addresses the bot by Salla's merchant_id, which it
+# resolves to the owning account via the merchant→account map + the account's
+# salla_merchant_id. If those went missing (a link that didn't fully land), the
+# widget orphans even though the dashboard shows "connected". The account still
+# holds a valid Salla token, so we just ask Salla which store this token belongs
+# to and (re)write both the map and salla_merchant_id. Owner-authenticated, no
+# super needed — wired to the "تحديث الربط" button.
+
+@router.post("/admin/{store_id}/integrations/salla/repair")
+async def salla_repair_binding(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    token = sm.get_access_token(store_id)
+    if not token:
+        raise HTTPException(400, "هذا الحساب غير مربوط بسلة")
+    from salla_oauth import get_user_info
+    try:
+        info = await get_user_info(token)
+    except Exception:
+        raise HTTPException(502, "تعذّر التحقق من المتجر لدى سلة — قد يكون الربط بحاجة لإعادة التثبيت")
+    data  = info.get("data") or {}
+    store = data.get("store") or data.get("merchant") or {}
+    merchant_id = str(store.get("id") or "").strip()
+    if not merchant_id:
+        raise HTTPException(502, "تعذّر جلب معرّف المتجر من سلة")
+    await db.set_store_salla_merchant_id(store_id, merchant_id)
+    await db.set_salla_merchant_map(merchant_id, store_id)
+    ti = dict(sm.get_store_info(store_id) or {})
+    ti["salla_merchant_id"] = merchant_id
+    sm.update_store_info(store_id, ti)
+    sm.reset_agent(store_id)
+    print(f"[salla-repair] bound merchant {merchant_id!r} → account {store_id!r}")
+    return {"ok": True, "merchant_id": merchant_id}
+
+
 # ── Shopify: initiate install ─────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/integrations/shopify/install")

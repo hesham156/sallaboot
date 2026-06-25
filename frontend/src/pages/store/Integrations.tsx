@@ -339,6 +339,10 @@ export default function Integrations({ storeId }: Props) {
         window.location.assign(`/store/${newStore}/integrations`)
         return
       }
+      // Repair the merchant→account binding so the storefront widget resolves
+      // (asks Salla which store our token owns). Best-effort: harmless if Salla
+      // isn't connected, or already bound.
+      await api.repairSallaBinding(storeId).catch(() => null)
       await loadIntegrations()
       const connected = (await api.listIntegrations(storeId).catch(() => null))
         ?.integrations?.['salla']
