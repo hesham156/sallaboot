@@ -251,12 +251,19 @@ async def salla_app_settings_validation(request: Request):
     if ok:
         return {"success": True}
 
-    # Surface a clear, actionable error so the merchant fixes their input.
-    msg = "تعذّر الربط — تأكد من بريدك الإلكتروني في حياك ومن نسخ مفتاح الربط بالكامل"
-    if "another platform" in detail:
-        msg = "حساب حياك مرتبط بمنصة تجارة إلكترونية أخرى بالفعل"
-    elif detail == "salla_store_not_ready":
-        msg = "لم يكتمل تثبيت التطبيق بعد — انتظر لحظات ثم احفظ مرة أخرى"
+    # Validation must HARD-FAIL only on a genuinely bad input — a wrong API key,
+    # or a real platform/store conflict. Everything else (the Salla store isn't
+    # registered on this process yet, etc.) is a timing condition that the
+    # app.settings.updated webhook and the "تحديث الربط" button resolve on their
+    # own. Blocking the merchant's save on a timing race is what produced the
+    # confusing "لم يكتمل التثبيت بعد" loop — so accept the save in that case.
+    if "no 7ayak account matched" in detail:
+        msg = "مفتاح الربط غير صحيح — انسخه من صفحة التكاملات في حياك وألصقه كاملاً"
+    elif "another platform" in detail or "different Salla store" in detail:
+        msg = "حساب حياك مرتبط بمنصة/متجر آخر بالفعل"
+    else:
+        # Non-fatal (e.g. salla_store_not_ready) — don't block the save.
+        return {"success": True}
     return JSONResponse(status_code=422, content={
         "success": False,
         "message": msg,

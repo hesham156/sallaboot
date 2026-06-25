@@ -338,6 +338,21 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
     if await db.resolve_merchant_to_account(store_id):
         return True, "already linked"
 
+    # Already on Salla? A re-save with the same secret api_key is just the legit
+    # owner saving again — idempotent success. Only refuse a DIFFERENT Salla
+    # store. This is checked BEFORE the store-ready guard below because once the
+    # account is linked the separate merchant store row is already gone, so
+    # is_registered() would wrongly report "not ready" and block the save.
+    home_integrations = await db.get_integrations(home)
+    if home_integrations.get("salla"):
+        existing_mid = str((sm.get_store_info(home) or {}).get("salla_merchant_id") or "")
+        if not existing_mid or existing_mid == str(store_id):
+            return True, "already linked"
+        return False, f"home account {home!r} already linked to a different Salla store"
+    # Never attach to an account that already runs a different e-commerce platform.
+    if any(home_integrations.get(p) for p in ("shopify", "zid", "woocommerce")):
+        return False, f"home account {home!r} already has another platform"
+
     # The Salla store (holding the OAuth tokens from app.store.authorize) must
     # exist. It may have been registered on another process — reconcile from the
     # shared DB before giving up.
@@ -345,11 +360,6 @@ async def link_store_via_app_settings(store_id: str, email: str, api_key: str) -
         await sm.sync_one_from_db(store_id)
     if not sm.is_registered(store_id):
         return False, "salla_store_not_ready"
-
-    # Never attach to an account that already runs another e-commerce platform.
-    home_integrations = await db.get_integrations(home)
-    if any(home_integrations.get(p) for p in ("salla", "shopify", "zid", "woocommerce")):
-        return False, f"home account {home!r} already has another platform"
 
     # ── Move the Salla connection onto the account (keep the account's identity) ──
     merchant_tokens = dict(sm.get_store_info(store_id) or {})   # Salla store row (tokens)
