@@ -27,7 +27,7 @@ import notifications as _notif
 import store_manager as sm
 from models import (EmployeeLoginRequest, ForgotPasswordRequest, LoginRequest,
                     OtpVerifyRequest, ResetPasswordRequest, SignupRequest)
-from routers.deps import is_rate_limited as _is_rate_limited
+from routers.deps import audit as _audit, is_rate_limited as _is_rate_limited
 
 
 router = APIRouter()
@@ -551,6 +551,10 @@ async def resolve_link(request: Request):
     info      = sm.get_store_info(new_store)
     new_token = _auth.create_token(new_store)
     print(f"[auth] 🔁 seamless link migration: {old_store!r} → {new_store!r}")
+    # Security-relevant: a new owner token was minted off a dead placeholder
+    # token. Record who/where for post-incident review.
+    await _audit(request, "session_migrated_after_link",
+                 target_store=new_store, details={"from": old_store})
     return {
         "token":      new_token,
         "store_id":   new_store,

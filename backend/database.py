@@ -1181,10 +1181,18 @@ async def set_app_setting(key: str, value) -> None:
 # deleted, the merchant's browser still holds a session token bound to the dead
 # placeholder id. These breadcrumbs let /auth/resolve-link trade that token for
 # a fresh one on the new store WITHOUT a re-login. Stored in app_settings (JSONB
-# KV) so there's no schema migration; the row is tiny and self-expiring in
-# practice (the old token it serves expires within the 7-day session window).
+# KV) so there's no schema migration; the row is tiny and resolve ignores any
+# breadcrumb past _LINK_FORWARD_TTL_SECS (the old token it serves can't outlive
+# the 7-day session window anyway).
 
 _LINK_FORWARD_PREFIX = "link_forward:"
+# A forward can only ever be followed by a session token bound to the old
+# placeholder, and those expire after auth.TOKEN_EXPIRY_SECONDS (7 days). A
+# breadcrumb older than that window is therefore un-followable — treat it as
+# expired so a long-stale record (e.g. a placeholder id later reused) can't be
+# resolved. Within the window the record is kept so multi-device sessions can
+# each recover.
+_LINK_FORWARD_TTL_SECS = 8 * 24 * 60 * 60
 
 
 async def record_account_forward(old_store_id: str, new_store_id: str) -> None:
@@ -1201,14 +1209,23 @@ async def record_account_forward(old_store_id: str, new_store_id: str) -> None:
 
 
 async def resolve_account_forward(old_store_id: str) -> Optional[str]:
-    """Return the canonical store a merged placeholder was forwarded to, or None."""
+    """Return the canonical store a merged placeholder was forwarded to, or None.
+
+    Forwards older than _LINK_FORWARD_TTL_SECS are ignored: the only token that
+    could legitimately follow one has already expired, so a stale breadcrumb is
+    inert and must not resolve.
+    """
     old_store_id = str(old_store_id)
     if not old_store_id:
         return None
     rec = await get_app_setting(f"{_LINK_FORWARD_PREFIX}{old_store_id}")
-    if isinstance(rec, dict) and rec.get("to"):
-        return str(rec["to"])
-    return None
+    if not isinstance(rec, dict) or not rec.get("to"):
+        return None
+    import time as _t
+    at = rec.get("at")
+    if isinstance(at, (int, float)) and (_t.time() - at) > _LINK_FORWARD_TTL_SECS:
+        return None
+    return str(rec["to"])
 
 
 # ── Uploads (persistent file storage in PostgreSQL) ──────────────────────────
