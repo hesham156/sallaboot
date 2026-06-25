@@ -159,6 +159,7 @@ export const api = {
   get: <T>(url: string) => get<T>(url),
   post: <T>(url: string, body?: unknown) => post<T>(url, body),
   put: <T>(url: string, body?: unknown) => put<T>(url, body),
+  del: <T>(url: string) => del<T>(url),
 
   // Unified email/password login. Backend figures out which kind of
   // account the email belongs to (super → employee → store owner) and
