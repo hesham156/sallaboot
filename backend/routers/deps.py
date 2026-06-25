@@ -299,7 +299,11 @@ _INTERNAL_SESSION_PREFIXES = ("wa:", "msgr:", "ig:", "tg:")
 # refused". Non-mapped ids (Salla-first installs, non-Salla stores) pass through
 # unchanged. Cached briefly so high-frequency polling doesn't hit the DB each time.
 _merchant_map_cache: dict[str, tuple[float, str]] = {}
+# A real mapping is stable → cache it long. A "no mapping" (pass-through) result
+# is cached only briefly so a store that gets linked while its widget is polling
+# starts resolving within seconds instead of orphaning for a full minute.
 _MERCHANT_MAP_TTL = 60.0
+_MERCHANT_MISS_TTL = 5.0
 
 
 async def resolve_store_id(requested: str) -> str:
@@ -311,8 +315,11 @@ async def resolve_store_id(requested: str) -> str:
         return requested
     now = _t.time()
     hit = _merchant_map_cache.get(requested)
-    if hit and (now - hit[0]) < _MERCHANT_MAP_TTL:
-        return hit[1]
+    if hit:
+        resolved = hit[1]
+        ttl = _MERCHANT_MAP_TTL if resolved != requested else _MERCHANT_MISS_TTL
+        if (now - hit[0]) < ttl:
+            return resolved
     try:
         mapped = await db.resolve_merchant_to_account(requested)
     except Exception:
