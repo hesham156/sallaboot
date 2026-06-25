@@ -409,11 +409,17 @@ class SallaClient:
     async def list_order_invoices(self, order_id: int) -> dict:
         """
         List invoices attached to a specific order.
-        GET /admin/v2/orders/{order_id}/invoices
+        GET /admin/v2/orders/invoices?order_id={order_id}
+
+        NOTE (verified against the Salla Platform Docs OAS): there is NO
+        /orders/{order_id}/invoices path — the only listing endpoint is
+        "List Invoices" = GET /orders/invoices, which takes order_id as a
+        QUERY param. The old nested path 404'd (silently swallowed by the
+        resolver), so invoice lookup fell back to the order payload.
 
         Scope required: orders.read
         """
-        return await self._request("GET", f"/orders/{order_id}/invoices")
+        return await self._request("GET", "/orders/invoices", params={"order_id": order_id})
 
     # ── Brands ─────────────────────────────────────────────────────────────────
 

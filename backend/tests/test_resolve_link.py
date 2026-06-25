@@ -22,6 +22,9 @@ pytestmark = pytest.mark.unit
 class _Req:
     def __init__(self, token: str = ""):
         self.headers = {"Authorization": f"Bearer {token}"} if token else {}
+        # resolve_link audit-logs a successful migration; deps.audit reads
+        # request.client (None is fine — it records an empty ip).
+        self.client = None
 
 
 @pytest.fixture
@@ -103,3 +106,22 @@ async def test_invalid_token_is_401(patched):
     with pytest.raises(HTTPException) as ei:
         await ra.resolve_link(_Req("garbage.token"))
     assert ei.value.status_code == 401
+
+
+# ── TTL on the forwarding breadcrumb (database.resolve_account_forward) ──────
+
+async def test_resolve_forward_honours_ttl(monkeypatch):
+    """A fresh breadcrumb resolves; one older than the TTL is treated as inert
+    (the only token that could follow it has long since expired)."""
+    import time as _t
+    import database as db
+
+    fresh = {"to": "merchant_1", "at": int(_t.time()) - 60}
+    stale = {"to": "merchant_1", "at": int(_t.time()) - db._LINK_FORWARD_TTL_SECS - 60}
+
+    async def _get(key, default=None):
+        return {"link_forward:fresh": fresh, "link_forward:stale": stale}.get(key)
+
+    monkeypatch.setattr(db, "get_app_setting", _get)
+    assert await db.resolve_account_forward("fresh") == "merchant_1"
+    assert await db.resolve_account_forward("stale") is None
