@@ -1228,6 +1228,40 @@ async def resolve_account_forward(old_store_id: str) -> Optional[str]:
     return str(rec["to"])
 
 
+async def load_one_store(store_id: str) -> Optional[dict]:
+    """
+    Fetch a SINGLE store row (secrets decrypted), or None when it doesn't exist.
+
+    Mirrors load_all_stores for one id. Used for cross-process registry
+    coherence: the in-memory registry is per-process, so a store registered /
+    deleted on one web replica or the worker is invisible to the others until
+    they reload. This lets any process reconcile one store against the shared DB
+    on demand (see store_manager.sync_one_from_db).
+    """
+    store_id = str(store_id)
+    if not _pool or not store_id:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.fetchrow(
+                "SELECT store_id, tokens, ai_config, cache_data FROM stores WHERE store_id = $1",
+                store_id,
+            )
+        if not r:
+            return None
+        tokens    = _crypto.decrypt_store_blob(_coerce_jsonb(r["tokens"]))
+        ai_config = _crypto.decrypt_ai_config_blob(_coerce_jsonb(r["ai_config"]))
+        return {
+            "store_id":  r["store_id"],
+            "tokens":    tokens,
+            "ai_config": ai_config,
+            "cache":     _coerce_jsonb(r["cache_data"]),
+        }
+    except Exception as e:
+        print(f"[db] load_one_store({store_id!r}) error: {e}")
+        return None
+
+
 # ── Uploads (persistent file storage in PostgreSQL) ──────────────────────────
 
 async def save_upload(file_id: str, filename: str, content_type: str,
