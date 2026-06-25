@@ -122,8 +122,8 @@ async def create_store_employee(
         raise HTTPException(409, "هذا البريد مسجّل لموظف آخر بالفعل")
 
     role = (req.role or "agent").strip().lower()
-    if role not in ("agent", "manager"):
-        raise HTTPException(400, "role must be 'agent' or 'manager'")
+    if role not in ("agent", "manager", "viewer"):
+        raise HTTPException(400, "role must be 'agent', 'manager' or 'viewer'")
 
     emp_id = await db.add_employee(
         store_id = store_id,

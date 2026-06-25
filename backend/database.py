@@ -5231,3 +5231,54 @@ async def set_entitlements(store_id: str, *, comments_enabled: bool,
             )
     except Exception as e:
         print(f"[db] set_entitlements error: {e}")
+
+
+async def social_comment_analytics(store_id: str, days: int = 30) -> dict:
+    """Aggregate comment metrics for the analytics dashboard (last `days`)."""
+    empty = {
+        "total": 0, "replied": 0, "ai_replied": 0, "response_rate": 0.0,
+        "ai_response_rate": 0.0, "leads": 0, "avg_response_secs": 0,
+        "sentiment": {"positive": 0, "neutral": 0, "negative": 0},
+    }
+    if not _pool:
+        return empty
+    try:
+        async with _pool.acquire() as conn:
+            r = await conn.fetchrow(
+                """
+                SELECT
+                  COUNT(*)                                                          AS total,
+                  COUNT(*) FILTER (WHERE status IN ('replied','ai_replied'))         AS replied,
+                  COUNT(*) FILTER (WHERE status = 'replied' AND replied_by = 'ai')   AS ai_replied,
+                  COUNT(*) FILTER (WHERE lead_temp IN ('hot','warm'))                AS leads,
+                  COUNT(*) FILTER (WHERE sentiment = 'positive')                     AS positive,
+                  COUNT(*) FILTER (WHERE sentiment = 'neutral')                      AS neutral,
+                  COUNT(*) FILTER (WHERE sentiment = 'negative')                     AS negative,
+                  AVG(EXTRACT(EPOCH FROM (replied_at - created_at)))
+                      FILTER (WHERE replied_at IS NOT NULL)                          AS avg_secs
+                FROM social_comments
+                WHERE store_id = $1
+                  AND created_at >= NOW() - make_interval(days => $2)
+                """,
+                store_id, int(days),
+            )
+        total   = int(r["total"] or 0)
+        replied = int(r["replied"] or 0)
+        ai_rep  = int(r["ai_replied"] or 0)
+        return {
+            "total":            total,
+            "replied":          replied,
+            "ai_replied":       ai_rep,
+            "response_rate":    round(replied / total, 3) if total else 0.0,
+            "ai_response_rate": round(ai_rep / replied, 3) if replied else 0.0,
+            "leads":            int(r["leads"] or 0),
+            "avg_response_secs": int(r["avg_secs"] or 0),
+            "sentiment": {
+                "positive": int(r["positive"] or 0),
+                "neutral":  int(r["neutral"] or 0),
+                "negative": int(r["negative"] or 0),
+            },
+        }
+    except Exception as e:
+        print(f"[db] social_comment_analytics error: {e}")
+        return empty
