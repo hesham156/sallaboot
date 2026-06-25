@@ -217,7 +217,7 @@ function SallaConnectModal({ isOpen, onClose, storeId, onToast }: {
               </div>
 
               <div className="bg-content2 rounded-xl p-3 text-[11px] text-default-500 leading-relaxed">
-                بعد الحفظ في لوحة سلة، ارجع إلى هذه الصفحة وسيتم ربط المتجر وتحديث اللوحة تلقائياً خلال لحظات — دون الحاجة لتحديث الصفحة.
+                بعد حفظ المفتاح في لوحة سلة، ارجع إلى هذه الصفحة واضغط زر <span className="font-bold text-foreground">«تحديث الربط»</span> بالأعلى ليظهر متجرك «متصل».
               </div>
             </ModalBody>
             <ModalFooter>
@@ -249,10 +249,8 @@ export default function Integrations({ storeId }: Props) {
 
   // Salla connect modal — Salla links ONLY via the App-Settings API key.
   const [sallaModal, setSallaModal]     = useState(false)
-  // Set once the merchant opens the Salla modal (intent to link). While true and
-  // Salla isn't connected yet, the page polls for the link to complete so the
-  // dashboard updates itself — no manual refresh after saving the key in Salla.
-  const [awaitingSallaLink, setAwaitingSallaLink] = useState(false)
+  // "تحديث الربط" button busy state.
+  const [refreshingLink, setRefreshingLink] = useState(false)
 
   // Disconnect confirmation modal
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null)
@@ -322,67 +320,35 @@ export default function Integrations({ storeId }: Props) {
     } finally { setLoading(false) }
   }
 
-  // ── Auto-detect Salla linking completion (no manual refresh) ──────────────
-  // After the merchant pastes the API key in Salla and saves, the link arrives
-  // server-side via the app.settings.updated webhook. The merchant is still
-  // sitting on this page (often having tabbed away to Salla and back), so we
-  // poll for completion instead of making them refresh. Two outcomes:
-  //   1. Signup placeholder merged into the Salla store → /auth/resolve-link
-  //      returns a fresh session → swap token + hard-navigate to the new store.
-  //   2. Store linked in place (already canonical) → the integration status
-  //      flips to connected → refresh the UI and toast.
-  // Runs only after the merchant opened the Salla modal (intent), only while
-  // Salla isn't connected, and only checks when the tab is visible — so an
-  // unrelated user without Salla never polls.
-  const sallaConnected = integrations.find(i => i.id === 'salla')?.status === 'connected'
-
-  useEffect(() => {
-    if (!awaitingSallaLink || sallaConnected || loading) return
-
-    let stopped = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    async function check() {
-      if (stopped || document.hidden) return
-      // 1. Did our own account migrate onto a Salla store? (placeholder flow)
+  // ── "تحديث الربط" — explicit, merchant-initiated link refresh ─────────────
+  // After the merchant pastes the API key in Salla and saves, they come back
+  // here and press this button. No automatic polling, no surprise navigation.
+  // Two outcomes:
+  //   1. The signup placeholder was merged into the Salla store (its store_id
+  //      changed server-side): swap to a fresh token for the canonical store and
+  //      load its dashboard. The token is already in localStorage before we
+  //      navigate, so it loads straight in — no login screen, same password.
+  //   2. The store linked in place (already canonical): just re-read the
+  //      integration status and update the cards.
+  async function refreshLink() {
+    setRefreshingLink(true)
+    try {
       const newStore = await api.resolveLinkedSession()
-      if (stopped) return
       if (newStore) {
-        window.location.assign(`/store/${newStore}`)
+        showToast('تم تحديث الربط بنجاح ✅', 'success')
+        window.location.assign(`/store/${newStore}/integrations`)
         return
       }
-      // 2. Same store linked in place — has Salla just become connected?
-      try {
-        const res = await api.listIntegrations(storeId)
-        if (!stopped && (res.integrations || {})['salla']) {
-          setAwaitingSallaLink(false)
-          showToast('تم ربط متجر سلّة بنجاح! 🎉', 'success')
-          loadIntegrations()
-        }
-      } catch { /* keep polling */ }
+      await loadIntegrations()
+      const connected = (await api.listIntegrations(storeId).catch(() => null))
+        ?.integrations?.['salla']
+      showToast(connected ? 'تم ربط متجر سلّة بنجاح! 🎉' : 'لم يكتمل الربط بعد — تأكد من حفظ المفتاح في سلة ثم أعد المحاولة', connected ? 'success' : 'info')
+    } catch {
+      showToast('تعذّر تحديث الربط — حاول مرة أخرى', 'error')
+    } finally {
+      setRefreshingLink(false)
     }
-
-    function schedule() {
-      timer = setTimeout(async () => {
-        await check()
-        if (!stopped) schedule()
-      }, 5000)
-    }
-
-    // Check immediately when the merchant returns to this tab from Salla.
-    const onVisible = () => { if (!document.hidden) check() }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-    schedule()
-
-    return () => {
-      stopped = true
-      if (timer) clearTimeout(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [awaitingSallaLink, sallaConnected, loading, storeId])
+  }
 
   const ECOMMERCE_IDS = ['salla', 'shopify', 'zid', 'woocommerce']
 
@@ -398,7 +364,7 @@ export default function Integrations({ storeId }: Props) {
       }
     }
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
-    else if (id === 'salla') { setSallaModal(true); setAwaitingSallaLink(true) }   // API-key linking is the only Salla method
+    else if (id === 'salla') { setSallaModal(true) }   // API-key linking is the only Salla method
     else if (id === 'zid') { handleZidConnect() }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
@@ -487,7 +453,21 @@ export default function Integrations({ storeId }: Props) {
             title="التكاملات"
             subtitle="اربط متجرك بالمنصات والأدوات الخارجية"
             icon="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 10-5.656-5.656l-1.1 1.1"
-            actions={<StatusPill tone="success" pulse label={`${connectedCount} متصل`} />}
+            actions={
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={refreshLink}
+                  disabled={refreshingLink}
+                  title="بعد حفظ مفتاح الربط في سلة، اضغط هنا لتحديث حالة الربط"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border border-divider text-foreground hover:bg-content2 transition-colors disabled:opacity-50"
+                >
+                  <Icon paths={['M23 4v6h-6', 'M1 20v-6h6', 'M3.51 9a9 9 0 0114.85-3.36L23 10', 'M1 14l4.64 4.36A9 9 0 0020.49 15']} size={13}
+                    className={refreshingLink ? 'animate-spin' : ''} />
+                  {refreshingLink ? 'جارٍ التحديث…' : 'تحديث الربط'}
+                </button>
+                <StatusPill tone="success" pulse label={`${connectedCount} متصل`} />
+              </div>
+            }
           />
         </div>
 
