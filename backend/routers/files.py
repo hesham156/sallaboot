@@ -13,6 +13,7 @@ import conversation_store as cs
 from routers.deps import (
     UPLOAD_DIR, MAX_FILE_MB, ALLOWED_EXTENSIONS, CONTENT_TYPES,
     is_internal_session_id, is_rate_limited, read_upload_bounded, _content_length,
+    resolve_store_id,
 )
 
 router = APIRouter()
@@ -56,6 +57,7 @@ async def upload_file(
 
     if "{{" in store_id or "}}" in store_id:
         store_id = "default"
+    store_id = await resolve_store_id(store_id)   # Salla merchant_id → account
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:

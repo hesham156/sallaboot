@@ -291,6 +291,37 @@ async def budget_exhausted(store_id: str) -> tuple[bool, int, int]:
 _INTERNAL_SESSION_PREFIXES = ("wa:", "msgr:", "ig:", "tg:")
 
 
+# ── Salla merchant_id → account resolution (storefront widget) ──────────────────
+# Account-preserving linking keeps the 7ayak account's own store_id and deletes
+# the Salla merchant store row. But the storefront widget (and its snippet) still
+# address the bot by the Salla merchant_id, so every PUBLIC widget endpoint must
+# map that merchant_id back to the owning account or it gets "orphan store
+# refused". Non-mapped ids (Salla-first installs, non-Salla stores) pass through
+# unchanged. Cached briefly so high-frequency polling doesn't hit the DB each time.
+_merchant_map_cache: dict[str, tuple[float, str]] = {}
+_MERCHANT_MAP_TTL = 60.0
+
+
+async def resolve_store_id(requested: str) -> str:
+    """Map a storefront-supplied store id (often a Salla merchant_id) to the
+    account that owns it. Returns the input unchanged when there's no mapping."""
+    import time as _t
+    requested = requested or "default"
+    if not db.available():
+        return requested
+    now = _t.time()
+    hit = _merchant_map_cache.get(requested)
+    if hit and (now - hit[0]) < _MERCHANT_MAP_TTL:
+        return hit[1]
+    try:
+        mapped = await db.resolve_merchant_to_account(requested)
+    except Exception:
+        return requested
+    resolved = mapped or requested
+    _merchant_map_cache[requested] = (now, resolved)
+    return resolved
+
+
 def is_internal_session_id(session_id: str) -> bool:
     """True for channel-owned session ids that the public widget API must not
     serve. Case-insensitive so a mixed-case prefix can't slip through."""
