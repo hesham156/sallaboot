@@ -282,9 +282,17 @@ def _apply_security_headers(headers, path: str) -> None:
         # bearer token. The SPA loads only its own /assets bundle (same-origin);
         # inline JSON-LD is a non-executable data block; the inline-<script> pages
         # (OAuth callback, /snippet) aren't dashboard paths and never get this CSP.
+        #
+        # connect.facebook.net is the ONE allowed external script origin: it serves
+        # the Facebook JS SDK that powers the WhatsApp Embedded Signup and the
+        # Messenger/Instagram (and comment) page-connect popup. Without it the SDK
+        # <script> is blocked, onerror fires, and the connect UI shows
+        # "غير متاح" even when META_APP_ID is configured. Meta's CDN is trusted;
+        # no 'unsafe-inline' is granted, so the anti-token-exfil property holds.
         headers.setdefault(
             "Content-Security-Policy",
-            "script-src 'self'; frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
+            "script-src 'self' https://connect.facebook.net; "
+            "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
         )
 
 
