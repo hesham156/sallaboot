@@ -255,8 +255,28 @@ async def test_resaving_same_salla_account_is_idempotent(patched):
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
     )
-    assert db.saved == {} and db.maps == [] and db.purged == []
+    # Idempotent: no token move, no purge. But it DOES (re)record the
+    # merchant→account map so the storefront widget resolves (self-heal).
+    assert db.saved == {} and db.purged == []
+    assert db.maps == [("merchant_99", "home_acct")]
     assert sm.unregistered == []
+
+
+async def test_resave_with_no_recorded_merchant_id_self_heals(patched):
+    """Legacy state: the account has Salla tokens but no recorded merchant_id /
+    map (connected before the mapping existed) — exactly the case that left the
+    widget orphaned. A re-save records BOTH the map and the merchant id."""
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "home_acct"},
+                integrations={"home_acct": {"salla": {"connected": True}}}),
+        _SMStub(registered=False, infos={"home_acct": {"owner_email": "home@acct.com"}}),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
+    )
+    assert db.maps == [("merchant_99", "home_acct")]
+    assert db.saved.get("home_acct", {}).get("salla_merchant_id") == "merchant_99"
+    assert db.purged == []
 
 
 async def test_account_linked_to_a_different_salla_is_refused(patched):
