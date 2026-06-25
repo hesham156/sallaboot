@@ -44,10 +44,9 @@ def _resolve_database_url() -> str:
     """
     raw = (os.getenv("DATABASE_URL") or "").strip()
     if not raw:
-        raise RuntimeError(
-            "DATABASE_URL is not set. Migrations cannot run without it. "
-            "Configure it in Railway's service env vars."
-        )
+        # Caller checks for "" first and skips migrations; never reached with
+        # an unset URL. Kept defensive.
+        raise RuntimeError("DATABASE_URL is not set.")
     if raw.startswith("postgres://"):
         raw = "postgresql://" + raw[len("postgres://"):]
     if raw.startswith("postgresql+asyncpg://"):
@@ -80,4 +79,21 @@ if context.is_offline_mode():
     raise RuntimeError(
         "Offline mode is not supported — migrations always run against a live DB."
     )
-run_migrations_online()
+
+# Resilient deploy: the start command is `alembic upgrade head && uvicorn …`, so
+# a hard error here takes the ENTIRE app down in a crash loop (landing page,
+# storefront widget, everything). The app itself tolerates a missing DB at
+# runtime (filesystem fallback) and self-creates the schema via
+# database._create_tables() once a DB is present — so when DATABASE_URL is simply
+# absent (mis-set env / DB-less role), SKIP migrations and let uvicorn boot
+# instead of crash-looping. A migration that genuinely FAILS *with* a DB
+# configured still raises and blocks the deploy, as it should.
+if not (os.getenv("DATABASE_URL") or "").strip():
+    print("=" * 60)
+    print("⚠️  alembic: DATABASE_URL is not set — SKIPPING migrations so the")
+    print("    app can still boot. It will run WITHOUT persistence until a")
+    print("    database is configured. Fix: set DATABASE_URL on this Railway")
+    print("    service (link the Postgres plugin / restore the reference).")
+    print("=" * 60)
+else:
+    run_migrations_online()
