@@ -43,6 +43,8 @@ def patched(monkeypatch):
             return True, "linked to 7ayak account (was 'home')"
         if api_key == "other-platform":
             return False, "home account 'home' already has another platform"
+        if api_key == "notready":
+            return False, "salla_store_not_ready"
         return False, "no 7ayak account matched the email/API key provided"
 
     monkeypatch.setattr(w, "_verify_signature", lambda body, headers: (True, "token_ok"))
@@ -84,6 +86,15 @@ async def test_other_platform_returns_422(patched):
     res = await ig.salla_app_settings_validation(req)
     assert isinstance(res, JSONResponse)
     assert res.status_code == 422
+
+
+async def test_not_ready_does_not_block_save(patched):
+    """Timing race: the Salla store isn't registered on this process yet. The
+    app.settings.updated webhook completes the link, so validation must NOT block
+    the merchant's save — this is the 'لم يكتمل التثبيت بعد' loop the merchant hit."""
+    req = _FakeRequest({"merchant": 123, "data": {"settings": {"api_key": "notready"}}})
+    res = await ig.salla_app_settings_validation(req)
+    assert res == {"success": True}
 
 
 async def test_wrong_signature_rejected(monkeypatch):

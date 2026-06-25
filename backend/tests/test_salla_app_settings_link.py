@@ -240,14 +240,34 @@ async def test_live_platform_home_not_hijacked(patched):
     assert db.saved == {} and db.maps == [] and db.purged == []
 
 
-async def test_live_salla_home_not_hijacked(patched):
-    """An account that is itself already a live Salla store is protected too."""
+async def test_resaving_same_salla_account_is_idempotent(patched):
+    """The exact bug: an account ALREADY connected to Salla re-saves its key. The
+    separate merchant store row is long gone, so the link must NOT report
+    'salla_store_not_ready' (the 'لم يكتمل التثبيت بعد' loop). A same-merchant
+    re-save is idempotent success and mutates nothing."""
     db, sm = patched(
-        _DBStub(by_key={"7yk_K": "real_salla_store"},
-                integrations={"real_salla_store": {"salla": {"connected": True}}}),
-        _SMStub(),
+        _DBStub(by_key={"7yk_K": "home_acct"},
+                integrations={"home_acct": {"salla": {"connected": True}}}),
+        _SMStub(registered=False,
+                infos={"home_acct": {"salla_merchant_id": "merchant_99",
+                                     "owner_email": "home@acct.com"}}),
     )
     await w._handle_app_settings_updated(
-        "merchant_99", {"settings": {"email": "x@y.com", "api_key": "7yk_K"}}
+        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
+    )
+    assert db.saved == {} and db.maps == [] and db.purged == []
+    assert sm.unregistered == []
+
+
+async def test_account_linked_to_a_different_salla_is_refused(patched):
+    """An account already bound to a DIFFERENT Salla merchant must not be silently
+    re-pointed at another one."""
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "home_acct"},
+                integrations={"home_acct": {"salla": {"connected": True}}}),
+        _SMStub(infos={"home_acct": {"salla_merchant_id": "another_merchant"}}),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
     )
     assert db.saved == {} and db.maps == [] and db.purged == []
