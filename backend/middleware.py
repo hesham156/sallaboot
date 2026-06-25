@@ -20,7 +20,7 @@ import re
 import time
 
 from fastapi import Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from starlette.datastructures import MutableHeaders
 
 import auth as _auth
@@ -367,7 +367,10 @@ class GatewayMiddleware:
             }
             if allowed_origin:
                 headers["Access-Control-Allow-Origin"] = allowed_origin
-            resp = JSONResponse({}, status_code=204, headers=headers)
+            # 204 No Content MUST have an empty body — a JSONResponse({}) would
+            # emit a 2-byte `{}` and uvicorn rejects body-on-204 with "Response
+            # content longer than Content-Length". Use a bodiless Response.
+            resp = Response(status_code=204, headers=headers)
             _apply_security_headers(resp.headers, path)
             resp.headers.setdefault("X-Request-ID", rid)
             await resp(scope, receive, send)

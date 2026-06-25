@@ -111,6 +111,10 @@ async def test_preflight_options_returns_204_without_calling_route(cors_client):
     assert "POST" in r.headers.get("access-control-allow-methods", "")
     # Should echo the requested headers list back
     assert "Authorization" in r.headers.get("access-control-allow-headers", "")
+    # 204 No Content MUST carry no body — a JSONResponse({}) would emit `{}` and
+    # uvicorn rejects it ("Response content longer than Content-Length").
+    assert r.content == b""
+    assert "content-length" not in {k.lower() for k in r.headers}
 
 
 async def test_preflight_for_blocked_origin_omits_acao(cors_client):
