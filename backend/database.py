@@ -1248,6 +1248,29 @@ async def set_salla_merchant_map(merchant_id: str, account_store_id: str) -> Non
     await set_app_setting(f"{_SALLA_MERCHANT_PREFIX}{merchant_id}", {"store": account_store_id})
 
 
+async def find_account_by_salla_merchant(merchant_id: str) -> Optional[str]:
+    """Find the account that carries this Salla merchant id on its tokens.
+
+    Authoritative fallback for resolve_merchant_to_account: the link writes
+    salla_merchant_id onto the account, and it's PLAINTEXT in the tokens JSONB
+    (only access/refresh tokens are encrypted), so it's directly queryable. This
+    recovers the mapping even if the app_settings breadcrumb is missing.
+    """
+    merchant_id = str(merchant_id)
+    if not _pool or not merchant_id:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT store_id FROM stores WHERE tokens->>'salla_merchant_id' = $1 LIMIT 1",
+                merchant_id,
+            )
+        return row["store_id"] if row else None
+    except Exception as e:
+        print(f"[db] find_account_by_salla_merchant({merchant_id!r}) error: {e}")
+        return None
+
+
 async def resolve_merchant_to_account(merchant_id: str) -> Optional[str]:
     """Return the account that owns this Salla merchant, or None (Salla-first)."""
     merchant_id = str(merchant_id)
@@ -1256,6 +1279,14 @@ async def resolve_merchant_to_account(merchant_id: str) -> Optional[str]:
     rec = await get_app_setting(f"{_SALLA_MERCHANT_PREFIX}{merchant_id}")
     if isinstance(rec, dict) and rec.get("store"):
         return str(rec["store"])
+    # Fallback: the app_settings breadcrumb can be missing (older link, or a write
+    # that didn't land). The account's own salla_merchant_id is authoritative —
+    # find it and self-heal the breadcrumb so later lookups are a single KV read.
+    acct = await find_account_by_salla_merchant(merchant_id)
+    if acct:
+        print(f"[db] 🔧 self-healed salla map: merchant {merchant_id!r} → account {acct!r}")
+        await set_salla_merchant_map(merchant_id, acct)
+        return acct
     return None
 
 

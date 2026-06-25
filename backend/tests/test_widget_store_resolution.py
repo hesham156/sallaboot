@@ -71,3 +71,29 @@ async def test_result_is_cached(patched, monkeypatch):
     assert await deps.resolve_store_id("19314436") == "h123asham"
     assert await deps.resolve_store_id("19314436") == "h123asham"
     assert calls["n"] == 1   # second call served from the TTL cache
+
+
+# ── DB-layer fallback: resolve via the account's salla_merchant_id ──────────────
+
+async def test_resolve_merchant_falls_back_to_salla_merchant_id(monkeypatch):
+    """When the app_settings breadcrumb is missing, resolve_merchant_to_account
+    finds the account by its plaintext salla_merchant_id and self-heals the map."""
+    import database as db
+    healed = {}
+
+    async def _no_setting(key, default=None):
+        return default
+
+    async def _find(mid):
+        return "h123asham" if mid == "19314436" else None
+
+    async def _set_map(mid, acct):
+        healed["map"] = (mid, acct)
+
+    monkeypatch.setattr(db, "get_app_setting", _no_setting)
+    monkeypatch.setattr(db, "find_account_by_salla_merchant", _find)
+    monkeypatch.setattr(db, "set_salla_merchant_map", _set_map)
+
+    assert await db.resolve_merchant_to_account("19314436") == "h123asham"
+    assert healed["map"] == ("19314436", "h123asham")   # breadcrumb self-healed
+    assert await db.resolve_merchant_to_account("nope") is None
