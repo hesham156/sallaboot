@@ -1228,6 +1228,56 @@ async def resolve_account_forward(old_store_id: str) -> Optional[str]:
     return str(rec["to"])
 
 
+# ── Salla merchant → account mapping (account-preserving linking) ────────────
+# A 7ayak account keeps its OWN stable store_id even after it links Salla. The
+# Salla store is identified by Salla's merchant_id, which arrives on every Salla
+# webhook — so we keep a merchant_id → account_store_id map (shared, in the
+# app_settings KV) and route Salla events to the owning account. Salla-first
+# installs (no prior signup) have no mapping: their account_store_id IS the
+# merchant_id, so resolution falls through to the merchant_id unchanged.
+
+_SALLA_MERCHANT_PREFIX = "salla_merchant:"
+
+
+async def set_salla_merchant_map(merchant_id: str, account_store_id: str) -> None:
+    """Route this Salla merchant's events/tokens to account_store_id."""
+    merchant_id = str(merchant_id)
+    account_store_id = str(account_store_id)
+    if not merchant_id or not account_store_id or merchant_id == account_store_id:
+        return
+    await set_app_setting(f"{_SALLA_MERCHANT_PREFIX}{merchant_id}", {"store": account_store_id})
+
+
+async def resolve_merchant_to_account(merchant_id: str) -> Optional[str]:
+    """Return the account that owns this Salla merchant, or None (Salla-first)."""
+    merchant_id = str(merchant_id)
+    if not merchant_id:
+        return None
+    rec = await get_app_setting(f"{_SALLA_MERCHANT_PREFIX}{merchant_id}")
+    if isinstance(rec, dict) and rec.get("store"):
+        return str(rec["store"])
+    return None
+
+
+async def clear_salla_merchant_map(merchant_id: str) -> None:
+    """Drop a merchant→account mapping (on uninstall / disconnect)."""
+    merchant_id = str(merchant_id)
+    if not merchant_id:
+        return
+    await del_app_setting(f"{_SALLA_MERCHANT_PREFIX}{merchant_id}")
+
+
+async def del_app_setting(key: str) -> None:
+    """Delete an app_settings row. No-op when the DB is unavailable."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("DELETE FROM app_settings WHERE key = $1", key)
+    except Exception as e:
+        print(f"[db] del_app_setting({key!r}) error: {e}")
+
+
 async def load_one_store(store_id: str) -> Optional[dict]:
     """
     Fetch a SINGLE store row (secrets decrypted), or None when it doesn't exist.

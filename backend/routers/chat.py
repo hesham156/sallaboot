@@ -141,37 +141,53 @@ async def salla_callback(request: Request, code: str = "", error: str = "",
                 status_code=502,
             )
 
-        # Account unification: fold a pre-existing platform-less /signup
-        # placeholder (same email) into this Salla store so the merchant keeps
-        # ONE login + their chosen password. Runs before register_store so the
-        # email match resolves to the placeholder. First install only.
-        is_new = not sm.is_registered(store_id)
-        carried_pwd, placeholder_id = (
-            await sm.reassign_owner_email(owner_email, store_id) if is_new else ("", "")
-        )
-
         import datetime as _dt_o
         _expires_in = int(tokens.get("expires_in", 1_209_600))
         _expires_at = (_dt_o.datetime.utcnow() + _dt_o.timedelta(seconds=_expires_in)).isoformat()
-        _store_meta: dict = {"expires_at": _expires_at}
-        if store_name:
-            _store_meta["store_name"] = store_name
-        await sm.register_store(
-            store_id      = store_id,
-            access_token  = access_token,
-            refresh_token = refresh_token,
-            store_info    = _store_meta,
-            owner_email   = owner_email,
-        )
 
-        if carried_pwd:
-            await sm.set_admin_password(store_id, carried_pwd)
-            log.info("salla_linked_existing_account", extra={"store_id": store_id})
+        # Account-preserving model: if the merchant already has a /signup account
+        # (same email), ATTACH Salla to that account and keep its identity +
+        # login, instead of creating a separate merchant-keyed store that would
+        # make the signup account "disappear". OAuth just proved control of this
+        # Salla store, so matching by the Salla-verified email is safe here.
+        # Otherwise (Salla-first) register the store under the merchant_id.
+        merchant_id = str(store_id)
+        account_id  = await db.find_store_by_owner_email(owner_email) if owner_email else None
 
-        # Merge + delete the signup placeholder so OAuth-based linking doesn't
-        # leave a duplicate account behind (consistent with the other paths).
-        if placeholder_id and await db.merge_placeholder_into(placeholder_id, store_id):
-            sm.unregister(placeholder_id)
+        if account_id and str(account_id) != merchant_id:
+            home_tokens = dict(sm.get_store_info(account_id) or {})
+            home_tokens["access_token"]  = access_token
+            home_tokens["refresh_token"] = refresh_token
+            home_tokens["expires_at"]    = _expires_at
+            if store_name and not home_tokens.get("store_name"):
+                home_tokens["store_name"] = store_name
+            home_tokens["salla_merchant_id"] = merchant_id
+            sm.update_store_info(account_id, home_tokens)
+            await db.save_store(account_id, home_tokens)
+            sm.reset_agent(account_id)
+            await db.set_salla_merchant_map(merchant_id, account_id)
+            # If app.store.authorize already created a separate merchant row,
+            # remove it so there's no ghost store (its tokens live on the account).
+            if merchant_id != account_id:
+                try:
+                    await db.purge_store(merchant_id)
+                    sm.unregister(merchant_id)
+                except Exception:
+                    pass
+            log.info("salla_attached_to_account",
+                     extra={"account": account_id, "merchant": merchant_id})
+            store_id = account_id   # auto-login into the account, not the merchant id
+        else:
+            _store_meta: dict = {"expires_at": _expires_at}
+            if store_name:
+                _store_meta["store_name"] = store_name
+            await sm.register_store(
+                store_id      = store_id,
+                access_token  = access_token,
+                refresh_token = refresh_token,
+                store_info    = _store_meta,
+                owner_email   = owner_email,
+            )
 
         if _sync_task:
             asyncio.create_task(_sync_task(store_id, access_token))

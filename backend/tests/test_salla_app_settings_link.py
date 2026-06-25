@@ -1,12 +1,15 @@
 """
 Unit tests for routers.webhooks._handle_app_settings_updated — the Salla
-App Settings linking flow.
+App Settings linking flow (account-preserving model).
 
 The merchant pastes their 7ayak email + API key into the Salla app's settings
 form; Salla fires app.settings.updated with the fields under data.settings. The
-handler must bind the Salla store to the home 7ayak account (resolved by API key
-— the secret proof of ownership) — moving identity onto the Salla store — and
-must never hijack a home account that already runs another platform.
+handler resolves the home 7ayak account by API key (the secret proof of
+ownership) and ATTACHES Salla to it: the Salla OAuth tokens are moved onto the
+account, a merchant_id → account map is recorded so future Salla webhooks route
+to the account, and the redundant merchant store row is deleted. The account
+keeps its own store_id / email / password — it must never be deleted or
+re-keyed — and an account already running another platform is never hijacked.
 """
 from __future__ import annotations
 
@@ -19,14 +22,14 @@ pytestmark = pytest.mark.unit
 
 
 class _DBStub:
-    def __init__(self, *, by_key=None, by_email=None, integrations=None):
+    def __init__(self, *, by_key=None, by_email=None, integrations=None, mapped=None):
         self._by_key = by_key or {}
         self._by_email = by_email or {}
         self._integrations = integrations or {}
-        self.owner_email_set: dict = {}
-        self.api_key_set: dict = {}
-        self.merged: list = []
-        self.forwards: list = []
+        self._mapped = mapped or {}          # merchant_id -> account (pre-existing maps)
+        self.saved: dict = {}                # store_id -> tokens passed to save_store
+        self.maps: list = []                 # (merchant_id, account) from set_salla_merchant_map
+        self.purged: list = []               # store_ids passed to purge_store
 
     async def find_store_by_api_key(self, key):
         return self._by_key.get((key or "").strip())
@@ -37,50 +40,59 @@ class _DBStub:
     async def get_integrations(self, store_id):
         return self._integrations.get(store_id, {})
 
-    async def set_store_owner_email(self, store_id, email):
-        self.owner_email_set[store_id] = email
-        return True
+    async def resolve_merchant_to_account(self, merchant_id):
+        return self._mapped.get(str(merchant_id))
 
-    async def set_api_key(self, store_id, key):
-        self.api_key_set[store_id] = key
+    async def set_salla_merchant_map(self, merchant_id, account):
+        self.maps.append((str(merchant_id), str(account)))
 
-    async def merge_placeholder_into(self, placeholder_id, target_id):
-        self.merged.append((placeholder_id, target_id))
-        return True
+    async def save_store(self, store_id, tokens, owner_email=""):
+        self.saved[store_id] = dict(tokens)
 
-    async def record_account_forward(self, old_store_id, new_store_id):
-        self.forwards.append((old_store_id, new_store_id))
+    async def purge_store(self, store_id):
+        self.purged.append(store_id)
+        return {}
 
 
 class _SMStub:
-    def __init__(self, pwd="argon2$home", registered=True, access_token=""):
-        self._pwd = pwd
+    def __init__(self, *, registered=True, infos=None, caches=None):
         self._registered = registered
-        self._access_token = access_token
-        self.password_set: dict = {}
+        # per-store token blobs returned by get_store_info
+        self._infos = infos or {
+            "merchant_99": {"access_token": "salla-tok", "refresh_token": "ref-tok",
+                            "expires_at": "2026-07-01T00:00:00", "store_name": "متجر"},
+            "home_acct":   {"owner_email": "home@acct.com", "admin_password_hash": "argon2$home"},
+        }
+        self._caches = caches or {}
+        self.updated: dict = {}
+        self.cache_set: dict = {}
         self.reset: list = []
         self.unregistered: list = []
 
     def is_registered(self, store_id):
         return self._registered
 
-    def get_access_token(self, store_id):
-        return self._access_token
-
-    def unregister(self, store_id):
-        self.unregistered.append(store_id)
+    async def sync_one_from_db(self, store_id):
+        return self._registered
 
     def get_store_info(self, store_id):
-        return {"owner_email": "home@acct.com"}
+        return self._infos.get(store_id, {})
 
-    def get_admin_password_hash(self, store_id):
-        return self._pwd
+    def update_store_info(self, store_id, tokens):
+        self.updated[store_id] = dict(tokens)
+        self._infos[store_id] = dict(tokens)
 
-    async def set_admin_password(self, store_id, h):
-        self.password_set[store_id] = h
+    def get_cache(self, store_id):
+        return self._caches.get(store_id, {})
+
+    def set_cache(self, store_id, data):
+        self.cache_set[store_id] = data
 
     def reset_agent(self, store_id):
         self.reset.append(store_id)
+
+    def unregister(self, store_id):
+        self.unregistered.append(store_id)
 
 
 @pytest.fixture
@@ -92,6 +104,8 @@ def patched(monkeypatch):
         return db_stub, sm_stub
     return _apply
 
+
+# ── field extraction ─────────────────────────────────────────────────────────
 
 def test_extract_handles_salla_arabic_slugs():
     """Salla derives field keys from Arabic labels: الايميل→alaemel, الـ API Key→al_api_key."""
@@ -115,30 +129,37 @@ def test_extract_clean_slugs_still_work():
     assert (email, api_key) == ("a@b.com", "7yk_K")
 
 
-async def test_links_by_api_key(patched):
+# ── account-preserving attach ────────────────────────────────────────────────
+
+async def test_attaches_salla_to_account_and_keeps_account(patched):
+    """Happy path: Salla tokens move onto the account, a merchant→account map is
+    recorded, and the redundant merchant store is deleted — the account keeps its
+    own id, email, and password."""
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
-        _SMStub(pwd="argon2$chosen"),
+        _SMStub(),
     )
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
     )
-    # email + password moved onto the Salla store
-    assert db.owner_email_set["merchant_99"] == "me@store.com"
-    assert sm.password_set["merchant_99"] == "argon2$chosen"
-    # detached from home, key transferred to the Salla store
-    assert db.owner_email_set["home_acct"] == ""
-    assert db.api_key_set["home_acct"] is None
-    assert db.api_key_set["merchant_99"] == "7yk_K"
-    assert sm.reset == ["merchant_99"]
+    # Salla tokens landed on the ACCOUNT (home_acct), not a new merchant store.
+    saved = db.saved["home_acct"]
+    assert saved["access_token"] == "salla-tok"
+    assert saved["refresh_token"] == "ref-tok"
+    assert saved["salla_merchant_id"] == "merchant_99"
+    # Account identity preserved.
+    assert saved["owner_email"] == "home@acct.com"
+    assert saved["admin_password_hash"] == "argon2$home"
+    # Webhooks now route merchant_99 → home_acct, and the merchant row is gone.
+    assert db.maps == [("merchant_99", "home_acct")]
+    assert db.purged == ["merchant_99"]
+    assert sm.unregistered == ["merchant_99"]
+    assert sm.reset == ["home_acct"]
 
 
 async def test_no_link_when_salla_store_not_yet_created(patched):
-    """
-    The critical guard: if the app-settings link arrives before the Salla store
-    exists (app.store.authorize not delivered yet), we must NOT clear the home
-    account's email/api_key — doing so gutted the merchant's login.
-    """
+    """If the link arrives before app.store.authorize created the Salla store
+    (and it isn't in the shared DB either), bail without touching anything."""
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
         _SMStub(registered=False),
@@ -146,47 +167,27 @@ async def test_no_link_when_salla_store_not_yet_created(patched):
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
     )
-    # home account untouched — nothing moved or cleared
-    assert db.owner_email_set == {}
-    assert db.api_key_set == {}
-    assert sm.password_set == {}
+    assert db.saved == {}
+    assert db.maps == []
+    assert db.purged == []
 
 
-async def test_placeholder_merged_and_deleted(patched):
-    """A pure signup placeholder (no access token) is merged into the Salla
-    store and removed, so the merchant ends up with ONE account."""
+async def test_account_is_never_deleted(patched):
+    """The account row must never be purged/unregistered — only the merchant row."""
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
-        _SMStub(access_token=""),
+        _SMStub(),
     )
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
     )
-    assert db.merged == [("home_acct", "merchant_99")]
-    assert sm.unregistered == ["home_acct"]
-    # A forwarding breadcrumb is left so the merchant's still-open session
-    # migrates from the deleted placeholder to the Salla store without re-login.
-    assert db.forwards == [("home_acct", "merchant_99")]
-
-
-async def test_home_with_access_token_is_not_deleted(patched):
-    """If the matched account is a real store (has a token), never delete it."""
-    db, sm = patched(
-        _DBStub(by_key={"7yk_K": "home_acct"}, integrations={"home_acct": {}}),
-        _SMStub(access_token="real-salla-token"),
-    )
-    await w._handle_app_settings_updated(
-        "merchant_99", {"settings": {"email": "me@store.com", "api_key": "7yk_K"}}
-    )
-    assert db.merged == []
-    assert sm.unregistered == []
+    assert "home_acct" not in db.purged
+    assert "home_acct" not in sm.unregistered
 
 
 async def test_email_only_does_not_link(patched):
-    """C-4: the email is NOT a secret. Resolving the home account by email
-    alone let an attacker who merely knew a victim's email hijack and clear
-    that account. Linking now requires the API key (the secret proof of
-    ownership), so an email-only payload is a no-op — nothing is moved."""
+    """C-4: the email is NOT a secret. Linking requires the API key (the secret
+    proof of ownership), so an email-only payload is a no-op."""
     db, sm = patched(
         _DBStub(by_email={"me@store.com": "home_acct"}, integrations={"home_acct": {}}),
         _SMStub(),
@@ -194,9 +195,7 @@ async def test_email_only_does_not_link(patched):
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "me@store.com"}}
     )
-    assert db.owner_email_set == {}
-    assert db.api_key_set == {}
-    assert sm.password_set == {}
+    assert db.saved == {} and db.maps == [] and db.purged == []
 
 
 async def test_no_match_is_noop(patched):
@@ -204,19 +203,32 @@ async def test_no_match_is_noop(patched):
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "x@y.com", "api_key": "nope"}}
     )
-    assert db.owner_email_set == {}
-    assert sm.password_set == {}
+    assert db.saved == {} and db.maps == []
 
 
-async def test_already_linked_is_noop(patched):
+async def test_already_linked_same_store_is_noop(patched):
+    """Salla-first: the account already IS the merchant store → nothing to do."""
     db, sm = patched(_DBStub(by_key={"7yk_K": "merchant_99"}), _SMStub())
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "x@y.com", "api_key": "7yk_K"}}
     )
-    assert db.owner_email_set == {}
+    assert db.saved == {} and db.maps == [] and db.purged == []
+
+
+async def test_already_mapped_is_noop(patched):
+    """A retried webhook for an already-attached merchant is idempotent."""
+    db, sm = patched(
+        _DBStub(by_key={"7yk_K": "home_acct"}, mapped={"merchant_99": "home_acct"}),
+        _SMStub(),
+    )
+    await w._handle_app_settings_updated(
+        "merchant_99", {"settings": {"email": "x@y.com", "api_key": "7yk_K"}}
+    )
+    assert db.saved == {} and db.maps == [] and db.purged == []
 
 
 async def test_live_platform_home_not_hijacked(patched):
+    """An account already on another platform (Shopify) is never attached to."""
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "real_store"},
                 integrations={"real_store": {"shopify": {"shop": "x.myshopify.com"}}}),
@@ -225,21 +237,17 @@ async def test_live_platform_home_not_hijacked(patched):
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "x@y.com", "api_key": "7yk_K"}}
     )
-    assert db.owner_email_set == {}      # nothing moved
-    assert db.api_key_set == {}
+    assert db.saved == {} and db.maps == [] and db.purged == []
 
 
 async def test_live_salla_home_not_hijacked(patched):
-    """C-4: 'salla' was missing from the exclusivity guard, so an account that
-    is itself already a live Salla store could be moved onto another merchant_id.
-    It must now be protected like the other platforms."""
+    """An account that is itself already a live Salla store is protected too."""
     db, sm = patched(
         _DBStub(by_key={"7yk_K": "real_salla_store"},
-                integrations={"real_salla_store": {"salla": {"store_id": "real_salla_store"}}}),
+                integrations={"real_salla_store": {"salla": {"connected": True}}}),
         _SMStub(),
     )
     await w._handle_app_settings_updated(
         "merchant_99", {"settings": {"email": "x@y.com", "api_key": "7yk_K"}}
     )
-    assert db.owner_email_set == {}      # nothing moved
-    assert db.api_key_set == {}
+    assert db.saved == {} and db.maps == [] and db.purged == []
