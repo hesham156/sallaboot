@@ -81,3 +81,7 @@ async def test_admin_csp_locks_script_src_to_self(client):
     r = await client.get("/admin/stores")
     csp = r.headers.get("content-security-policy", "")
     assert "script-src 'self'" in csp
+    # The Facebook JS SDK origin is the ONE allowed external script source
+    # (WhatsApp Embedded Signup + Messenger/Instagram connect). No 'unsafe-inline'.
+    assert "https://connect.facebook.net" in csp
+    assert "unsafe-inline" not in csp
