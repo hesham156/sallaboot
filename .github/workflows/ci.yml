@@ -178,9 +178,12 @@ jobs:
 
       - name: Install alembic + driver
         working-directory: backend
+        # cryptography is required because migration 0002 imports crypto.py
+        # (Fernet) to encrypt existing secrets — without it the upgrade dies
+        # with ModuleNotFoundError before touching the DB.
         run: |
           python -m pip install --upgrade pip
-          pip install alembic psycopg2-binary SQLAlchemy
+          pip install alembic psycopg2-binary SQLAlchemy cryptography
 
       - name: Upgrade to head
         working-directory: backend

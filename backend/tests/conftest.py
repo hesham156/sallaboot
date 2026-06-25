@@ -16,7 +16,6 @@ Test DB strategy:
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import warnings
@@ -60,17 +59,10 @@ os.environ.setdefault("ENABLE_PERIODIC",         "false")
 
 
 # ── Async event loop ──────────────────────────────────────────────────────
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """
-    Session-scoped event loop so the DB pool / testcontainer survive
-    across tests. Default pytest-asyncio gives one loop per function which
-    would force a pool re-create every time.
-    """
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# NOTE: We deliberately do NOT define an `event_loop` fixture. pytest-asyncio
+# 1.x ignores a user-defined one and would warn. The session-wide single loop
+# (so the DB pool / testcontainer survive across tests) is configured in
+# pytest.ini via asyncio_default_{fixture,test}_loop_scope = session.
 
 
 # ── Database URL resolution ───────────────────────────────────────────────
