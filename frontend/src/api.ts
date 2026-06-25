@@ -691,6 +691,11 @@ export const api = {
   listIntegrations: (storeId: string) =>
     get<{ integrations: Record<string, IntegrationData> }>(`/admin/${storeId}/integrations`),
 
+  // Re-bind the Salla merchant_id → this account (asks Salla which store the
+  // stored token belongs to) so the storefront widget resolves. Best-effort.
+  repairSallaBinding: (storeId: string) =>
+    post<{ ok: boolean; merchant_id: string }>(`/admin/${storeId}/integrations/salla/repair`),
+
   shopifyInstall: (storeId: string, shop: string) =>
     get<{ install_url: string; shop: string }>(
       `/admin/${storeId}/integrations/shopify/install?shop=${encodeURIComponent(shop)}`
