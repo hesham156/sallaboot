@@ -137,7 +137,11 @@ def test_split_keeps_short_text_intact_and_chunks_long():
 # ── connect token-shape guard (channels router) ───────────────────────────────
 
 @pytest.mark.parametrize("token,valid", [
-    ("123456789:AAHk1Lp-abcDEFghijKLMNopqrstuvwx12", True),
+    # Split across the colon so the literal isn't a contiguous Telegram-token
+    # shape in source — it's a synthetic fixture, not a real credential, but
+    # GitHub secret scanning pattern-matches the full form and files a (false)
+    # "public leak" alert. Same dodge as the concatenated case just below.
+    ("123456789:" + "AAHk1Lp-abcDEFghijKLMNopqrstuvwx12", True),
     ("8000000000:AAF" + "z" * 32, True),
     ("not-a-token", False),
     ("123:short", False),                          # auth part too short
