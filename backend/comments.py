@@ -29,6 +29,8 @@ from __future__ import annotations
 import os
 import httpx
 
+import messenger as _ms
+
 GRAPH_VERSION = os.getenv("META_GRAPH_VERSION", os.getenv("WHATSAPP_GRAPH_VERSION", "v21.0"))
 _GRAPH = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
@@ -37,11 +39,16 @@ _GRAPH = f"https://graph.facebook.com/{GRAPH_VERSION}"
 # multi-part thread).
 COMMENT_TEXT_LIMIT = 1000
 
-# Page webhook fields for comment automation. Subscribed IN ADDITION to the
-# messaging fields messenger.py already sets, so DMs keep working.
+# Page webhook fields for comment automation.
 #   feed       → Page post comments (Facebook)
 #   mention    → someone @-mentions the Page
-COMMENT_PAGE_FIELDS = "feed,mention"
+#
+# CRITICAL: POST /{page}/subscribed_apps REPLACES the page's subscribed_fields
+# (it does NOT merge). The connect flow calls subscribe_page (messaging) and
+# then subscribe_page_comments — so whichever runs LAST must carry the FULL
+# union, otherwise it silently clobbers the other and that channel goes dark.
+# We therefore subscribe the union of messaging + comment fields here.
+COMMENT_PAGE_FIELDS = _ms._PAGE_SUBSCRIBE_FIELDS + ",feed,mention"
 # Instagram fields are subscribed on the linked IG account via the Page sub.
 COMMENT_IG_FIELDS = "comments,mentions"
 
