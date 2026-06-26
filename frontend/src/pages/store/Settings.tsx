@@ -406,7 +406,12 @@ export default function Settings({ storeId }: Props) {
     if (!window.FB) { setMetaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة وحاول'); return }
     setMetaConnecting(true); setMetaMsg('')
 
-    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,instagram_basic,instagram_manage_messages,business_management'
+    // Messaging + page subscription scopes, PLUS comment-automation scopes:
+    //   pages_read_user_content  → receive/read comments on the page's posts
+    //   pages_manage_engagement  → reply to / hide comments
+    //   instagram_manage_comments→ read + reply IG comments
+    // Without these Meta does not deliver `feed`/`comments` webhook events.
+    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,pages_read_user_content,pages_manage_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,business_management'
 
     function doConnect(token: string) {
       api.metaConnectPages(storeId, { user_token: token })
