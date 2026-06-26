@@ -6,6 +6,37 @@ import {
 } from '@heroui/react'
 import { api, ApiError, PlatformOpsSnapshot, PlatformOpsStoreRow, getIsSuper } from '../api'
 
+/* Per-store comment-automation entitlement toggle (super-admin only). Manages
+   its own optimistic state so the row updates instantly; reverts on failure. */
+function CommentToggle({ storeId, initial }: { storeId: string; initial: boolean }) {
+  const [on, setOn]       = useState(initial)
+  const [busy, setBusy]   = useState(false)
+  const [err, setErr]     = useState('')
+  async function toggle() {
+    const next = !on
+    setBusy(true); setErr('')
+    setOn(next)                                  // optimistic
+    try {
+      const res = await api.setCommentEntitlement(storeId, next)
+      setOn(res.comments_enabled)
+    } catch (e) {
+      setOn(!next)                               // revert
+      setErr(e instanceof ApiError ? e.detail : (e instanceof Error ? e.message : 'فشل'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Button size="sm" variant={on ? 'flat' : 'bordered'} color={on ? 'success' : 'default'}
+              isLoading={busy} onPress={toggle} className="min-w-[84px]">
+        {on ? 'مُفعّلة' : 'إيقاف'}
+      </Button>
+      {err && <span className="text-[10px] text-rose-600">{err}</span>}
+    </div>
+  )
+}
+
 /* ─────────────────────────── Helpers ────────────────────────────────── */
 
 function fmt(n: number): string {
@@ -303,6 +334,7 @@ export default function PlatformOps() {
                 <TableColumn>القنوات</TableColumn>
                 <TableColumn>توكن سلة</TableColumn>
                 <TableColumn>مزوّد AI</TableColumn>
+                <TableColumn>التعليقات</TableColumn>
                 <TableColumn className="text-right">توكنز اليوم</TableColumn>
                 <TableColumn>الحد</TableColumn>
                 <TableColumn>تاريخ الربط</TableColumn>
@@ -342,6 +374,9 @@ export default function PlatformOps() {
                         <Chip size="sm" color={chip.color} variant="flat">{chip.label}</Chip>
                       </TableCell>
                       <TableCell><span className="text-xs">{s.provider}</span></TableCell>
+                      <TableCell>
+                        <CommentToggle storeId={s.store_id} initial={s.comments_enabled} />
+                      </TableCell>
                       <TableCell className={`text-right font-mono text-sm ${usageColor}`}>
                         {fmt(s.tokens_today)}
                         {s.percent_used !== null && (

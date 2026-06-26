@@ -560,6 +560,13 @@ export const api = {
   platformOps: () =>
     get<PlatformOpsSnapshot>('/admin/platform-ops'),
 
+  // Super-admin: toggle the FB/IG comment-automation entitlement for a store.
+  setCommentEntitlement: (storeId: string, enabled: boolean) =>
+    put<{ comments_enabled: boolean; comments_monthly_limit: number }>(
+      `/admin/${storeId}/comments/entitlement`,
+      { comments_enabled: enabled, comments_monthly_limit: 0 },
+    ),
+
   // Audit log readers. Super-admin gets the global view (cross-store);
   // store-scoped owners/managers get only their own store's actions.
   auditLogGlobal: (params: { limit?: number; offset?: number; action?: string; store_id?: string } = {}) => {
@@ -1424,6 +1431,7 @@ export interface PlatformOpsStoreRow {
   tokens_today:    number
   budget:          number
   percent_used:    number | null
+  comments_enabled: boolean
 }
 
 export interface PlatformOpsSnapshot {

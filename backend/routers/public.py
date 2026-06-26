@@ -703,6 +703,7 @@ async def platform_ops(request: Request):
 
     near_budget: list[dict] = []
     store_rows:  list[dict] = []
+    ent_map = await db.get_entitlements_map()   # {store_id: comments_enabled}
     for s in stores_raw:
         sid = s["store_id"]
         # Coarse store metadata only — never the raw access_token or keys.
@@ -739,6 +740,7 @@ async def platform_ops(request: Request):
             "tokens_today":   used,
             "budget":         store_budget,
             "percent_used":   round(pct, 1) if pct is not None else None,
+            "comments_enabled": bool(ent_map.get(sid, False)),
         }
         store_rows.append(row)
 
