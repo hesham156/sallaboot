@@ -289,9 +289,14 @@ def _apply_security_headers(headers, path: str) -> None:
         # <script> is blocked, onerror fires, and the connect UI shows
         # "غير متاح" even when META_APP_ID is configured. Meta's CDN is trusted;
         # no 'unsafe-inline' is granted, so the anti-token-exfil property holds.
+        #
+        # static.cloudflareinsights.com serves the Web-Analytics beacon that
+        # Cloudflare auto-injects when the site is proxied through it. It is not
+        # ours to remove, so allow it to stop the noisy CSP violation in the
+        # console; it only reads page-load timings (no token access).
         headers.setdefault(
             "Content-Security-Policy",
-            "script-src 'self' https://connect.facebook.net; "
+            "script-src 'self' https://connect.facebook.net https://static.cloudflareinsights.com; "
             "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
         )
 
