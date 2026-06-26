@@ -1846,29 +1846,37 @@ async def handle_comment_event(comment: dict):
         if sm.is_suspended(store_id):
             return
 
-        cfg = sm.get_ai_config(store_id) or {}
-        enabled = bool(cfg.get("comments_ig_enabled") if platform == "instagram"
-                       else cfg.get("comments_fb_enabled"))
-        if not enabled:
-            return
+        # Entitlement is the hard feature gate (is the store on the comment plan).
         ent = await db.get_entitlements(store_id)
         if not ent.get("comments_enabled"):
             print(f"[{platform}_comment] ⛔ feature not entitled for store {store_id!r}")
             return
-        token = (cfg.get("page_token") or "").strip()
-        if not token:
-            return
 
-        # Persist first — idempotent on (store, platform, external id). A False
-        # here means Meta retried a delivery we already handled → stop.
+        cfg = sm.get_ai_config(store_id) or {}
+
+        # Persist FIRST — the comment must appear in the Smart Inbox regardless of
+        # whether AUTO-REPLY is enabled for this platform. Idempotent on
+        # (store, platform, external id); a False means Meta retried a delivery
+        # we already handled → stop.
         ins = await db.social_comment_upsert(store_id, platform, comment)
         if not ins["inserted"]:
             print(f"[{platform}_comment] duplicate {comment_id!r} — already processed")
             return
         pk = ins["id"]
+        print(f"[{platform}_comment] 💾 stored pk={pk} store={store_id!r}")
+
+        # Per-platform toggle gates AUTO-REPLY only — not ingest. When off, the
+        # comment stays visible as 'new' for manual handling; we just skip the AI.
+        enabled = bool(cfg.get("comments_ig_enabled") if platform == "instagram"
+                       else cfg.get("comments_fb_enabled"))
+        if not enabled:
+            print(f"[{platform}_comment] ⏸ auto-reply off for platform — stored as new")
+            return
 
         if not text.strip():
             return  # media-only comment, nothing to answer; left as 'new'
+
+        token = (cfg.get("page_token") or "").strip()
 
         # Forbidden topics → never auto-answer; hand to a human.
         if _hits_forbidden(text, cfg.get("comment_forbidden_topics") or []):
@@ -1902,7 +1910,7 @@ async def handle_comment_event(comment: dict):
         threshold = _clamp_threshold(cfg.get("comment_confidence_threshold"))
         reply     = result["reply"]
 
-        if mode == "auto" and reply and result["confidence"] >= threshold:
+        if mode == "auto" and reply and token and result["confidence"] >= threshold:
             await db.update_social_comment(store_id, pk, status="ai_replied", **enrich)
             await db.outbox_enqueue(
                 "comment_reply",
