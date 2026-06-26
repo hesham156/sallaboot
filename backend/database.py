@@ -5210,6 +5210,23 @@ async def get_entitlements(store_id: str) -> dict:
         return default
 
 
+async def get_entitlements_map() -> dict:
+    """Return {store_id: comments_enabled} for every store that has a row.
+    Used by the platform-ops snapshot to render the per-store toggle without
+    an N+1 query. Stores absent from the map default to disabled."""
+    if not _pool:
+        return {}
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT store_id, comments_enabled FROM store_entitlements"
+            )
+        return {r["store_id"]: bool(r["comments_enabled"]) for r in rows}
+    except Exception as e:
+        print(f"[db] get_entitlements_map error: {e}")
+        return {}
+
+
 async def set_entitlements(store_id: str, *, comments_enabled: bool,
                            comments_monthly_limit: int = 0) -> None:
     """Upsert a store's comment-feature entitlement."""
