@@ -420,39 +420,32 @@ export default function Settings({ storeId }: Props) {
         .finally(() => setMetaConnecting(false))
     }
 
-    // FB SDK requires plain (non-async) callbacks — async callbacks throw
-    // "Expression is of type asyncfunction, not function".
-    // Check existing session first; if connected skip the popup entirely.
-    window.FB.getLoginStatus((statusRes: { status: string; authResponse?: { accessToken: string } }) => {
-      if (statusRes.status === 'connected' && statusRes.authResponse?.accessToken) {
-        doConnect(statusRes.authResponse.accessToken)
-        return
-      }
+    // Always open the login popup with auth_type:'rerequest'. The previous
+    // getLoginStatus shortcut reused an EXISTING FB session token, which lacks
+    // any scope added after that session was granted (e.g. pages_manage_engagement
+    // for comment replies) — so reconnecting never upgraded the permissions.
+    // 'rerequest' forces Facebook to re-prompt for missing/declined scopes.
+    // FB SDK requires plain (non-async) callbacks.
+    let settled = false
+    const watchdog = setTimeout(() => {
+      if (settled) return
+      settled = true
+      setMetaConnecting(false)
+      setMetaMsg(
+        '❌ تعذّر إكمال تسجيل دخول Facebook (انتهى الوقت). الأسباب الشائعة: ' +
+        'الـ popup مغلق من المتصفح • تطبيق Facebook لسه في Development Mode • ' +
+        'الـ domain ‎7ayak.app‎ غير مضاف في App Settings • الصلاحيات المطلوبة ' +
+        '(pages_messaging, instagram_basic, إلخ) محتاجة Facebook App Review.'
+      )
+    }, 60_000)
 
-      // Not connected — open the login popup.
-      // Watchdog: if the popup is blocked, the FB App is in Development mode,
-      // or the popup gets stuck, the callback never fires. After 60s surface a hint.
-      let settled = false
-      const watchdog = setTimeout(() => {
-        if (settled) return
-        settled = true
-        setMetaConnecting(false)
-        setMetaMsg(
-          '❌ تعذّر إكمال تسجيل دخول Facebook (انتهى الوقت). الأسباب الشائعة: ' +
-          'الـ popup مغلق من المتصفح • تطبيق Facebook لسه في Development Mode • ' +
-          'الـ domain ‎7ayak.app‎ غير مضاف في App Settings • الصلاحيات المطلوبة ' +
-          '(pages_messaging, instagram_basic, إلخ) محتاجة Facebook App Review.'
-        )
-      }, 60_000)
-
-      window.FB.login((res: { authResponse?: { accessToken: string } }) => {
-        if (settled) return
-        settled = true
-        clearTimeout(watchdog)
-        if (!res.authResponse) { setMetaConnecting(false); setMetaMsg('❌ تم إلغاء الربط'); return }
-        doConnect(res.authResponse.accessToken)
-      }, { scope: REQUIRED_SCOPE })
-    })
+    window.FB.login((res: { authResponse?: { accessToken: string } }) => {
+      if (settled) return
+      settled = true
+      clearTimeout(watchdog)
+      if (!res.authResponse) { setMetaConnecting(false); setMetaMsg('❌ تم إلغاء الربط'); return }
+      doConnect(res.authResponse.accessToken)
+    }, { scope: REQUIRED_SCOPE, auth_type: 'rerequest' })
   }
 
   async function handlePagesResponse(data: Awaited<ReturnType<typeof api.metaConnectPages>>) {
