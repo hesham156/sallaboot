@@ -79,6 +79,22 @@ export default function CommentAutomation({ storeId }: Props) {
     finally { setSaving(false) }
   }
 
+  // Channel enable switches persist immediately (they sit at the top, far from
+  // the "حفظ الإعدادات" button — users expect a flip to stick on its own).
+  async function setChannel(field: 'comments_fb_enabled' | 'comments_ig_enabled', v: boolean) {
+    if (!s) return
+    setS({ ...s, [field]: v })                         // optimistic
+    setMsg('')
+    try {
+      const updated = await api.put<Settings>(`/admin/${storeId}/comments/settings`, { [field]: v })
+      setS(updated)
+      setMsg('تم الحفظ ✅')
+    } catch (e) {
+      setS({ ...s, [field]: !v })                       // revert on failure
+      setMsg((e as Error).message)
+    }
+  }
+
   async function addRule() {
     if (!nr.pattern.trim()) return
     try {
@@ -115,7 +131,7 @@ export default function CommentAutomation({ storeId }: Props) {
                 label={s.page_connected ? 'الصفحة مربوطة' : 'غير مربوطة'} />
             </div>
             <Switch isSelected={s.comments_fb_enabled} isDisabled={!canManage || !s.page_connected}
-              onValueChange={v => setS({ ...s, comments_fb_enabled: v })} />
+              onValueChange={v => setChannel('comments_fb_enabled', v)} />
           </div>
           <div className="flex items-center justify-between">
             <div>
@@ -124,7 +140,7 @@ export default function CommentAutomation({ storeId }: Props) {
                 label={s.ig_connected ? 'الحساب مربوط' : 'غير مربوط'} />
             </div>
             <Switch isSelected={s.comments_ig_enabled} isDisabled={!canManage || !s.ig_connected}
-              onValueChange={v => setS({ ...s, comments_ig_enabled: v })} />
+              onValueChange={v => setChannel('comments_ig_enabled', v)} />
           </div>
         </div>
       </SectionCard>
