@@ -62,3 +62,23 @@ def test_signature_for_different_body_rejected(monkeypatch):
     good_sig = _sig("app-secret-123", b'{"amount":1}')
     ok, _ = w._verify_meta_signature(b'{"amount":9999}', {"X-Hub-Signature-256": good_sig})
     assert ok is False
+
+
+def test_second_secret_accepted_for_separate_whatsapp_app(monkeypatch):
+    """WhatsApp may be on a different Meta app: a signature matching
+    WHATSAPP_APP_SECRET is accepted even when META_APP_SECRET differs."""
+    monkeypatch.setenv("META_APP_SECRET", "messenger-app-secret")
+    monkeypatch.setenv("WHATSAPP_APP_SECRET", "whatsapp-app-secret")
+    body = b'{"object":"whatsapp_business_account"}'
+    # Signed with the WhatsApp app's secret (not META_APP_SECRET).
+    ok, detail = w._verify_meta_signature(body, {"X-Hub-Signature-256": _sig("whatsapp-app-secret", body)})
+    assert ok is True
+    assert detail == "signature_ok"
+
+
+def test_signature_rejected_when_matching_neither_secret(monkeypatch):
+    monkeypatch.setenv("META_APP_SECRET", "messenger-app-secret")
+    monkeypatch.setenv("WHATSAPP_APP_SECRET", "whatsapp-app-secret")
+    body = b'{"object":"x"}'
+    ok, _ = w._verify_meta_signature(body, {"X-Hub-Signature-256": _sig("some-other-app", body)})
+    assert ok is False

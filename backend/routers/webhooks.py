@@ -1456,19 +1456,28 @@ def _verify_meta_signature(body: bytes, headers) -> tuple[bool, str]:
     configured app means the request did NOT come from Meta — i.e. a forged
     inbound WhatsApp / Messenger / Instagram event (finding C-3).
     """
-    secret = os.getenv("META_APP_SECRET", "")
-    if not secret:
+    # The unified webhook receives events from potentially TWO different Meta
+    # apps: the Messenger/Instagram/comments app (META_APP_SECRET) and a
+    # separate WhatsApp Business / BSP app (WHATSAPP_APP_SECRET). They sign with
+    # their own app secret, so we accept a signature that matches ANY configured
+    # secret. (Set WHATSAPP_APP_SECRET only if WhatsApp is on a different app.)
+    secrets = [s for s in (
+        os.getenv("META_APP_SECRET", ""),
+        os.getenv("WHATSAPP_APP_SECRET", ""),
+    ) if s]
+    if not secrets:
         log.warning("meta_webhook_no_secret_dev_mode")
         return True, "no_secret_configured"
     sig = headers.get("X-Hub-Signature-256", "")
     if not sig:
         log.warning("meta_webhook_signature_missing")
         return False, "signature_required_but_absent"
-    expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, sig):
-        log.warning("meta_webhook_signature_mismatch", extra={"got_prefix": sig[:23]})
-        return False, "signature_mismatch"
-    return True, "signature_ok"
+    for secret in secrets:
+        expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(expected, sig):
+            return True, "signature_ok"
+    log.warning("meta_webhook_signature_mismatch", extra={"got_prefix": sig[:23]})
+    return False, "signature_mismatch"
 
 
 @router.post("/whatsapp/webhook")
