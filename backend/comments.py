@@ -208,6 +208,27 @@ async def subscribe_page_comments(page_token: str, page_id: str) -> bool:
         return False
 
 
+async def debug_token_scopes(token: str) -> dict:
+    """Diagnostic: ask Graph debug_token (with the app token) what the given
+    page/user token actually carries. Returns the `data` object (scopes,
+    granular_scopes, type, …) or {} on failure. Used to explain a (#200)
+    Permissions error — i.e. whether pages_manage_engagement was granted, and
+    whether it's granular-scoped to the right Page."""
+    app_id     = os.getenv("META_APP_ID", "")
+    app_secret = os.getenv("META_APP_SECRET", "")
+    if not (token and app_id and app_secret):
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_GRAPH}/debug_token", params={
+                "input_token":  token,
+                "access_token": f"{app_id}|{app_secret}",
+            })
+            return r.json().get("data", {}) if r.status_code < 400 else {}
+    except Exception:
+        return {}
+
+
 async def _post(url: str, token: str, body: dict, label: str) -> bool:
     """Shared Graph POST with bearer auth. Logs + returns False on any failure."""
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}

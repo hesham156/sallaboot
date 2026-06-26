@@ -195,6 +195,12 @@ async def _send_reply(store_id: str, comment: dict, text: str, actor: str) -> No
     ok = await cm.reply_to_comment(token, comment["external_comment_id"], text,
                                    platform=comment["platform"])
     if not ok:
+        # Diagnose: what does the stored page token actually carry? A (#200)
+        # almost always means pages_manage_engagement is missing or not granular-
+        # scoped to this Page. Logged (no secrets) to pinpoint grant vs mode issue.
+        info = await cm.debug_token_scopes(token)
+        print(f"[comments] reply-fail diag type={info.get('type')} "
+              f"scopes={info.get('scopes')} granular={info.get('granular_scopes')}")
         # Most common cause is a page token missing pages_manage_engagement /
         # instagram_manage_comments (Graph "(#200) Permissions error"). The exact
         # Graph error is logged server-side by comments._post.
