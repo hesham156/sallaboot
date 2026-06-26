@@ -195,7 +195,14 @@ async def _send_reply(store_id: str, comment: dict, text: str, actor: str) -> No
     ok = await cm.reply_to_comment(token, comment["external_comment_id"], text,
                                    platform=comment["platform"])
     if not ok:
-        raise HTTPException(502, "تعذّر إرسال الرد إلى ميتا — حاول مجدداً")
+        # Most common cause is a page token missing pages_manage_engagement /
+        # instagram_manage_comments (Graph "(#200) Permissions error"). The exact
+        # Graph error is logged server-side by comments._post.
+        raise HTTPException(
+            502,
+            "تعذّر إرسال الرد إلى ميتا. الأرجح أن صلاحية إدارة التعليقات غير "
+            "ممنوحة — أعد ربط فيسبوك/إنستقرام ووافق على كل الصلاحيات، ثم حاول مجدداً.",
+        )
     await db.update_social_comment(
         store_id, comment["id"], status="replied", final_reply=text,
         replied_by=actor, replied_at=_dt.datetime.now(_dt.timezone.utc),
