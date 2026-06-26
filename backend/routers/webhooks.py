@@ -1492,6 +1492,18 @@ async def meta_webhook(request: Request):
     body = await request.body()
     sig_ok, sig_detail = _verify_meta_signature(body, request.headers)
     if not sig_ok:
+        # Diagnostic (no secrets): which object/sender is being rejected, so a
+        # signature mismatch can be traced to the right Meta app/channel.
+        try:
+            _p   = _json.loads(body)
+            _obj = _p.get("object", "?")
+            _eid = ((_p.get("entry") or [{}])[0]).get("id", "?")
+            _fld = [c.get("field") for e in (_p.get("entry") or [])
+                    for c in (e.get("changes") or [])]
+            print(f"[meta_webhook] ⛔ 403 sig_mismatch object={_obj!r} entry_id={_eid!r} "
+                  f"changes={_fld} body_len={len(body)}")
+        except Exception:
+            print(f"[meta_webhook] ⛔ 403 sig_mismatch (unparseable body, len={len(body)})")
         _log_event("", "meta.webhook", "rejected", f"signature: {sig_detail}",
                    sig_status=sig_detail)
         raise HTTPException(403, f"invalid signature: {sig_detail}")
