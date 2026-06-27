@@ -184,6 +184,7 @@ AI_CONFIG_SECRET_FIELDS = (
     "page_token",        # Facebook Page access token (Messenger + Instagram)
     "ig_access_token",   # Instagram-login long-lived (~60d) token — same blast
                          # radius as page_token, must be encrypted at rest too.
+
 )
 
 # Secret fields inside each per-platform entry of the stores.integrations JSONB

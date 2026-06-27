@@ -31,7 +31,7 @@ def test_extract_messenger_message():
     out = ms.extract_messages(payload)
     assert out == [{
         "channel": "messenger", "recipient_id": "PAGE_1", "from": "PSID_1",
-        "text": "السلام عليكم", "msg_id": "m_1", "name": "",
+        "text": "السلام عليكم", "msg_id": "m_1", "name": "", "standby": False,
     }]
 
 
