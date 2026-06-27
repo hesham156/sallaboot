@@ -579,6 +579,32 @@ async def list_whatsapp_numbers(store_id: str, request: Request):
     ]}
 
 
+@router.post("/admin/{store_id}/whatsapp/numbers")
+async def add_whatsapp_number(store_id: str, request: Request):
+    """Manually add (or update by phone_id) a WhatsApp number — Phone Number ID +
+    Access Token (+ optional WABA id / label) from Meta › WhatsApp › API Setup.
+    Body: {phone_id, token, waba_id?, label?}."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    body     = await request.json()
+    phone_id = str(body.get("phone_id", "")).strip()
+    token    = str(body.get("token", "")).strip()
+    waba_id  = str(body.get("waba_id", "")).strip()
+    label    = str(body.get("label", "")).strip()
+    if not phone_id or not token:
+        raise HTTPException(400, "Phone Number ID والـ Access Token مطلوبان")
+    await sm.upsert_whatsapp_number(store_id, {
+        "phone_id": phone_id, "token": token, "waba_id": waba_id,
+        "label": label, "enabled": True,
+    })
+    # Global uniqueness — detach this number from any OTHER store that holds it.
+    released = [s for s in await sm.claim_whatsapp_phone_id(phone_id, store_id) if s != str(store_id)]
+    await audit(request, "whatsapp_add_number_manual", target_store=store_id,
+                details={"phone_id": phone_id, "released_from": released})
+    return {"status": "ok", "message": "تم إضافة الرقم", "phone_id": phone_id,
+            "also_removed_from": released}
+
+
 @router.delete("/admin/{store_id}/whatsapp/numbers/{phone_id}")
 async def remove_whatsapp_number(store_id: str, phone_id: str, request: Request):
     """Unlink ONE WhatsApp number (leaves the others connected). Best-effort Meta

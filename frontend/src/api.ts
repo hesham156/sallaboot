@@ -301,6 +301,8 @@ export const api = {
       `/admin/${storeId}/whatsapp/numbers`),
   waRemoveNumber: (storeId: string, phoneId: string) =>
     del<{ status: string; message: string }>(`/admin/${storeId}/whatsapp/numbers/${encodeURIComponent(phoneId)}`),
+  waAddNumber: (storeId: string, body: { phone_id: string; token: string; waba_id?: string; label?: string }) =>
+    post<{ status: string; message: string; phone_id: string }>(`/admin/${storeId}/whatsapp/numbers`, body),
 
   // Messenger + Instagram (Facebook Page) connect
   metaConnectPages: (storeId: string, body: { user_token: string; page_id?: string }) =>
