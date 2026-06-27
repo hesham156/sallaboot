@@ -4,6 +4,10 @@ for external platforms.
 
 Currently supported:
   • Shopify — full OAuth 2.0 install + ScriptTag widget injection + disconnect
+  • Zid     — OAuth 2.0 install + product sync + disconnect
+  • TikTok  — Login Kit OAuth (connect + token storage + disconnect). Foundation
+              only: TikTok exposes no public DM/comment WRITE API, so this just
+              establishes the authenticated account link + read scopes.
 """
 
 import hashlib
@@ -44,6 +48,19 @@ BASE_URL              = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/
 ZID_CLIENT_ID     = os.getenv("ZID_CLIENT_ID", "")
 ZID_CLIENT_SECRET = os.getenv("ZID_CLIENT_SECRET", "")
 ZID_OAUTH_BASE    = "https://oauth.zid.sa"
+
+# ── TikTok (Login Kit / OAuth v2) ─────────────────────────────────────────────
+# Foundation: connect a creator's TikTok account (OAuth), store tokens, show
+# profile. Messaging/comment WRITE APIs are NOT publicly available from TikTok,
+# so this only establishes the authenticated link + read scopes for now.
+TIKTOK_CLIENT_KEY    = os.getenv("TIKTOK_CLIENT_KEY", "")
+TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET", "")
+TIKTOK_AUTH_URL      = "https://www.tiktok.com/v2/auth/authorize/"
+TIKTOK_TOKEN_URL     = "https://open.tiktokapis.com/v2/oauth/token/"
+TIKTOK_USERINFO_URL  = "https://open.tiktokapis.com/v2/user/info/"
+# Comma-separated. user.info.basic is granted without audit; profile/video.list
+# need app review — keep them here so they're requested once the app is approved.
+TIKTOK_SCOPES        = "user.info.basic,user.info.profile,video.list"
 
 # In-memory CSRF state store — single-process only.
 # In multi-worker deployments (gunicorn/uvicorn --workers N) use Redis instead.
@@ -1169,3 +1186,148 @@ async def zid_market_webhook(request: Request):
 
     # Always return 200 so Zid doesn't retry
     return {"received": True, "event": event}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TikTok — Login Kit OAuth (foundation: connect + token storage + disconnect)
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def tiktok_refresh_token(refresh_token: str) -> dict:
+    """Exchange a TikTok refresh_token for a fresh access token. Returns the
+    parsed token dict (access_token, refresh_token, expires_in, …) or {} on
+    failure. TikTok access tokens last 24h; refresh tokens ~365d."""
+    if not (refresh_token and TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET):
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                TIKTOK_TOKEN_URL,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={
+                    "client_key":    TIKTOK_CLIENT_KEY,
+                    "client_secret": TIKTOK_CLIENT_SECRET,
+                    "grant_type":    "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+            )
+            return r.json() if r.status_code < 400 else {}
+    except Exception as exc:
+        print(f"[tiktok] refresh error: {exc}")
+        return {}
+
+
+@router.get("/admin/{store_id}/integrations/tiktok/install")
+async def tiktok_install(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    if not (TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET):
+        raise HTTPException(503, "لم يتم تهيئة تكامل TikTok على هذا الخادم")
+
+    state = secrets.token_urlsafe(32)
+    _prune_oauth_states()
+    _oauth_states[state] = {"store_id": store_id, "platform": "tiktok", "ts": time.time()}
+
+    params = {
+        "client_key":    TIKTOK_CLIENT_KEY,
+        "scope":         TIKTOK_SCOPES,
+        "response_type": "code",
+        "redirect_uri":  f"{BASE_URL}/integrations/tiktok/callback",
+        "state":         state,
+    }
+    return {"install_url": f"{TIKTOK_AUTH_URL}?{urlencode(params)}"}
+
+
+@router.get("/integrations/tiktok/callback")
+async def tiktok_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+    error_description: str = "",
+):
+    if error:
+        store_id = (_oauth_states.pop(state, None) or {}).get("store_id", "unknown")
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?tiktok=error&reason={error}",
+            status_code=302,
+        )
+
+    state_data = _oauth_states.pop(state, None)
+    if not state_data or state_data.get("platform") != "tiktok":
+        raise HTTPException(400, "Invalid or expired OAuth state — please retry the connection")
+    store_id = state_data["store_id"]
+
+    # 1. Exchange code → access token (form-urlencoded, NOT JSON).
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                TIKTOK_TOKEN_URL,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={
+                    "client_key":    TIKTOK_CLIENT_KEY,
+                    "client_secret": TIKTOK_CLIENT_SECRET,
+                    "code":          code,
+                    "grant_type":    "authorization_code",
+                    "redirect_uri":  f"{BASE_URL}/integrations/tiktok/callback",
+                },
+            )
+            tok = r.json()
+    except Exception as exc:
+        raise HTTPException(502, f"فشل استبدال الكود مع TikTok: {exc}") from exc
+
+    # New-gen returns fields at the top level; tolerate a legacy {data:{…}} wrap.
+    if "access_token" not in tok and isinstance(tok.get("data"), dict):
+        tok = tok["data"]
+    access_token = tok.get("access_token", "")
+    if not access_token:
+        reason = tok.get("error_description") or tok.get("error") or "no_token"
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?tiktok=error&reason={reason}",
+            status_code=302,
+        )
+
+    # 2. Fetch basic profile (best-effort).
+    profile: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                TIKTOK_USERINFO_URL,
+                params={"fields": "open_id,union_id,display_name,avatar_url"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            profile = (r.json().get("data") or {}).get("user", {}) if r.is_success else {}
+    except Exception as e:
+        print(f"[tiktok] user info fetch failed (non-fatal): {e}")
+
+    # 3. Persist.
+    expires_in = int(tok.get("expires_in") or 0)
+    try:
+        await db.save_integration(store_id, "tiktok", {
+            "open_id":            tok.get("open_id", "") or profile.get("open_id", ""),
+            "access_token":       access_token,
+            "refresh_token":      tok.get("refresh_token", ""),
+            "scope":              tok.get("scope", ""),
+            "expires_at":         int(time.time()) + expires_in if expires_in else 0,
+            "refresh_expires_at": int(time.time()) + int(tok.get("refresh_expires_in") or 0),
+            "display_name":       profile.get("display_name", ""),
+            "avatar_url":         profile.get("avatar_url", ""),
+        })
+        print(f"[integrations] ✅ TikTok connected: store={store_id} open_id={tok.get('open_id','')[:8]}…")
+    except Exception as e:
+        print(f"[integrations] ❌ TikTok save_integration failed: {e}")
+        return RedirectResponse(
+            f"{BASE_URL}/store/{store_id}/integrations?tiktok=error&reason=db_save_failed",
+            status_code=302,
+        )
+
+    return RedirectResponse(
+        f"{BASE_URL}/store/{store_id}/integrations?tiktok=connected",
+        status_code=302,
+    )
+
+
+@router.delete("/admin/{store_id}/integrations/tiktok")
+async def tiktok_disconnect(store_id: str, request: Request):
+    require_store_owner(request, store_id)
+    await db.remove_integration(store_id, "tiktok")
+    print(f"[integrations] 🔌 TikTok disconnected: store={store_id}")
+    return {"message": "تم فصل TikTok"}

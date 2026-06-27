@@ -727,6 +727,12 @@ export const api = {
   zidSync: (storeId: string) =>
     req<{ message: string; products: number; errors: string[] }>('POST', `/admin/${storeId}/integrations/zid/sync`),
 
+  tiktokInstall: (storeId: string) =>
+    get<{ install_url: string }>(`/admin/${storeId}/integrations/tiktok/install`),
+
+  tiktokDisconnect: (storeId: string) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/tiktok`),
+
   // ── Channels (messaging surfaces the AI auto-replies on) ───────────────────
   listChannels: (storeId: string) =>
     get<{ channels: Record<string, ChannelData> }>(`/admin/${storeId}/channels`),
