@@ -153,9 +153,10 @@ export default function Settings({ storeId }: Props) {
   const fbRef = useRef(false)
 
   /* Instagram — manual connection */
-  const [igIdInput, setIgIdInput]     = useState('')
-  const [igSaving, setIgSaving]       = useState(false)
-  const [igMsg, setIgMsg]             = useState('')
+  const [igIdInput, setIgIdInput]         = useState('')
+  const [igTokenInput, setIgTokenInput]   = useState('')
+  const [igSaving, setIgSaving]           = useState(false)
+  const [igMsg, setIgMsg]                 = useState('')
 
   /* Notifications */
   const DEF_NOTIF: NotificationSettings = {
@@ -516,12 +517,13 @@ export default function Settings({ storeId }: Props) {
 
   // ── Instagram manual connect ──
   async function saveInstagram() {
-    const id = igIdInput.trim()
+    const id    = igIdInput.trim()
+    const token = igTokenInput.trim()
     if (!id) { setIgMsg('❌ أدخل معرّف حساب إنستقرام'); return }
     setIgSaving(true); setIgMsg('')
     try {
-      const r = await api.metaSetInstagram(storeId, { ig_id: id })
-      setIgMsg(r.message || '✅ تم الربط'); setIgIdInput(''); load()
+      const r = await api.metaSetInstagram(storeId, { ig_id: id, ig_access_token: token || undefined })
+      setIgMsg(r.message || '✅ تم الربط'); setIgIdInput(''); setIgTokenInput(''); load()
     } catch (e: unknown) { setIgMsg(e instanceof Error ? e.message : '❌ فشل الحفظ') }
     finally { setIgSaving(false) }
   }
@@ -1330,26 +1332,66 @@ export default function Settings({ storeId }: Props) {
                   <p className="text-sm font-bold text-emerald-600">
                     ✅ مفعّل{cfg.ig_username ? ` (@${cfg.ig_username})` : ''}
                   </p>
-                  <p className="text-[11px] text-default-400 font-mono dir-ltr">{cfg.ig_id}</p>
-                  <Button size="sm" color="danger" variant="flat" onPress={disconnectInstagram} className="mt-1">
-                    فصل إنستقرام
-                  </Button>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-default-500">
+                    <span className="font-mono">{cfg.ig_id}</span>
+                    <span>•</span>
+                    <span>توكن الإرسال: {cfg.ig_token_set ? '✓ محفوظ' : '⚠️ غير محفوظ (لن يرد البوت)'}</span>
+                  </div>
+                  {/* Allow updating the token without full disconnect */}
+                  <div className="pt-1 space-y-1.5">
+                    <p className="text-[11px] text-default-400">تحديث رمز الوصول:</p>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      placeholder="EAAB... (رمز وصول إنستقرام)"
+                      value={igTokenInput}
+                      onChange={e => setIgTokenInput(e.target.value)}
+                      className="w-full rounded-lg border border-divider bg-content1 px-3 py-2 text-sm font-mono text-foreground placeholder:text-default-400 focus:outline-none focus:border-primary"
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" color="primary" variant="flat" isLoading={igSaving}
+                        onPress={() => { setIgIdInput(cfg.ig_id || ''); saveInstagram() }}
+                        className="font-bold">
+                        تحديث التوكن
+                      </Button>
+                      <Button size="sm" color="danger" variant="flat" onPress={disconnectInstagram}>
+                        فصل إنستقرام
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <input
-                    type="text"
-                    dir="ltr"
-                    placeholder="17841415872706624"
-                    value={igIdInput}
-                    onChange={e => setIgIdInput(e.target.value)}
-                    className="w-full rounded-lg border border-divider bg-content1 px-3 py-2 text-sm font-mono text-foreground placeholder:text-default-400 focus:outline-none focus:border-primary"
-                  />
-                  <p className="text-[11px] text-default-400">
-                    ابحث عن المعرّف في: Meta Business Suite → الإعدادات → الحسابات → Instagram
-                  </p>
+                  <div>
+                    <p className="text-xs text-default-500 mb-1">معرّف حساب إنستقرام Business <span className="text-danger">*</span></p>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      placeholder="17841415872706624"
+                      value={igIdInput}
+                      onChange={e => setIgIdInput(e.target.value)}
+                      className="w-full rounded-lg border border-divider bg-content1 px-3 py-2 text-sm font-mono text-foreground placeholder:text-default-400 focus:outline-none focus:border-primary"
+                    />
+                    <p className="text-[11px] text-default-400 mt-1">
+                      Meta Developers → تطبيق إنستقرام → Instagram → معرّف حساب Instagram
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-default-500 mb-1">رمز الوصول (Access Token) <span className="text-danger">*</span></p>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      placeholder="EAAB..."
+                      value={igTokenInput}
+                      onChange={e => setIgTokenInput(e.target.value)}
+                      className="w-full rounded-lg border border-divider bg-content1 px-3 py-2 text-sm font-mono text-foreground placeholder:text-default-400 focus:outline-none focus:border-primary"
+                    />
+                    <p className="text-[11px] text-default-400 mt-1">
+                      Meta Developers → تطبيق إنستقرام → Instagram → إنشاء رمز
+                    </p>
+                  </div>
                   <Button color="primary" size="sm" isLoading={igSaving} onPress={saveInstagram} className="font-bold">
-                    حفظ
+                    ربط إنستقرام
                   </Button>
                 </div>
               )}

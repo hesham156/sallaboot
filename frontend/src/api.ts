@@ -310,8 +310,8 @@ export const api = {
       `/admin/${storeId}/meta/connect-pages`, body),
   metaDisconnectPages: (storeId: string) =>
     del<{ status: string; message: string }>(`/admin/${storeId}/meta/connect-pages`),
-  metaSetInstagram: (storeId: string, body: { ig_id: string }) =>
-    put<{ status?: string; ig_id?: string; message?: string }>(`/admin/${storeId}/meta/instagram`, body),
+  metaSetInstagram: (storeId: string, body: { ig_id: string; ig_access_token?: string }) =>
+    put<{ status?: string; ig_id?: string; ig_token_set?: boolean; message?: string }>(`/admin/${storeId}/meta/instagram`, body),
   metaDisconnectInstagram: (storeId: string) =>
     del<{ status: string; message: string }>(`/admin/${storeId}/meta/instagram`),
 
@@ -1121,6 +1121,7 @@ export interface AIConfig {
   page_token_set?: boolean
   ig_id?: string
   ig_username?: string
+  ig_token_set?: boolean
   // Telegram channel
   telegram_enabled?: boolean
   telegram_bot_username?: string
