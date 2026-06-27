@@ -151,6 +151,26 @@ def test_encrypt_fields_does_not_mutate_input(crypto_mod):
     assert plain["groq_api_key"] == "sk-test", "input dict was mutated!"
 
 
+def test_integration_secret_fields_round_trip(crypto_mod):
+    """OAuth tokens in the integrations column (Shopify/Zid/TikTok) encrypt at
+    rest and decrypt back; non-secret fields (shop, open_id) are untouched."""
+    plain = {"access_token": "tok-123", "refresh_token": "ref-456",
+             "shop": "x.myshopify.com", "open_id": "abc"}
+    enc = crypto_mod.encrypt_fields(plain, crypto_mod.INTEGRATION_SECRET_FIELDS)
+    assert enc["access_token"].startswith("enc:v1:")
+    assert enc["refresh_token"].startswith("enc:v1:")
+    assert enc["shop"] == "x.myshopify.com" and enc["open_id"] == "abc"
+    back = crypto_mod.decrypt_fields(enc, crypto_mod.INTEGRATION_SECRET_FIELDS)
+    assert back["access_token"] == "tok-123" and back["refresh_token"] == "ref-456"
+
+
+def test_integration_decrypt_passes_through_legacy_plaintext(crypto_mod):
+    """Existing rows stored before encryption must still read correctly."""
+    legacy = {"access_token": "plain-tok", "shop": "x.myshopify.com"}
+    out = crypto_mod.decrypt_fields(legacy, crypto_mod.INTEGRATION_SECRET_FIELDS)
+    assert out["access_token"] == "plain-tok"
+
+
 def test_encrypt_fields_skips_missing_and_empty(crypto_mod):
     plain = {"groq_api_key": "", "anthropic_api_key": None}
     out = crypto_mod.encrypt_fields(plain, crypto_mod.AI_CONFIG_SECRET_FIELDS)

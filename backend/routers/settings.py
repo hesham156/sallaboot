@@ -449,6 +449,10 @@ async def meta_connect_pages(store_id: str, request: Request):
     import httpx as _httpx
     import messenger as _ms
 
+    # Authz: the `/admin/{store}/meta/*` prefix is gated by middleware
+    # (_PROTECTED_RE) — it requires a valid token, binds it to this store_id
+    # (no cross-store IDOR), and restricts to owner/manager (_MANAGER_ONLY_RE).
+    # So no explicit require_store_owner() call is needed here.
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
 
@@ -472,7 +476,10 @@ async def meta_connect_pages(store_id: str, request: Request):
             "fb_exchange_token": user_token,
         })
         if resp.status_code != 200:
-            raise HTTPException(400, f"فشل تبادل التوكن: {resp.text}")
+            # Log the raw Graph error server-side; don't echo it to the client
+            # (it can carry app/token internals). Generic message for the UI.
+            print(f"[meta] token exchange failed {resp.status_code}: {resp.text[:300]}")
+            raise HTTPException(400, "فشل تبادل التوكن مع Meta — أعد المحاولة ومنح الصلاحيات كاملة.")
         long_user_token = resp.json().get("access_token", "") or user_token
 
     pages = await _ms.list_pages(long_user_token)
