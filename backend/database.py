@@ -4869,6 +4869,22 @@ async def find_store_by_shopify_shop(shop: str) -> str | None:
         return None
 
 
+async def find_store_by_tiktok_open_id(open_id: str) -> str | None:
+    """Return the store_id whose TikTok integration owns this open_id, or None."""
+    if not (_pool and open_id):
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT store_id FROM stores WHERE integrations->'tiktok'->>'open_id' = $1 LIMIT 1",
+                open_id,
+            )
+            return row["store_id"] if row else None
+    except Exception as e:
+        print(f"[db] find_store_by_tiktok_open_id error: {e}")
+        return None
+
+
 async def get_integrations(store_id: str) -> dict:
     """
     Return a merged integrations dict for the store.
