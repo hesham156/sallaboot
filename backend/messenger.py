@@ -194,10 +194,7 @@ async def list_pages(user_token: str) -> list[dict]:
 
 # Webhook fields covering both Messenger and Instagram message events delivered
 # through the connected Page subscription.
-_PAGE_SUBSCRIBE_FIELDS = (
-    "messages,messaging_postbacks,messaging_optins,message_reactions,"
-    "instagram_manage_messages"   # enables Instagram DM delivery when an IG account is linked to the Page
-)
+_PAGE_SUBSCRIBE_FIELDS = "messages,messaging_postbacks,messaging_optins,message_reactions"
 
 
 async def subscribe_page(page_token: str, page_id: str) -> bool:
