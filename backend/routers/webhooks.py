@@ -1550,7 +1550,13 @@ async def meta_webhook(request: Request):
 
     # ── Messenger / Instagram ────────────────────────────────────────────
     if obj in ("page", "instagram"):
-        for msg in ms.extract_messages(payload):
+        _extracted = ms.extract_messages(payload)
+        _comments  = cm.extract_comments(payload)
+        # DEBUG — when an instagram event yields neither a DM nor a comment,
+        # dump the raw payload so we can see its exact shape.
+        if obj == "instagram" and not _extracted and not _comments:
+            print(f"[instagram] ⚠️ webhook yielded 0 messages + 0 comments. RAW={body[:800]!r}")
+        for msg in _extracted:
             msg_id  = (msg.get("msg_id") or "").strip()
             channel = msg.get("channel", "messenger")
             if not db.available():
@@ -1571,7 +1577,7 @@ async def meta_webhook(request: Request):
         # Public comments arrive on the SAME page/instagram object but under
         # `changes[]` (feed/comments) rather than `messaging[]`. Queue them on a
         # distinct source so the drainer routes them to handle_comment_event.
-        for c in cm.extract_comments(payload):
+        for c in _comments:
             cid      = (c.get("comment_id") or "").strip()
             platform = c.get("platform", "facebook")
             source   = "ig_comment" if platform == "instagram" else "fb_comment"
