@@ -551,29 +551,30 @@ async def meta_disconnect_pages(store_id: str, request: Request):
     return {"status": "disconnected", "message": "تم فصل ماسنجر"}
 
 
-async def _ig_subscribe_messages(ig_access_token: str) -> bool:
+async def _ig_validate_token(ig_access_token: str) -> tuple[bool, str]:
     """
-    Subscribe the Instagram account (identified by the access token) to receive
-    message webhook events.  Must be called once per token/account.
-
-    POST /me/subscribed_apps?subscribed_fields=messages
+    Validate an Instagram-login access token by calling graph.instagram.com/me.
+    Returns (ok, detail) where detail is the IG username on success, or a short
+    human-readable error on failure. The IG-login messaging API ONLY accepts
+    `IGAA…` tokens against graph.instagram.com — Facebook `EAA…` tokens and
+    expired/truncated tokens fail here with "Cannot parse access token".
     """
     import httpx as _httpx
     graph = os.getenv("META_GRAPH_VERSION", "v21.0")
     try:
         async with _httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(
-                f"https://graph.facebook.com/{graph}/me/subscribed_apps",
-                headers={"Authorization": f"Bearer {ig_access_token}"},
-                params={"subscribed_fields": "messages"},
+            r = await client.get(
+                f"https://graph.instagram.com/{graph}/me",
+                params={"fields": "user_id,username", "access_token": ig_access_token},
             )
-            ok = r.status_code < 400 and r.json().get("success", False)
-            if not ok:
-                print(f"[instagram] subscribed_apps {r.status_code}: {r.text[:200]}")
-            return ok
+            if r.status_code < 400:
+                return True, (r.json().get("username") or "").strip()
+            err = (r.json().get("error", {}) or {}).get("message", r.text[:120])
+            print(f"[instagram] token validation {r.status_code}: {err}")
+            return False, err
     except Exception as exc:
-        print(f"[instagram] subscribed_apps error: {exc}")
-        return False
+        print(f"[instagram] token validation error: {exc}")
+        return False, str(exc)[:120]
 
 
 @router.put("/admin/{store_id}/meta/instagram")
@@ -590,31 +591,38 @@ async def meta_set_instagram_manual(store_id: str, request: Request):
         raise HTTPException(400, "ig_id يجب أن يكون رقماً — ابحث عنه في Meta Business Suite أو إعدادات تطبيق فيسبوك")
 
     config = dict(sm.get_ai_config(store_id))
+
+    # Validate a newly-supplied token BEFORE saving so a bad token (expired,
+    # truncated, or a Facebook EAA token) is rejected with a clear message
+    # instead of silently failing on every reply.
+    token_valid = None  # None = not checked this request
+    ig_username = ""
+    if ig_access_token:
+        token_valid, detail = await _ig_validate_token(ig_access_token)
+        if not token_valid:
+            raise HTTPException(400,
+                f"رمز الوصول غير صالح: {detail} — تأكد أنه رمز إنستقرام (يبدأ بـ IGAA) "
+                f"وغير منتهي. أعد إنشاءه من تطبيق إنستقرام في Meta Developers.")
+        ig_username = detail
+        config["ig_access_token"] = ig_access_token
+
     config["ig_id"]             = ig_id
     config["instagram_enabled"] = True
+    if ig_username:
+        config["ig_username"] = ig_username
 
-    subscribed = False
-    token_to_use = ig_access_token or (config.get("ig_access_token") or "").strip()
-    if ig_access_token:
-        config["ig_access_token"] = ig_access_token
-    if token_to_use:
-        # Subscribe this IG account to receive DM webhooks (account-level subscription).
-        # Without this call Meta delivers comments but NOT direct messages.
-        subscribed = await _ig_subscribe_messages(token_to_use)
-        print(f"[instagram] messages subscription {'✅' if subscribed else '⚠️ failed'} for ig_id={ig_id}")
-
+    token_to_use = (config.get("ig_access_token") or "").strip()
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
     await audit(request, "meta_instagram_manual_connect", target_store=store_id,
-                details={"ig_id": ig_id, "token_set": bool(token_to_use), "subscribed": subscribed})
+                details={"ig_id": ig_id, "token_set": bool(token_to_use),
+                         "token_valid": token_valid})
     msg = f"✅ تم ربط إنستقرام (معرّف: {ig_id})"
-    if token_to_use and not subscribed:
-        msg += " — ⚠️ تعذّر الاشتراك في رسائل DM تلقائياً، تحقق من صلاحيات التوكن"
-    elif subscribed:
-        msg += " واشتراك رسائل DM ✓"
+    if token_valid:
+        msg += f" — رمز الوصول صالح ✓{(' (@' + ig_username + ')') if ig_username else ''}"
     return {"status": "connected", "ig_id": ig_id,
             "ig_token_set": bool(token_to_use),
-            "subscribed": subscribed,
+            "ig_username": ig_username,
             "message": msg}
 
 
