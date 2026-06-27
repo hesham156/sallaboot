@@ -127,6 +127,8 @@ async def test_resolve_forward_honours_ttl(monkeypatch):
     async def _get(key, default=None):
         return {"link_forward:fresh": fresh, "link_forward:stale": stale}.get(key)
 
-    monkeypatch.setattr(db, "get_app_setting", _get)
+    # resolve_account_forward + get_app_setting both live in the database.linking
+    # submodule after the package split; patch the dependency where it's looked up.
+    monkeypatch.setattr(db.linking, "get_app_setting", _get)
     assert await db.resolve_account_forward("fresh") == "merchant_1"
     assert await db.resolve_account_forward("stale") is None
