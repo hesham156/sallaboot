@@ -41,6 +41,36 @@ async def get_store_info_endpoint(store_id: str):
     return found
 
 
+# ── WhatsApp display-number helpers ─────────────────────────────────────────
+
+async def _enrich_whatsapp_display(store_id: str) -> list:
+    """Return the store's WhatsApp numbers, fetching + persisting any missing
+    human-readable display number (+966…) from Meta. One-time per number."""
+    import whatsapp as _wa
+    nums = sm.get_whatsapp_numbers(store_id)
+    for n in nums:
+        token = str(n.get("token", "")).strip()
+        if token and not str(n.get("display_number", "")).strip():
+            info = await _wa.get_phone_number_info(token, n.get("phone_id", ""))
+            disp = info.get("display_number", "")
+            if disp:
+                await sm.upsert_whatsapp_number(store_id, {
+                    "phone_id":       n.get("phone_id", ""),
+                    "display_number": disp,
+                    "label":          n.get("label") or info.get("verified_name", ""),
+                })
+    return sm.get_whatsapp_numbers(store_id)
+
+
+def _wa_primary_display(numbers: list) -> str:
+    """Display number of the primary (first enabled-with-token) number, else ''."""
+    primary = next(
+        (n for n in numbers if n.get("enabled") and str(n.get("token", "")).strip()),
+        numbers[0] if numbers else None,
+    )
+    return str((primary or {}).get("display_number", "")).strip()
+
+
 # ── AI config ─────────────────────────────────────────────────────────────────
 
 @router.get("/admin/{store_id}/settings/ai")
@@ -72,6 +102,10 @@ async def get_ai_settings(store_id: str):
     excluded_categories = [str(c) for c in (cfg.get("excluded_categories") or [])]
     import whatsapp as _wa
     base = os.getenv("BASE_URL", "").rstrip("/")
+    # Backfill display numbers (+966…) for any connected number missing one, so
+    # the UI shows the real number instead of the Meta Phone-ID. One-time per
+    # number (persisted), then this is a no-op.
+    _wa_numbers = await _enrich_whatsapp_display(store_id)
     return {
         "groq_api_key":      "••••" if groq_set      else "",
         "anthropic_api_key": "••••" if anthropic_set else "",
@@ -87,12 +121,15 @@ async def get_ai_settings(store_id: str):
         "whatsapp_phone_id":   cfg.get("whatsapp_phone_id", ""),
         "whatsapp_token":      "••••" if cfg.get("whatsapp_token") else "",
         "whatsapp_waba_id":    cfg.get("whatsapp_waba_id", ""),
+        # The human-readable primary number (+966…) for the inbox channel label.
+        "whatsapp_display_number": _wa_primary_display(_wa_numbers),
         # All connected WhatsApp numbers (a store can link several). Tokens masked.
         "whatsapp_numbers":    [
             {"phone_id": n.get("phone_id", ""), "waba_id": n.get("waba_id", ""),
+             "display_number": n.get("display_number", ""),
              "label": n.get("label", ""), "enabled": bool(n.get("enabled", True)),
              "has_token": bool(str(n.get("token", "")).strip())}
-            for n in sm.get_whatsapp_numbers(store_id)
+            for n in _wa_numbers
         ],
         "whatsapp_webhook":    (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
         "whatsapp_verify_token": _wa.VERIFY_TOKEN,
@@ -363,13 +400,16 @@ async def whatsapp_connect(store_id: str, request: Request):
 
     # 5. Save: ADD this number to the store's WhatsApp numbers — a store can
     #    connect SEVERAL (sales + support + …). upsert keeps the legacy flat
-    #    fields synced to the primary and persists to the DB.
+    #    fields synced to the primary and persists to the DB. Fetch the
+    #    human-readable display number so the UI shows +966… not the Phone ID.
+    _info = await _wa.get_phone_number_info(long_token, chosen_phone_id)
     await sm.upsert_whatsapp_number(store_id, {
-        "phone_id": chosen_phone_id,
-        "token":    long_token,
-        "waba_id":  chosen_waba_id,
-        "label":    "",
-        "enabled":  True,
+        "phone_id":       chosen_phone_id,
+        "token":          long_token,
+        "waba_id":        chosen_waba_id,
+        "display_number": _info.get("display_number", ""),
+        "label":          _info.get("verified_name", ""),
+        "enabled":        True,
     })
 
     # Enforce phone-number uniqueness: detach this number from any OTHER store
@@ -573,9 +613,10 @@ async def list_whatsapp_numbers(store_id: str, request: Request):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     return {"numbers": [
         {"phone_id": n.get("phone_id", ""), "waba_id": n.get("waba_id", ""),
+         "display_number": n.get("display_number", ""),
          "label": n.get("label", ""), "enabled": bool(n.get("enabled", True)),
          "has_token": bool(str(n.get("token", "")).strip())}
-        for n in sm.get_whatsapp_numbers(store_id)
+        for n in await _enrich_whatsapp_display(store_id)
     ]}
 
 
@@ -593,9 +634,12 @@ async def add_whatsapp_number(store_id: str, request: Request):
     label    = str(body.get("label", "")).strip()
     if not phone_id or not token:
         raise HTTPException(400, "Phone Number ID والـ Access Token مطلوبان")
+    import whatsapp as _wa
+    _info = await _wa.get_phone_number_info(token, phone_id)
     await sm.upsert_whatsapp_number(store_id, {
         "phone_id": phone_id, "token": token, "waba_id": waba_id,
-        "label": label, "enabled": True,
+        "display_number": _info.get("display_number", ""),
+        "label": label or _info.get("verified_name", ""), "enabled": True,
     })
     # Global uniqueness — detach this number from any OTHER store that holds it.
     released = [s for s in await sm.claim_whatsapp_phone_id(phone_id, store_id) if s != str(store_id)]

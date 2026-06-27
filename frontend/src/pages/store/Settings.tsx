@@ -128,7 +128,7 @@ export default function Settings({ storeId }: Props) {
   const [waToken, setWaToken]       = useState('')
   const [waSaving, setWaSaving]     = useState(false)
   const [waMsg, setWaMsg]           = useState('')
-  type WaNumber = { phone_id: string; waba_id?: string; label?: string; enabled: boolean; has_token?: boolean }
+  type WaNumber = { phone_id: string; waba_id?: string; display_number?: string; label?: string; enabled: boolean; has_token?: boolean }
   const [waNumbers, setWaNumbers]   = useState<WaNumber[]>([])
   const [waRemoving, setWaRemoving] = useState('')
   const [waConnecting, setWaConnecting] = useState(false)
@@ -1072,8 +1072,13 @@ export default function Settings({ storeId }: Props) {
                      ).map(n => (
                       <div key={n.phone_id} className="flex items-center justify-between gap-2 bg-content2/60 rounded-xl px-3 py-2">
                         <div className="min-w-0">
-                          <p className="text-xs font-mono text-foreground truncate">{n.label || n.phone_id}</p>
-                          <p className="text-[10px] text-default-400 font-mono truncate">Phone ID: {n.phone_id}</p>
+                          <p className="text-sm font-bold text-foreground truncate" dir="ltr">
+                            {n.display_number || n.label || n.phone_id}
+                          </p>
+                          {n.label && n.display_number && (
+                            <p className="text-[10px] text-default-500 truncate">{n.label}</p>
+                          )}
+                          <p className="text-[10px] text-default-400 font-mono truncate">ID: {n.phone_id}</p>
                         </div>
                         <Button size="sm" variant="flat" color="danger"
                           isLoading={waRemoving === n.phone_id}
