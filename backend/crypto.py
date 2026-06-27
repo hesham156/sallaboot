@@ -184,6 +184,15 @@ AI_CONFIG_SECRET_FIELDS = (
     "page_token",        # Facebook Page access token (Messenger + Instagram)
     "ig_access_token",   # Instagram-login long-lived (~60d) token — same blast
                          # radius as page_token, must be encrypted at rest too.
+
+)
+
+# Secret fields inside each per-platform entry of the stores.integrations JSONB
+# column (Shopify / Zid / TikTok OAuth tokens). Encrypted on save_integration,
+# decrypted on get_integrations + list_stores_with_integration.
+INTEGRATION_SECRET_FIELDS = (
+    "access_token",
+    "refresh_token",
 )
 
 

@@ -2580,7 +2580,10 @@ async def list_stores_with_integration(platform: str) -> list:
                     cfg = json.loads(cfg)
                 except Exception:
                     cfg = {}
-            out.append((row["store_id"], cfg or {}))
+            # Decrypt OAuth secrets so background sweeps get usable tokens
+            # (mirror of save_integration; legacy plaintext passes through).
+            cfg = _crypto.decrypt_fields(cfg or {}, _crypto.INTEGRATION_SECRET_FIELDS)
+            out.append((row["store_id"], cfg))
         return out
     except Exception as e:
         print(f"[db] list_stores_with_integration({platform!r}) error: {e}")
@@ -4903,6 +4906,11 @@ async def get_integrations(store_id: str) -> dict:
                 print(f"[db] get_integrations: no row for store_id='{store_id}'")
                 return {}
             result = _coerce_jsonb(row["integrations"])
+            # Decrypt each platform entry's OAuth secrets (mirror of the encrypt
+            # in save_integration). Legacy plaintext rows pass through unchanged.
+            for _plat, _cfg in list(result.items()):
+                if isinstance(_cfg, dict):
+                    result[_plat] = _crypto.decrypt_fields(_cfg, _crypto.INTEGRATION_SECRET_FIELDS)
             tokens = _coerce_jsonb(row["tokens"])
             if tokens.get("access_token"):
                 result.setdefault("salla", {"connected": True})
@@ -4914,9 +4922,14 @@ async def get_integrations(store_id: str) -> dict:
 
 
 async def save_integration(store_id: str, platform: str, data: dict) -> None:
-    """Upsert a single platform entry inside stores.integrations."""
+    """Upsert a single platform entry inside stores.integrations.
+
+    OAuth secrets (access_token / refresh_token) are encrypted at rest; the
+    matching decrypt happens in get_integrations + list_stores_with_integration.
+    """
     if not _pool:
         raise RuntimeError("Database pool not initialised")
+    enc_data = _crypto.encrypt_fields(data, _crypto.INTEGRATION_SECRET_FIELDS)
     async with _pool.acquire() as conn:
         # Pass {platform: data} as a Python dict — the registered JSONB codec
         # handles serialisation. Do NOT use json.dumps() + ::jsonb cast here;
@@ -4929,7 +4942,7 @@ async def save_integration(store_id: str, platform: str, data: dict) -> None:
              WHERE store_id = $1
             """,
             store_id,
-            {platform: data},
+            {platform: enc_data},
         )
         rows_affected = int((status or "UPDATE 0").split()[-1])
         if rows_affected == 0:
