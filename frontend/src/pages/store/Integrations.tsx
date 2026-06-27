@@ -43,6 +43,7 @@ const INTEGRATIONS_DEF: Omit<IntegrationDef, 'status' | 'data'>[] = [
   { id: 'shopify',     name: 'شوبيفاي',    nameEn: 'Shopify',     category: 'ecommerce', logo: <BrandLogo domain="shopify.com"     fallbackColor="#96BF48" fallbackLabel="S"   />, description: 'اربط متجر شوبيفاي لإدارة الطلبات والمنتجات من لوحة تحكم واحدة.' },
   { id: 'zid',         name: 'زد',         nameEn: 'Zid',         category: 'ecommerce', logo: <BrandLogo domain="zid.sa"          fallbackColor="#1C3553" fallbackLabel="ز"   />, description: 'اربط متجرك على منصة زد — الطلبات والمنتجات والعملاء تظهر في المحادثات.' },
   { id: 'woocommerce', name: 'ووكومرس',    nameEn: 'WooCommerce', category: 'ecommerce', logo: <BrandLogo domain="woocommerce.com" fallbackColor="#7F54B3" fallbackLabel="Woo" />, description: 'ربط موقع ووردبريس/ووكومرس لمتابعة الطلبات.', comingSoon: true },
+  { id: 'tiktok',      name: 'تيك توك',     nameEn: 'TikTok',      category: 'social',    logo: <BrandLogo domain="tiktok.com"     fallbackColor="#000000" fallbackLabel="TT"  />, description: 'اربط حساب تيك توك (الأساس: تسجيل الدخول وعرض الحساب). الرد على الرسائل والتعليقات غير متاح بعد عبر واجهة تيك توك الرسمية.' },
   { id: 'myfatoorah',  name: 'ماي فاتوره', nameEn: 'MyFatoorah',  category: 'payment',   logo: <BrandLogo domain="myfatoorah.com" fallbackColor="#00B0A6" fallbackLabel="MF"  />, description: 'إرسال روابط دفع مباشرة للعميل داخل المحادثة.', comingSoon: true },
   { id: 'tabby',       name: 'تابي',        nameEn: 'Tabby',       category: 'payment',   logo: <BrandLogo domain="tabby.ai"       fallbackColor="#3DBFA3" fallbackLabel="tab" />, description: 'عرض خيار الدفع بالتقسيط عبر تابي.', comingSoon: true },
   { id: 'tamara',      name: 'تمارا',       nameEn: 'Tamara',      category: 'payment',   logo: <BrandLogo domain="tamara.co"      fallbackColor="#EB4C60" fallbackLabel="تم"  />, description: 'الشراء الآن والدفع لاحقاً عبر تمارا.', comingSoon: true },
@@ -246,6 +247,7 @@ export default function Integrations({ storeId }: Props) {
   const [installError, setInstallError] = useState('')
   const [syncing, setSyncing]           = useState<string | null>(null)
   const [connectingZid, setConnectingZid] = useState(false)
+  const [connectingTiktok, setConnectingTiktok] = useState(false)
 
   // Salla connect modal — Salla links ONLY via the App-Settings API key.
   const [sallaModal, setSallaModal]     = useState(false)
@@ -291,6 +293,21 @@ export default function Integrations({ storeId }: Props) {
       showToast('فشل الربط مع زد — حاول مرة أخرى', 'error')
       const next = new URLSearchParams(searchParams)
       next.delete('zid')
+      next.delete('reason')
+      setSearchParams(next, { replace: true })
+    }
+
+    const tiktokParam = searchParams.get('tiktok')
+    if (tiktokParam === 'connected') {
+      showToast('تم الربط مع تيك توك بنجاح! 🎉', 'success')
+      const next = new URLSearchParams(searchParams)
+      next.delete('tiktok')
+      setSearchParams(next, { replace: true })
+    } else if (tiktokParam === 'error') {
+      const reason = searchParams.get('reason')
+      showToast(`فشل الربط مع تيك توك${reason ? ` (${reason})` : ''} — حاول مرة أخرى`, 'error')
+      const next = new URLSearchParams(searchParams)
+      next.delete('tiktok')
       next.delete('reason')
       setSearchParams(next, { replace: true })
     }
@@ -370,6 +387,7 @@ export default function Integrations({ storeId }: Props) {
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
     else if (id === 'salla') { setSallaModal(true) }   // API-key linking is the only Salla method
     else if (id === 'zid') { handleZidConnect() }
+    else if (id === 'tiktok') { handleTiktokConnect() }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
 
@@ -401,6 +419,17 @@ export default function Integrations({ storeId }: Props) {
     }
   }
 
+  async function handleTiktokConnect() {
+    setConnectingTiktok(true)
+    try {
+      const { install_url } = await api.tiktokInstall(storeId)
+      window.location.href = install_url
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'تعذّر بدء عملية الربط مع تيك توك', 'error')
+      setConnectingTiktok(false)
+    }
+  }
+
   const SYNCABLE_IDS = ['shopify', 'zid']
 
   async function handleSync(id: string) {
@@ -429,6 +458,7 @@ export default function Integrations({ storeId }: Props) {
       if (disconnectTarget === 'shopify') await api.shopifyDisconnect(storeId)
       else if (disconnectTarget === 'salla') await api.sallaDisconnect(storeId)
       else if (disconnectTarget === 'zid') await api.zidDisconnect(storeId)
+      else if (disconnectTarget === 'tiktok') await api.tiktokDisconnect(storeId)
       await loadIntegrations()
       showToast('تم قطع الاتصال بنجاح', 'success')
     } catch (e) {
@@ -443,6 +473,9 @@ export default function Integrations({ storeId }: Props) {
     { id: 'payment', label: 'بوابات الدفع',
       icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
       color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+    { id: 'social', label: 'منصات التواصل',
+      icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 4z',
+      color: 'text-pink-400', bg: 'bg-pink-500/10' },
   ]
 
   const connectedCount = integrations.filter(i => i.status === 'connected').length
@@ -503,7 +536,7 @@ export default function Integrations({ storeId }: Props) {
                         onConnect={handleConnect}
                         onDisconnect={handleDisconnect}
                         onSync={SYNCABLE_IDS.includes(integration.id) ? handleSync : undefined}
-                        connecting={integration.id === 'zid' && connectingZid}
+                        connecting={(integration.id === 'zid' && connectingZid) || (integration.id === 'tiktok' && connectingTiktok)}
                       />
                     ))}
                   </div>
