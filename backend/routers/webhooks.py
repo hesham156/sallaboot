@@ -91,7 +91,7 @@ def _verify_signature(body: bytes, headers) -> tuple:
     attacker-controlled access_token into any merchant_id. Hard-fail
     is now the default; WEBHOOK_ALLOW_UNSIGNED=true is the dev override.
     """
-    secret = os.getenv("SALLA_WEBHOOK_SECRET", "")
+    secret = os.getenv("SALLA_WEBHOOK_SECRET", "").strip()   # tolerate stray whitespace in the env value
     if not secret:
         log.warning("webhook_no_secret_dev_mode")
         return True, "no_secret_configured"
@@ -1461,22 +1461,36 @@ def _verify_meta_signature(body: bytes, headers) -> tuple[bool, str]:
     # separate WhatsApp Business / BSP app (WHATSAPP_APP_SECRET). They sign with
     # their own app secret, so we accept a signature that matches ANY configured
     # secret. (Set WHATSAPP_APP_SECRET only if WhatsApp is on a different app.)
+    # .strip() each secret: a stray trailing newline/space in the Railway env
+    # value (an extremely common copy-paste mistake) would otherwise be folded
+    # into the HMAC key and make EVERY signature mismatch even when the secret is
+    # otherwise correct.
     secrets = [s for s in (
-        os.getenv("META_APP_SECRET", ""),
-        os.getenv("WHATSAPP_APP_SECRET", ""),
+        os.getenv("META_APP_SECRET", "").strip(),
+        os.getenv("WHATSAPP_APP_SECRET", "").strip(),
     ) if s]
     if not secrets:
         log.warning("meta_webhook_no_secret_dev_mode")
         return True, "no_secret_configured"
-    sig = headers.get("X-Hub-Signature-256", "")
+    sig = (headers.get("X-Hub-Signature-256", "") or "").strip()
     if not sig:
         log.warning("meta_webhook_signature_missing")
         return False, "signature_required_but_absent"
+    expected_prefix = ""
     for secret in secrets:
         expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        expected_prefix = expected_prefix or expected[:20]
         if hmac.compare_digest(expected, sig):
             return True, "signature_ok"
-    log.warning("meta_webhook_signature_mismatch", extra={"got_prefix": sig[:23]})
+    # Diagnostic (never leaks the secret): the got/expected prefixes + key length
+    # make a config mismatch obvious. #1 cause: META_APP_SECRET doesn't match the
+    # Meta app's App Secret (Meta › App › Settings › Basic). If WhatsApp is on a
+    # SEPARATE Meta/BSP app, set WHATSAPP_APP_SECRET to that app's secret too.
+    log.warning("meta_webhook_signature_mismatch", extra={
+        "got_prefix":      sig[:20],
+        "expected_prefix": expected_prefix,
+        "secret_lens":     [len(s) for s in secrets],
+    })
     return False, "signature_mismatch"
 
 
