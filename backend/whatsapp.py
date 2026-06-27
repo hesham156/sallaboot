@@ -93,6 +93,31 @@ def extract_messages(payload: dict) -> list[dict]:
     return out
 
 
+async def get_phone_number_info(token: str, phone_id: str) -> dict:
+    """Fetch a number's human-readable display number + verified name from Meta.
+    Returns {"display_number": "+966…", "verified_name": "…"} or {}."""
+    if not (token and phone_id):
+        return {}
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{phone_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(url, params={
+                "fields": "display_phone_number,verified_name",
+                "access_token": token,
+            })
+        if r.status_code != 200:
+            print(f"[whatsapp] get_phone_number_info {r.status_code}: {r.text[:160]}")
+            return {}
+        d = r.json()
+        return {
+            "display_number": (d.get("display_phone_number") or "").strip(),
+            "verified_name":  (d.get("verified_name") or "").strip(),
+        }
+    except Exception as exc:
+        print(f"[whatsapp] get_phone_number_info error: {exc}")
+        return {}
+
+
 async def send_text(token: str, phone_id: str, to: str, text: str) -> bool:
     """
     Send a plain-text WhatsApp message via the Cloud API. Splits overly long

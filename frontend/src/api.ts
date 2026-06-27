@@ -1103,6 +1103,8 @@ export interface AIConfig {
   available_categories?: string[]
   whatsapp_enabled?: boolean
   whatsapp_phone_id?: string
+  whatsapp_display_number?: string
+  whatsapp_numbers?: { phone_id: string; waba_id?: string; display_number?: string; label?: string; enabled: boolean; has_token?: boolean }[]
   whatsapp_token?: string
   whatsapp_waba_id?: string
   whatsapp_webhook?: string
