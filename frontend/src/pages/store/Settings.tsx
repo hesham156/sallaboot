@@ -128,6 +128,9 @@ export default function Settings({ storeId }: Props) {
   const [waToken, setWaToken]       = useState('')
   const [waSaving, setWaSaving]     = useState(false)
   const [waMsg, setWaMsg]           = useState('')
+  type WaNumber = { phone_id: string; waba_id?: string; label?: string; enabled: boolean; has_token?: boolean }
+  const [waNumbers, setWaNumbers]   = useState<WaNumber[]>([])
+  const [waRemoving, setWaRemoving] = useState('')
   const [waConnecting, setWaConnecting] = useState(false)
   const [waStep, setWaStep]         = useState<'idle'|'choose_waba'|'choose_phone'>('idle')
   const [waOptions, setWaOptions]   = useState<{id:string;name?:string;number?:string}[]>([])
@@ -208,6 +211,7 @@ export default function Settings({ storeId }: Props) {
       setWaEnabled(!!ai.whatsapp_enabled)
       setWaPhoneId(ai.whatsapp_phone_id || '')
       setWaWabaId((ai as AIConfig & { whatsapp_waba_id?: string }).whatsapp_waba_id || '')
+      setWaNumbers(((ai as AIConfig & { whatsapp_numbers?: WaNumber[] }).whatsapp_numbers) || [])
       setBotTone((ai.bot_tone as 'formal' | 'friendly' | 'very_friendly') || 'friendly')
       setBotLanguage((ai.bot_language as 'ar' | 'en' | 'auto') || 'ar')
       setResponseLength((ai.response_length as 'concise' | 'normal' | 'detailed') || 'normal')
@@ -393,12 +397,23 @@ export default function Settings({ storeId }: Props) {
   }
 
   async function disconnectWa() {
-    if (!confirm('هل تريد إلغاء ربط واتساب؟')) return
+    if (!confirm('هل تريد إلغاء ربط جميع أرقام واتساب؟')) return
     try {
       await api.waDisconnect(storeId)
       setWaMsg('✅ تم إلغاء الربط')
       load()
     } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+  }
+
+  async function removeWaNumber(phoneId: string) {
+    if (!confirm('إلغاء ربط هذا الرقم؟ (تبقى بقية الأرقام مربوطة)')) return
+    setWaRemoving(phoneId); setWaMsg('')
+    try {
+      await api.waRemoveNumber(storeId, phoneId)
+      setWaMsg('✅ تم إلغاء ربط الرقم')
+      load()
+    } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+    finally { setWaRemoving('') }
   }
 
   // ── Messenger + Instagram connect (Facebook Page) ──
@@ -1023,9 +1038,30 @@ export default function Settings({ storeId }: Props) {
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                         واتساب مربوط ونشط
                       </p>
-                      <p className="text-xs text-default-500 mt-1">Phone ID: <span className="font-mono text-foreground">{waPhoneId}</span></p>
-                      {waWabaId && <p className="text-xs text-default-500">WABA ID: <span className="font-mono text-foreground">{waWabaId}</span></p>}
+                      <p className="text-xs text-default-500 mt-1">
+                        {(waNumbers.length || (waPhoneId ? 1 : 0))} رقم مربوط بهذا المتجر
+                      </p>
                     </div>
+                  </div>
+
+                  {/* Connected numbers — a store can link several */}
+                  <div className="mt-4 space-y-2 border-t border-emerald-500/20 pt-3">
+                    {(waNumbers.length ? waNumbers
+                      : (waPhoneId ? [{ phone_id: waPhoneId, waba_id: waWabaId, label: '', enabled: waEnabled, has_token: true }] : [])
+                     ).map(n => (
+                      <div key={n.phone_id} className="flex items-center justify-between gap-2 bg-content2/60 rounded-xl px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-mono text-foreground truncate">{n.label || n.phone_id}</p>
+                          <p className="text-[10px] text-default-400 font-mono truncate">Phone ID: {n.phone_id}</p>
+                        </div>
+                        <Button size="sm" variant="flat" color="danger"
+                          isLoading={waRemoving === n.phone_id}
+                          onPress={() => removeWaNumber(n.phone_id)}
+                          className="font-bold flex-shrink-0">
+                          إزالة
+                        </Button>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Enable/Disable toggle */}
@@ -1050,9 +1086,15 @@ export default function Settings({ storeId }: Props) {
 
                 <InlineAlert text={waMsg} />
 
+                <Button color="success" variant="flat" isLoading={waConnecting}
+                  onPress={startEmbeddedSignup} className="w-full font-bold h-10"
+                  startContent={<Icon d="M12 5v14M5 12h14" size={16} />}>
+                  ربط رقم واتساب آخر
+                </Button>
+
                 <div className="flex gap-2">
                   <Button variant="flat" color="danger" onPress={disconnectWa} className="flex-1 font-bold h-10">
-                    إلغاء الربط
+                    إلغاء ربط الكل
                   </Button>
                   <Button variant="flat" onPress={() => setWaManual(true)} className="font-bold h-10 text-default-400">
                     إعدادات يدوية

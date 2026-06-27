@@ -1676,20 +1676,22 @@ async def handle_whatsapp_message(msg: dict):
             print(f"[whatsapp] ⚠️ missing required fields — dropped")
             return
 
-        store_id = sm.find_store_by_whatsapp_phone_id(phone_id)
+        # Resolve which store + which of its WhatsApp numbers received this — a
+        # store can connect several, and we MUST reply from the same number.
+        store_id, number = sm.find_whatsapp_number(phone_id)
         if not store_id:
             registered = [
-                (sid, (sm.get_ai_config(sid) or {}).get("whatsapp_phone_id", "—"))
+                (sid, [n.get("phone_id") for n in sm.get_whatsapp_numbers(sid)])
                 for sid in [s["store_id"] for s in sm.list_stores()]
             ]
             print(f"[whatsapp] ❌ no store for phone_id={phone_id!r}")
             print(f"[whatsapp]    registered phone IDs: {registered}")
             return
 
-        cfg   = sm.get_ai_config(store_id) or {}
-        token = (cfg.get("whatsapp_token") or "").strip()
-        print(f"[whatsapp] ✅ store={store_id!r} enabled={cfg.get('whatsapp_enabled')} token={'✓' if token else '✗'}")
-        if not cfg.get("whatsapp_enabled") or not token:
+        token = (number.get("token") or "").strip()
+        number_enabled = number.get("enabled", True)
+        print(f"[whatsapp] ✅ store={store_id!r} enabled={number_enabled} token={'✓' if token else '✗'}")
+        if not number_enabled or not token:
             print(f"[whatsapp] ⛔ disabled or no token — skipping")
             return
 
