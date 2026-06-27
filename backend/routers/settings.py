@@ -542,6 +542,31 @@ async def meta_disconnect_pages(store_id: str, request: Request):
     return {"status": "disconnected", "message": "تم فصل ماسنجر"}
 
 
+async def _ig_subscribe_messages(ig_access_token: str) -> bool:
+    """
+    Subscribe the Instagram account (identified by the access token) to receive
+    message webhook events.  Must be called once per token/account.
+
+    POST /me/subscribed_apps?subscribed_fields=messages
+    """
+    import httpx as _httpx
+    graph = os.getenv("META_GRAPH_VERSION", "v21.0")
+    try:
+        async with _httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"https://graph.facebook.com/{graph}/me/subscribed_apps",
+                headers={"Authorization": f"Bearer {ig_access_token}"},
+                params={"subscribed_fields": "messages"},
+            )
+            ok = r.status_code < 400 and r.json().get("success", False)
+            if not ok:
+                print(f"[instagram] subscribed_apps {r.status_code}: {r.text[:200]}")
+            return ok
+    except Exception as exc:
+        print(f"[instagram] subscribed_apps error: {exc}")
+        return False
+
+
 @router.put("/admin/{store_id}/meta/instagram")
 async def meta_set_instagram_manual(store_id: str, request: Request):
     """Manually save an Instagram Business Account ID for webhook routing."""
@@ -558,15 +583,30 @@ async def meta_set_instagram_manual(store_id: str, request: Request):
     config = dict(sm.get_ai_config(store_id))
     config["ig_id"]             = ig_id
     config["instagram_enabled"] = True
+
+    subscribed = False
+    token_to_use = ig_access_token or (config.get("ig_access_token") or "").strip()
     if ig_access_token:
         config["ig_access_token"] = ig_access_token
+    if token_to_use:
+        # Subscribe this IG account to receive DM webhooks (account-level subscription).
+        # Without this call Meta delivers comments but NOT direct messages.
+        subscribed = await _ig_subscribe_messages(token_to_use)
+        print(f"[instagram] messages subscription {'✅' if subscribed else '⚠️ failed'} for ig_id={ig_id}")
+
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
     await audit(request, "meta_instagram_manual_connect", target_store=store_id,
-                details={"ig_id": ig_id, "token_set": bool(ig_access_token)})
+                details={"ig_id": ig_id, "token_set": bool(token_to_use), "subscribed": subscribed})
+    msg = f"✅ تم ربط إنستقرام (معرّف: {ig_id})"
+    if token_to_use and not subscribed:
+        msg += " — ⚠️ تعذّر الاشتراك في رسائل DM تلقائياً، تحقق من صلاحيات التوكن"
+    elif subscribed:
+        msg += " واشتراك رسائل DM ✓"
     return {"status": "connected", "ig_id": ig_id,
-            "ig_token_set": bool(ig_access_token or config.get("ig_access_token")),
-            "message": f"✅ تم ربط إنستقرام (معرّف: {ig_id})"}
+            "ig_token_set": bool(token_to_use),
+            "subscribed": subscribed,
+            "message": msg}
 
 
 @router.delete("/admin/{store_id}/meta/instagram")
