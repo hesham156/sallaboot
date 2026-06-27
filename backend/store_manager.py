@@ -586,27 +586,113 @@ def get_ai_config(store_id: str) -> dict:
     return _registry.get(str(store_id), {}).get("tokens", {}).get("ai_config", {})
 
 
-def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
-    """
-    Reverse-lookup the store that owns a given WhatsApp Phone Number ID, so an
-    incoming webhook message is routed to the right store's bot. Returns "" if
-    no store has that phone_id configured.
-    """
+# ── Multi-number WhatsApp ────────────────────────────────────────────────────
+# A store can connect SEVERAL WhatsApp numbers (e.g. sales + support), all served
+# by the SAME bot. They live in ai_config['whatsapp_numbers'] as a list of
+# {phone_id, token, waba_id, label, enabled}. The legacy flat fields
+# (whatsapp_phone_id / whatsapp_token / whatsapp_waba_id / whatsapp_enabled)
+# mirror the PRIMARY (first enabled) number so older paths — broadcasts, the
+# outbox sender, the settings GET — keep working unchanged. An inbound message is
+# answered from the SAME number it arrived on (each number carries its own token).
+
+def get_whatsapp_numbers(store_id: str) -> list[dict]:
+    """All WhatsApp numbers connected to a store. Falls back to a single entry
+    synthesised from the legacy flat fields when the list isn't populated yet."""
+    cfg = get_ai_config(store_id) or {}
+    out: list[dict] = []
+    for n in (cfg.get("whatsapp_numbers") or []):
+        if isinstance(n, dict) and str(n.get("phone_id", "")).strip():
+            out.append(n)
+    if out:
+        return out
+    pid = str(cfg.get("whatsapp_phone_id", "")).strip()
+    if pid:
+        return [{
+            "phone_id": pid,
+            "token":    cfg.get("whatsapp_token", ""),
+            "waba_id":  cfg.get("whatsapp_waba_id", ""),
+            "label":    cfg.get("whatsapp_label", "") or "الرقم الأساسي",
+            "enabled":  bool(cfg.get("whatsapp_enabled")),
+        }]
+    return []
+
+
+def find_whatsapp_number(phone_id: str) -> tuple:
+    """Return (store_id, number_dict) for the store+number owning this phone_id,
+    or ("", {}). Prefers an enabled number that still holds a token (the real
+    active owner) over a stale/half-disconnected one."""
     pid = str(phone_id or "").strip()
     if not pid:
-        return ""
-    fallback = ""
-    for sid, entry in _registry.items():
-        cfg = (entry.get("tokens", {}) or {}).get("ai_config", {}) or {}
-        if str(cfg.get("whatsapp_phone_id", "")).strip() != pid:
-            continue
-        # Prefer the store that still holds a token (the real, active owner).
-        # A stale/half-disconnected store (phone_id set but token wiped) must
-        # never steal messages from the store that actually owns the number now.
-        if str(cfg.get("whatsapp_token", "")).strip():
-            return str(sid)
-        fallback = fallback or str(sid)
+        return "", {}
+    fallback = ("", {})
+    for sid in list(_registry.keys()):
+        for n in get_whatsapp_numbers(sid):
+            if str(n.get("phone_id", "")).strip() != pid:
+                continue
+            if str(n.get("token", "")).strip() and n.get("enabled", True):
+                return str(sid), n
+            if not fallback[0]:
+                fallback = (str(sid), n)
     return fallback
+
+
+def find_store_by_whatsapp_phone_id(phone_id: str) -> str:
+    """Reverse-lookup the store that owns a WhatsApp Phone Number ID (any of its
+    connected numbers). Returns "" when none match."""
+    return find_whatsapp_number(phone_id)[0]
+
+
+def _sync_whatsapp_primary(cfg: dict) -> dict:
+    """Mirror the first enabled number (else the first) into the legacy flat
+    fields so broadcasts / outbox / settings GET keep working. Mutates cfg."""
+    nums = [n for n in (cfg.get("whatsapp_numbers") or []) if isinstance(n, dict)]
+    primary = next(
+        (n for n in nums if n.get("enabled") and str(n.get("token", "")).strip()),
+        nums[0] if nums else None,
+    )
+    cfg["whatsapp_phone_id"] = str((primary or {}).get("phone_id", "")).strip()
+    cfg["whatsapp_token"]    = (primary or {}).get("token", "")
+    cfg["whatsapp_waba_id"]  = (primary or {}).get("waba_id", "")
+    cfg["whatsapp_enabled"]  = bool((primary or {}).get("enabled"))
+    return cfg
+
+
+async def upsert_whatsapp_number(store_id: str, number: dict) -> None:
+    """Add (or update by phone_id) a WhatsApp number on a store, keep the flat
+    primary fields in sync, and persist. Migrates a legacy single-number config
+    into the list on first call."""
+    pid = str(number.get("phone_id", "")).strip()
+    if not pid:
+        return
+    existing = get_whatsapp_numbers(store_id)   # legacy-aware
+    merged: list[dict] = []
+    replaced = False
+    for n in existing:
+        if str(n.get("phone_id", "")).strip() == pid:
+            merged.append({**n, **number})
+            replaced = True
+        else:
+            merged.append(n)
+    if not replaced:
+        merged.append(number)
+    cfg = dict(get_ai_config(store_id) or {})
+    cfg["whatsapp_numbers"] = merged
+    _sync_whatsapp_primary(cfg)
+    await set_ai_config(store_id, cfg)
+
+
+async def remove_whatsapp_number(store_id: str, phone_id: str) -> bool:
+    """Remove one WhatsApp number from a store. Returns True if it existed."""
+    pid = str(phone_id or "").strip()
+    existing = get_whatsapp_numbers(store_id)
+    kept = [n for n in existing if str(n.get("phone_id", "")).strip() != pid]
+    if len(kept) == len(existing):
+        return False
+    cfg = dict(get_ai_config(store_id) or {})
+    cfg["whatsapp_numbers"] = kept
+    _sync_whatsapp_primary(cfg)
+    await set_ai_config(store_id, cfg)
+    return True
 
 
 async def _release_whatsapp(phone_id: str, exclude_store_id: str = "") -> list[str]:
@@ -620,20 +706,20 @@ async def _release_whatsapp(phone_id: str, exclude_store_id: str = "") -> list[s
     cleared: list[str] = []
     if not pid:
         return cleared
-    # 1) In-memory stores in THIS process: clear + persist + reset agent now.
+    # 1) In-memory stores in THIS process: drop the number from each store that
+    #    holds it (in its multi-number list OR the legacy flat field), re-sync the
+    #    primary, persist + reset agent.
     for sid in list(_registry.keys()):
         if exclude and str(sid) == exclude:
             continue
-        cfg = (_registry[sid].get("tokens", {}) or {}).get("ai_config", {}) or {}
-        if str(cfg.get("whatsapp_phone_id", "")).strip() != pid:
+        nums = get_whatsapp_numbers(sid)
+        if not any(str(n.get("phone_id", "")).strip() == pid for n in nums):
             continue
-        newcfg = dict(cfg)
-        newcfg.update({
-            "whatsapp_token":    "",
-            "whatsapp_phone_id": "",
-            "whatsapp_waba_id":  "",
-            "whatsapp_enabled":  False,
-        })
+        newcfg = dict(get_ai_config(sid) or {})
+        newcfg["whatsapp_numbers"] = [
+            n for n in nums if str(n.get("phone_id", "")).strip() != pid
+        ]
+        _sync_whatsapp_primary(newcfg)
         await set_ai_config(sid, newcfg)        # persists to DB + resets agent
         cleared.append(str(sid))
     # 2) DB-authoritative sweep: clears any store NOT loaded in this process so a

@@ -295,6 +295,12 @@ export const api = {
       `/admin/${storeId}/whatsapp/connect`, body),
   waDisconnect: (storeId: string) =>
     del<{ status: string; message: string }>(`/admin/${storeId}/whatsapp/connect`),
+  // Multiple WhatsApp numbers per store
+  waListNumbers: (storeId: string) =>
+    get<{ numbers: { phone_id: string; waba_id: string; label: string; enabled: boolean; has_token: boolean }[] }>(
+      `/admin/${storeId}/whatsapp/numbers`),
+  waRemoveNumber: (storeId: string, phoneId: string) =>
+    del<{ status: string; message: string }>(`/admin/${storeId}/whatsapp/numbers/${encodeURIComponent(phoneId)}`),
 
   // Messenger + Instagram (Facebook Page) connect
   metaConnectPages: (storeId: string, body: { user_token: string; page_id?: string }) =>

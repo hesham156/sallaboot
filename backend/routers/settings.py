@@ -87,6 +87,13 @@ async def get_ai_settings(store_id: str):
         "whatsapp_phone_id":   cfg.get("whatsapp_phone_id", ""),
         "whatsapp_token":      "••••" if cfg.get("whatsapp_token") else "",
         "whatsapp_waba_id":    cfg.get("whatsapp_waba_id", ""),
+        # All connected WhatsApp numbers (a store can link several). Tokens masked.
+        "whatsapp_numbers":    [
+            {"phone_id": n.get("phone_id", ""), "waba_id": n.get("waba_id", ""),
+             "label": n.get("label", ""), "enabled": bool(n.get("enabled", True)),
+             "has_token": bool(str(n.get("token", "")).strip())}
+            for n in sm.get_whatsapp_numbers(store_id)
+        ],
         "whatsapp_webhook":    (base + "/whatsapp/webhook") if base else "/whatsapp/webhook",
         "whatsapp_verify_token": _wa.VERIFY_TOKEN,
         # Messenger + Instagram (Facebook Page) connection status — token masked.
@@ -354,17 +361,16 @@ async def whatsapp_connect(store_id: str, request: Request):
     import whatsapp as _wa
     subscribed = await _wa.subscribe_waba(long_token, chosen_waba_id)
 
-    # 5. Save to ai_config
-    existing = sm.get_ai_config(store_id)
-    config = dict(existing)
-    config.update({
-        "whatsapp_token":    long_token,
-        "whatsapp_phone_id": chosen_phone_id,
-        "whatsapp_waba_id":  chosen_waba_id,
-        "whatsapp_enabled":  True,
+    # 5. Save: ADD this number to the store's WhatsApp numbers — a store can
+    #    connect SEVERAL (sales + support + …). upsert keeps the legacy flat
+    #    fields synced to the primary and persists to the DB.
+    await sm.upsert_whatsapp_number(store_id, {
+        "phone_id": chosen_phone_id,
+        "token":    long_token,
+        "waba_id":  chosen_waba_id,
+        "label":    "",
+        "enabled":  True,
     })
-    await sm.set_ai_config(store_id, config)
-    await db.save_ai_config(store_id, config)
 
     # Enforce phone-number uniqueness: detach this number from any OTHER store
     # that still claims it, so inbound messages route only to THIS store.
@@ -530,6 +536,7 @@ async def whatsapp_disconnect(store_id: str, request: Request):
         "whatsapp_phone_id": "",
         "whatsapp_waba_id":  "",
         "whatsapp_enabled":  False,
+        "whatsapp_numbers":  [],   # disconnect ALL numbers
     })
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
@@ -555,6 +562,54 @@ async def whatsapp_disconnect(store_id: str, request: Request):
         "meta_unsubscribed": unsubscribed,
         "also_purged_from":  purged,
     }
+
+
+# ── WhatsApp: multiple numbers ────────────────────────────────────────────────
+
+@router.get("/admin/{store_id}/whatsapp/numbers")
+async def list_whatsapp_numbers(store_id: str, request: Request):
+    """All WhatsApp numbers connected to this store (tokens never returned)."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    return {"numbers": [
+        {"phone_id": n.get("phone_id", ""), "waba_id": n.get("waba_id", ""),
+         "label": n.get("label", ""), "enabled": bool(n.get("enabled", True)),
+         "has_token": bool(str(n.get("token", "")).strip())}
+        for n in sm.get_whatsapp_numbers(store_id)
+    ]}
+
+
+@router.delete("/admin/{store_id}/whatsapp/numbers/{phone_id}")
+async def remove_whatsapp_number(store_id: str, phone_id: str, request: Request):
+    """Unlink ONE WhatsApp number (leaves the others connected). Best-effort Meta
+    unsubscribe + purge of that number from every store that still holds it."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    pid = (phone_id or "").strip()
+    target = next((n for n in sm.get_whatsapp_numbers(store_id)
+                   if str(n.get("phone_id", "")).strip() == pid), None)
+    if not target:
+        raise HTTPException(404, "هذا الرقم غير مربوط بالمتجر")
+
+    unsubscribed = False
+    token   = (target.get("token") or "").strip()
+    waba_id = (target.get("waba_id") or "").strip()
+    if token and waba_id:
+        import whatsapp as _wa
+        try:
+            unsubscribed = await _wa.unsubscribe_waba(token, waba_id)
+        except Exception as exc:
+            print(f"[whatsapp] remove-number unsubscribe skipped: {exc}")
+
+    await sm.remove_whatsapp_number(store_id, pid)
+    # Purge from any OTHER store that still holds the same number.
+    purged = [s for s in await sm.purge_whatsapp_phone_id(pid) if s != str(store_id)]
+
+    await audit(request, "whatsapp_remove_number", target_store=store_id,
+                details={"phone_id": pid, "meta_unsubscribed": unsubscribed,
+                         "also_purged_from": purged})
+    return {"status": "ok", "message": "تم إلغاء ربط الرقم",
+            "meta_unsubscribed": unsubscribed, "also_purged_from": purged}
 
 
 # ── AI Brain ──────────────────────────────────────────────────────────────────
