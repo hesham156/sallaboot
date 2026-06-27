@@ -1837,6 +1837,12 @@ async def handle_messenger_message(msg: dict):
                   f"(enabled={enabled} token_set={bool(token)})")
             return
 
+        # Handover Protocol: this message arrived in `standby[]` (another app is
+        # the primary receiver). Claim the thread so our reply can go through.
+        if msg.get("standby"):
+            took = await ms.claim_thread_control(token, sender)
+            print(f"[{channel}] 🤝 standby message — claim_thread_control={'✅' if took else '⚠️ failed'}")
+
         # Stable per-customer session keyed by store + PSID/IGSID — persists and
         # shows in the admin inbox just like a widget or WhatsApp chat.
         # store_id is REQUIRED: same PSID could be linked to different stores.
