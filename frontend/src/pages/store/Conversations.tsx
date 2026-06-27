@@ -671,6 +671,18 @@ export default function Conversations({ storeId }: Props) {
                   <span className="truncate">{aiConfig.ig_username || 'إنستقرام'}</span>
                 </button>
               )}
+              {aiConfig?.messenger_enabled && (
+                <button
+                  onClick={() => toggleChannelFilter('messenger')}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    channelFilter === 'messenger'
+                      ? 'bg-blue-500/10 text-blue-400'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}>
+                  <MsgrIcon size={13} />
+                  <span className="truncate">{aiConfig.page_name || 'ماسنجر'}</span>
+                </button>
+              )}
               <button
                 onClick={() => toggleChannelFilter('widget')}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${

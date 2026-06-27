@@ -1718,11 +1718,14 @@ async def handle_whatsapp_message(msg: dict):
         await cs.restore_to_memory(session_id)
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}
-        if not info.get("phone"):
+        if not info.get("phone") or info.get("wa_phone_id") != phone_id:
             await cs.set_customer_info(session_id, {
                 "name":  msg.get("name", "") or info.get("name", ""),
                 "phone": sender,
                 "channel": "whatsapp",
+                # Remember WHICH of our numbers received this, so an admin reply
+                # (and the bot) goes back out from the SAME number (multi-number).
+                "wa_phone_id": phone_id,
             })
 
         # CSAT response intercept — if the most-recent bot msg was a CSAT
@@ -1823,6 +1826,32 @@ async def handle_messenger_message(msg: dict):
                 "name":    msg.get("name", "") or info.get("name", ""),
                 "channel": channel,
             })
+
+        # CSAT response intercept — if the most-recent bot msg was a CSAT survey,
+        # treat the reply as a rating (mirrors WhatsApp/Telegram) instead of
+        # routing it through the agent.
+        conv_now = cs.all_conversations().get(session_id) or {}
+        csat_msg = None
+        for prev in reversed(conv_now.get("messages", [])):
+            if prev.get("role") == "user":
+                break
+            if prev.get("role") == "assistant" and (prev.get("meta") or {}).get("kind") == "csat":
+                csat_msg = prev
+                break
+        if csat_msg:
+            rating = _parse_csat_reply("", text)
+            if rating:
+                await cs.add_message(session_id, "user", text, store_id)
+                await cs.set_rating(session_id, rating, f"CSAT {channel}: {text}")
+                csat_meta = csat_msg.get("meta") or {}
+                conv_now["rating_employee_id"]   = csat_meta.get("target_agent_id")
+                conv_now["rating_employee_name"] = csat_meta.get("target_agent_name", "")
+                conv_now["rated_at"]             = _dt.datetime.utcnow().isoformat()
+                cs.mark_dirty(session_id)
+                await cs.flush(session_id)
+                await ms.send_text(token, page_id, sender, "شكراً لتقييمك 🌷", channel=channel)
+                print(f"[{channel}] ⭐ CSAT recorded: {rating} for store {store_id}")
+                return
 
         if not cs.is_bot_enabled(session_id):
             # Admin took this thread over — just record the message.

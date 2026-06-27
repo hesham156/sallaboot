@@ -164,10 +164,13 @@ async def store_admin_reply(
     asyncio.create_task(bot_learning.capture_admin_correction(store_id, session_id, text))
 
     if session_id.startswith("wa:"):
-        cfg = sm.get_ai_config(store_id) or {}
-        wa_token   = (cfg.get("whatsapp_token") or "").strip()
-        wa_phone_id = (cfg.get("whatsapp_phone_id") or "").strip()
-        if wa_token and wa_phone_id:
+        cfg  = sm.get_ai_config(store_id) or {}
+        conv = cs.all_conversations().get(session_id) or {}
+        # Reply from the SAME number the customer messaged (multi-number); fall
+        # back to the store's primary number. The outbox resolves the token.
+        wa_phone_id = ((conv.get("customer_info", {}) or {}).get("wa_phone_id")
+                       or cfg.get("whatsapp_phone_id") or "").strip()
+        if wa_phone_id:
             await db.outbox_enqueue(
                 kind     = "whatsapp_send",
                 store_id = store_id,
@@ -186,6 +189,20 @@ async def store_admin_reply(
                 store_id = store_id,
                 payload  = {
                     "chat_id": session_id.split(":", 2)[2],
+                    "text":    text,
+                },
+            )
+    elif session_id.startswith("msgr:") or session_id.startswith("ig:"):
+        cfg = sm.get_ai_config(store_id) or {}
+        page_token = (cfg.get("page_token") or "").strip()
+        channel    = "instagram" if session_id.startswith("ig:") else "messenger"
+        if page_token:
+            await db.outbox_enqueue(
+                kind     = "messenger_send",
+                store_id = store_id,
+                payload  = {
+                    "channel": channel,
+                    "to":      session_id.split(":", 2)[2],
                     "text":    text,
                 },
             )
@@ -429,6 +446,33 @@ async def store_end_conversation(
                 except Exception as exc:
                     print(f"[end-conversation] Telegram delivery error: {exc}")
             asyncio.create_task(_deliver_to_telegram())
+
+    # 7. Messenger / Instagram delivery. No interactive list → CSAT goes out as a
+    #    numbered text prompt; the reply is captured by the CSAT intercept in
+    #    webhooks.handle_messenger_message (mirrors WhatsApp/Telegram).
+    elif session_id.startswith("msgr:") or session_id.startswith("ig:"):
+        import messenger as ms
+        page_token = (cfg.get("page_token") or "").strip()
+        channel    = "instagram" if session_id.startswith("ig:") else "messenger"
+        page_id    = (cfg.get("page_id") or "").strip()
+        to         = session_id.split(":", 2)[2]
+        if page_token and page_id and to:
+            async def _deliver_to_messenger():
+                try:
+                    await ms.send_text(page_token, page_id, to, farewell, channel=channel)
+                    await ms.send_text(page_token, page_id, to, thanks_line, channel=channel)
+                    if not req.skip_csat:
+                        target = agent_name or "ممثل خدمة العملاء"
+                        question = (
+                            f"كيف كانت تجربتك مع {target}؟\n\n"
+                            "ردّ بالرقم المناسب:\n"
+                            "1️⃣ غير راضٍ تماماً\n2️⃣ غير راضٍ\n3️⃣ محايد\n"
+                            "4️⃣ راضٍ\n5️⃣ راضٍ تماماً"
+                        )
+                        await ms.send_text(page_token, page_id, to, question, channel=channel)
+                except Exception as exc:
+                    print(f"[end-conversation] Messenger delivery error: {exc}")
+            asyncio.create_task(_deliver_to_messenger())
 
     return {"status": "ok", "session_id": session_id, "messages": conv.get("messages", [])[-3:]}
 
