@@ -117,8 +117,11 @@ async def _deliver_outbox_row(row: dict) -> None:
         import whatsapp as wa
         import store_manager as sm
         cfg      = sm.get_ai_config(store_id) or {}
-        token    = (cfg.get("whatsapp_token") or "").strip()
         phone_id = payload.get("phone_id") or (cfg.get("whatsapp_phone_id") or "")
+        # Resolve the token for THIS specific number (a store can connect several);
+        # fall back to the primary token for legacy single-number configs.
+        _, _num  = sm.find_whatsapp_number(phone_id)
+        token    = ((_num.get("token") if _num else "") or cfg.get("whatsapp_token") or "").strip()
         to       = payload.get("to", "")
         text     = payload.get("text", "")
         if not (token and phone_id and to and text):
@@ -142,6 +145,24 @@ async def _deliver_outbox_row(row: dict) -> None:
         ok = await tg.send_text(token, chat_id, text)
         if not ok:
             raise RuntimeError("telegram send failed (see telegram.py log)")
+        return
+
+    if kind == "messenger_send":
+        # Admin reply → Facebook Messenger / Instagram Direct (same Page token).
+        import messenger as ms
+        import store_manager as sm
+        cfg     = sm.get_ai_config(store_id) or {}
+        token   = (cfg.get("page_token") or "").strip()
+        page_id = (cfg.get("page_id") or "").strip()
+        channel = payload.get("channel", "messenger")
+        to      = payload.get("to", "")
+        text    = payload.get("text", "")
+        if not (token and page_id and to and text):
+            print(f"[outbox] messenger_send skipped (store={store_id}): missing config")
+            return
+        ok = await ms.send_text(token, page_id, to, text, channel=channel)
+        if not ok:
+            raise RuntimeError("messenger send failed (see messenger.py log)")
         return
 
     if kind == "comment_reply":
