@@ -1824,11 +1824,17 @@ async def handle_messenger_message(msg: dict):
         cfg     = sm.get_ai_config(store_id) or {}
         enabled = bool(cfg.get("instagram_enabled") if channel == "instagram"
                        else cfg.get("messenger_enabled"))
-        # Instagram: prefer the dedicated ig_access_token + ig_id; fall back to
-        # the linked Facebook Page token when Instagram is connected via Messenger.
+        # Instagram: prefer the dedicated ig_access_token (Instagram API with
+        # Instagram Login → sends via graph.instagram.com); fall back to the
+        # linked Facebook Page token (sends via graph.facebook.com/{page_id}).
+        ig_login = False
         if channel == "instagram":
-            token   = (cfg.get("ig_access_token") or cfg.get("page_token") or "").strip()
-            page_id = (cfg.get("ig_id") or cfg.get("page_id") or recipient_id).strip()
+            ig_token = (cfg.get("ig_access_token") or "").strip()
+            if ig_token:
+                token, page_id, ig_login = ig_token, (cfg.get("ig_id") or recipient_id).strip(), True
+            else:
+                token   = (cfg.get("page_token") or "").strip()
+                page_id = (cfg.get("page_id") or recipient_id).strip()
         else:
             token   = (cfg.get("page_token") or "").strip()
             page_id = (cfg.get("page_id") or recipient_id).strip()
@@ -1837,9 +1843,11 @@ async def handle_messenger_message(msg: dict):
                   f"(enabled={enabled} token_set={bool(token)})")
             return
 
-        # Handover Protocol: this message arrived in `standby[]` (another app is
-        # the primary receiver). Claim the thread so our reply can go through.
-        if msg.get("standby"):
+        # Handover Protocol: a `standby[]` message means another app is the
+        # primary receiver. Claim the thread so our reply can go through. Only
+        # applies to the Page transport — the IG-login API (graph.instagram.com)
+        # owns the conversation directly and has no handover endpoints.
+        if msg.get("standby") and not ig_login:
             took = await ms.claim_thread_control(token, sender)
             print(f"[{channel}] 🤝 standby message — claim_thread_control={'✅' if took else '⚠️ failed'}")
 
@@ -1878,7 +1886,8 @@ async def handle_messenger_message(msg: dict):
                 conv_now["rated_at"]             = _dt.datetime.utcnow().isoformat()
                 cs.mark_dirty(session_id)
                 await cs.flush(session_id)
-                await ms.send_text(token, page_id, sender, "شكراً لتقييمك 🌷", channel=channel)
+                await ms.send_text(token, page_id, sender, "شكراً لتقييمك 🌷",
+                                   channel=channel, instagram_login=ig_login)
                 print(f"[{channel}] ⭐ CSAT recorded: {rating} for store {store_id}")
                 return
 
@@ -1891,8 +1900,10 @@ async def handle_messenger_message(msg: dict):
         if agent is None:
             return
         reply = await agent.chat(message=text, session_id=session_id)
-        await ms.send_text(token, page_id, sender, reply, channel=channel)
-        print(f"[{channel}] ↩ replied to {sender} (store {store_id})")
+        sent  = await ms.send_text(token, page_id, sender, reply,
+                                   channel=channel, instagram_login=ig_login)
+        print(f"[{channel}] {'↩ replied to' if sent else '⚠️ send FAILED to'} "
+              f"{sender} (store {store_id})")
     except Exception as exc:
         print(f"[messenger] handle error: {exc}")
 

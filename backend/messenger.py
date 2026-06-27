@@ -112,28 +112,40 @@ def extract_messages(payload: dict) -> list[dict]:
 
 
 async def send_text(token: str, page_id: str, to: str, text: str,
-                    channel: str = "messenger") -> bool:
+                    channel: str = "messenger", instagram_login: bool = False) -> bool:
     """
-    Send a text message via the Graph Send API. Works for both Messenger and
-    Instagram (both route through the connected Page's /messages edge).
+    Send a text message via the Graph Send API.
 
-    `page_id` is the Facebook Page ID; `to` is the recipient PSID/IGSID.
-    Splits long replies. Returns True on success, never raises.
+    Two transports:
+      • Messenger + Instagram-via-Page → POST graph.facebook.com/{page_id}/messages
+        with the Page access token.
+      • Instagram API with Instagram Login → POST graph.instagram.com/me/messages
+        with the Instagram user access token (`instagram_login=True`). This host
+        is REQUIRED for IG-login tokens; the facebook.com host rejects them with
+        "(#3) Application does not have the capability".
+
+    `page_id` is the Facebook Page ID (or IG id for IG-login); `to` is the
+    recipient PSID/IGSID. Splits long replies. Returns True on success; never raises.
     """
-    if not (token and page_id and to and text):
+    if not (token and to and text):
         return False
-    url     = f"https://graph.facebook.com/{GRAPH_VERSION}/{page_id}/messages"
+    if instagram_login:
+        url = f"https://graph.instagram.com/{GRAPH_VERSION}/me/messages"
+    elif page_id:
+        url = f"https://graph.facebook.com/{GRAPH_VERSION}/{page_id}/messages"
+    else:
+        return False
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     ok = True
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             for chunk in _split(text, _TEXT_LIMIT):
-                body = {
-                    "recipient":      {"id": to},
-                    "messaging_type": "RESPONSE",
-                    "message":        {"text": chunk},
-                }
+                body: dict = {"recipient": {"id": to}, "message": {"text": chunk}}
+                # messaging_type is a Messenger Platform field; graph.instagram.com
+                # (IG-login) does not accept it.
+                if not instagram_login:
+                    body["messaging_type"] = "RESPONSE"
                 r = await client.post(url, headers=headers, json=body)
                 if r.status_code >= 400:
                     print(f"[{channel}] send failed {r.status_code}: {r.text[:300]}")
