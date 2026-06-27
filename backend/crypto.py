@@ -186,6 +186,14 @@ AI_CONFIG_SECRET_FIELDS = (
                          # radius as page_token, must be encrypted at rest too.
 )
 
+# Secret fields inside each per-platform entry of the stores.integrations JSONB
+# column (Shopify / Zid / TikTok OAuth tokens). Encrypted on save_integration,
+# decrypted on get_integrations + list_stores_with_integration.
+INTEGRATION_SECRET_FIELDS = (
+    "access_token",
+    "refresh_token",
+)
+
 
 def encrypt_fields(blob: dict | None, fields: Iterable[str]) -> dict:
     """
