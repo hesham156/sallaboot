@@ -551,6 +551,34 @@ async def meta_disconnect_pages(store_id: str, request: Request):
     return {"status": "disconnected", "message": "تم فصل ماسنجر"}
 
 
+async def _ig_long_lived_token(short_token: str) -> str:
+    """
+    Exchange a short-lived Instagram-login token (~1h) for a long-lived one
+    (~60d) using the Instagram app secret. Returns the long-lived token, or ""
+    when the exchange isn't possible (no secret, or the token is already
+    long-lived). Best-effort; never raises.
+
+    GET graph.instagram.com/access_token?grant_type=ig_exchange_token
+    """
+    import httpx as _httpx
+    secret = os.getenv("INSTAGRAM_APP_SECRET", "").strip()
+    if not secret:
+        return ""
+    try:
+        async with _httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://graph.instagram.com/access_token",
+                params={"grant_type": "ig_exchange_token",
+                        "client_secret": secret, "access_token": short_token},
+            )
+            if r.status_code < 400:
+                return (r.json().get("access_token") or "").strip()
+            print(f"[instagram] long-lived exchange {r.status_code}: {r.text[:160]}")
+    except Exception as exc:
+        print(f"[instagram] long-lived exchange error: {exc}")
+    return ""
+
+
 async def _ig_validate_token(ig_access_token: str) -> tuple[bool, str]:
     """
     Validate an Instagram-login access token by calling graph.instagram.com/me.
@@ -604,7 +632,13 @@ async def meta_set_instagram_manual(store_id: str, request: Request):
                 f"رمز الوصول غير صالح: {detail} — تأكد أنه رمز إنستقرام (يبدأ بـ IGAA) "
                 f"وغير منتهي. أعد إنشاءه من تطبيق إنستقرام في Meta Developers.")
         ig_username = detail
-        config["ig_access_token"] = ig_access_token
+        # Upgrade the short-lived (~1h) token to a long-lived (~60d) one so the
+        # connection doesn't die within the hour. Falls back to the original
+        # token when the exchange isn't available.
+        long_token = await _ig_long_lived_token(ig_access_token)
+        config["ig_access_token"] = long_token or ig_access_token
+        if long_token:
+            print(f"[instagram] token upgraded to long-lived for ig_id={ig_id}")
 
     config["ig_id"]             = ig_id
     config["instagram_enabled"] = True
