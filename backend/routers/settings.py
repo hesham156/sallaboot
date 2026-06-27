@@ -141,6 +141,7 @@ async def get_ai_settings(store_id: str):
         "page_token_set":      bool(cfg.get("page_token")),
         "ig_id":               cfg.get("ig_id", ""),
         "ig_username":         cfg.get("ig_username", ""),
+        "ig_token_set":        bool(cfg.get("ig_access_token")),
         # Telegram channel connection status — token never echoed.
         "telegram_enabled":      bool(cfg.get("telegram_enabled")),
         "telegram_bot_username": cfg.get("telegram_bot_username", ""),
@@ -547,7 +548,8 @@ async def meta_set_instagram_manual(store_id: str, request: Request):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     body = await request.json()
-    ig_id = (body.get("ig_id") or "").strip()
+    ig_id           = (body.get("ig_id")           or "").strip()
+    ig_access_token = (body.get("ig_access_token") or "").strip()
     if not ig_id:
         raise HTTPException(400, "ig_id مطلوب")
     if not ig_id.isdigit():
@@ -556,11 +558,14 @@ async def meta_set_instagram_manual(store_id: str, request: Request):
     config = dict(sm.get_ai_config(store_id))
     config["ig_id"]             = ig_id
     config["instagram_enabled"] = True
+    if ig_access_token:
+        config["ig_access_token"] = ig_access_token
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
     await audit(request, "meta_instagram_manual_connect", target_store=store_id,
-                details={"ig_id": ig_id})
+                details={"ig_id": ig_id, "token_set": bool(ig_access_token)})
     return {"status": "connected", "ig_id": ig_id,
+            "ig_token_set": bool(ig_access_token or config.get("ig_access_token")),
             "message": f"✅ تم ربط إنستقرام (معرّف: {ig_id})"}
 
 
@@ -570,8 +575,9 @@ async def meta_disconnect_instagram(store_id: str, request: Request):
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     config = dict(sm.get_ai_config(store_id))
-    config.pop("ig_id",       None)
-    config.pop("ig_username", None)
+    config.pop("ig_id",           None)
+    config.pop("ig_username",     None)
+    config.pop("ig_access_token", None)
     config["instagram_enabled"]   = False
     config["comments_ig_enabled"] = False
     await sm.set_ai_config(store_id, config)

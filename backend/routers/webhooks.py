@@ -1807,12 +1807,19 @@ async def handle_messenger_message(msg: dict):
             return
 
         cfg     = sm.get_ai_config(store_id) or {}
-        token   = (cfg.get("page_token") or "").strip()
-        page_id = (cfg.get("page_id") or recipient_id).strip()
         enabled = bool(cfg.get("instagram_enabled") if channel == "instagram"
                        else cfg.get("messenger_enabled"))
+        # Instagram: prefer the dedicated ig_access_token + ig_id; fall back to
+        # the linked Facebook Page token when Instagram is connected via Messenger.
+        if channel == "instagram":
+            token   = (cfg.get("ig_access_token") or cfg.get("page_token") or "").strip()
+            page_id = (cfg.get("ig_id") or cfg.get("page_id") or recipient_id).strip()
+        else:
+            token   = (cfg.get("page_token") or "").strip()
+            page_id = (cfg.get("page_id") or recipient_id).strip()
         if not (enabled and token):
-            print(f"[{channel}] ⛔ disabled or no page_token for store {store_id!r}")
+            print(f"[{channel}] ⛔ disabled or no token for store {store_id!r} "
+                  f"(enabled={enabled} token_set={bool(token)})")
             return
 
         # Stable per-customer session keyed by store + PSID/IGSID — persists and
