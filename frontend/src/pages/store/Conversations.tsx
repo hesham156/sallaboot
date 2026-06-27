@@ -507,7 +507,7 @@ export default function Conversations({ storeId }: Props) {
   })
 
   function channelLabel(ch: string): string {
-    if (ch === 'whatsapp')  return aiConfig?.whatsapp_phone_id ? `+${aiConfig.whatsapp_phone_id}` : 'واتساب'
+    if (ch === 'whatsapp')  return aiConfig?.whatsapp_display_number || 'واتساب'
     if (ch === 'telegram')  return 'تيليجرام'
     if (ch === 'instagram') return aiConfig?.ig_username || 'إنستقرام'
     if (ch === 'messenger') return 'ماسنجر'
@@ -644,7 +644,7 @@ export default function Conversations({ storeId }: Props) {
                       : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                   }`}>
                   <WaIcon size={13} />
-                  <span className="truncate">{aiConfig.whatsapp_phone_id || 'واتساب'}</span>
+                  <span className="truncate" dir="ltr">{aiConfig.whatsapp_display_number || 'واتساب'}</span>
                 </button>
               )}
               {aiConfig?.telegram_enabled && (
