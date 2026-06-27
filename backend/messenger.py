@@ -61,43 +61,51 @@ def extract_messages(payload: dict) -> list[dict]:
             # `entry.id` is the Page ID (Messenger) or IG account ID (Instagram);
             # individual events also carry recipient.id which we prefer.
             entry_id = str(entry.get("id", "") or "")
-            for ev in entry.get("messaging", []) or []:
-                msg = ev.get("message") or {}
-                # Skip echoes of our own sends + non-message events.
-                if msg.get("is_echo"):
-                    continue
-                if "message" not in ev and "postback" not in ev:
-                    continue  # delivery / read / reaction → ignore
+            # `messaging[]` = we're the active (primary) receiver.
+            # `standby[]`   = Handover Protocol: another app owns the thread and
+            #   we receive a read-only copy. Happens on Instagram when a second
+            #   app (e.g. the IG inbox) is the primary receiver. We still ingest
+            #   it; the handler takes thread control before replying.
+            for src, events in (("messaging", entry.get("messaging") or []),
+                                ("standby",   entry.get("standby")   or [])):
+                for ev in events:
+                    msg = ev.get("message") or {}
+                    # Skip echoes of our own sends + non-message events.
+                    if msg.get("is_echo"):
+                        continue
+                    if "message" not in ev and "postback" not in ev:
+                        continue  # delivery / read / reaction → ignore
 
-                sender    = str((ev.get("sender") or {}).get("id", "") or "")
-                recipient = str((ev.get("recipient") or {}).get("id", "") or "") or entry_id
-                if not sender or not recipient:
-                    continue
+                    sender    = str((ev.get("sender") or {}).get("id", "") or "")
+                    recipient = str((ev.get("recipient") or {}).get("id", "") or "") or entry_id
+                    if not sender or not recipient:
+                        continue
 
-                # Text, quick-reply, or postback payload → a usable string.
-                text = ""
-                if msg:
-                    text = (msg.get("text") or "").strip()
-                    if not text and msg.get("attachments"):
-                        text = "📎 (أرسل العميل مرفقاً)"
-                    qr = msg.get("quick_reply") or {}
-                    if not text and qr.get("payload"):
-                        text = str(qr.get("payload"))
-                elif ev.get("postback"):
-                    pb = ev["postback"]
-                    text = (pb.get("title") or pb.get("payload") or "").strip()
+                    # Text, quick-reply, or postback payload → a usable string.
+                    text = ""
+                    if msg:
+                        text = (msg.get("text") or "").strip()
+                        if not text and msg.get("attachments"):
+                            text = "📎 (أرسل العميل مرفقاً)"
+                        qr = msg.get("quick_reply") or {}
+                        if not text and qr.get("payload"):
+                            text = str(qr.get("payload"))
+                    elif ev.get("postback"):
+                        pb = ev["postback"]
+                        text = (pb.get("title") or pb.get("payload") or "").strip()
 
-                if not text:
-                    continue
+                    if not text:
+                        continue
 
-                out.append({
-                    "channel":      channel,
-                    "recipient_id": recipient,
-                    "from":         sender,
-                    "text":         text,
-                    "msg_id":       str(msg.get("mid", "") or ""),
-                    "name":         "",
-                })
+                    out.append({
+                        "channel":      channel,
+                        "recipient_id": recipient,
+                        "from":         sender,
+                        "text":         text,
+                        "msg_id":       str(msg.get("mid", "") or ""),
+                        "name":         "",
+                        "standby":      src == "standby",
+                    })
     except Exception as exc:
         print(f"[messenger] extract_messages error: {exc}")
     return out
@@ -134,6 +142,34 @@ async def send_text(token: str, page_id: str, to: str, text: str,
         print(f"[{channel}] send_text error: {exc}")
         return False
     return ok
+
+
+async def claim_thread_control(token: str, psid: str) -> bool:
+    """
+    Claim ownership of a conversation under the Handover Protocol so we can
+    reply. Needed when a message arrives in `standby[]` (another app is the
+    primary receiver).
+
+    A Primary Receiver uses `take_thread_control`; a Secondary Receiver uses
+    `request_thread_control`. We don't know our role for a given thread, so we
+    try `take` first and fall back to `request`. Best-effort; never raises.
+    """
+    if not (token and psid):
+        return False
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body    = {"recipient": {"id": psid}}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            for action in ("take_thread_control", "request_thread_control"):
+                url = f"https://graph.facebook.com/{GRAPH_VERSION}/me/{action}"
+                r   = await client.post(url, headers=headers, json=body)
+                if r.status_code < 400:
+                    print(f"[handover] {action} ✅")
+                    return True
+                print(f"[handover] {action} {r.status_code}: {r.text[:200]}")
+    except Exception as exc:
+        print(f"[handover] claim_thread_control error: {exc}")
+    return False
 
 
 async def get_sender_name(token: str, psid: str) -> str:
