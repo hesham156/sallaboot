@@ -1514,6 +1514,15 @@ async def meta_webhook(request: Request):
     import comments as cm
 
     body = await request.body()
+    # DEBUG — log every POST so we can see if Meta is sending anything at all.
+    try:
+        _preview = _json.loads(body)
+        _obj_dbg = _preview.get("object", "?")
+        _eid_dbg = ((_preview.get("entry") or [{}])[0]).get("id", "?")
+    except Exception:
+        _obj_dbg, _eid_dbg = "?", "?"
+    print(f"[meta_webhook] ← POST object={_obj_dbg!r} entry_id={_eid_dbg!r} "
+          f"len={len(body)} sig={'present' if request.headers.get('X-Hub-Signature-256') else 'MISSING'}")
     sig_ok, sig_detail = _verify_meta_signature(body, request.headers)
     if not sig_ok:
         # Diagnostic (no secrets): which object/sender is being rejected, so a
