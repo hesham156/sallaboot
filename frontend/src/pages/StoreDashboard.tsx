@@ -60,6 +60,8 @@ type NavChild = {
   activeColor: string
   activeBg: string
   activeBorder: string
+  printingOnly?: boolean
+  roles?: Role[]
 }
 
 const NAV_ITEMS: Array<{
@@ -90,15 +92,6 @@ const NAV_ITEMS: Array<{
     activeBorder: 'border-r-violet-500',
   },
   {
-    key: 'products',
-    label: 'المنتجات',
-    icon: ['M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'],
-    activeColor: 'text-emerald-400',
-    activeBg: 'bg-emerald-500/10',
-    activeBorder: 'border-r-emerald-500',
-    roles: ['owner', 'manager'],
-  },
-  {
     key: 'orders',
     label: 'الطلبات',
     icon: ['M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'],
@@ -114,123 +107,143 @@ const NAV_ITEMS: Array<{
     activeBg: 'bg-orange-500/10',
     activeBorder: 'border-r-orange-500',
   },
+  // ── Group: المتجر (products / pricing / analytics) ──
   {
-    key: 'analytics',
-    label: 'التحليلات',
-    icon: ['M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z'],
-    activeColor: 'text-pink-400',
-    activeBg: 'bg-pink-500/10',
-    activeBorder: 'border-r-pink-500',
+    key: 'grp-store',
+    label: 'المتجر',
+    icon: ['M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'],
+    activeColor: 'text-emerald-400',
+    activeBg: 'bg-emerald-500/10',
+    activeBorder: 'border-r-emerald-500',
     roles: ['owner', 'manager'],
+    children: [
+      {
+        key: 'products',
+        label: 'المنتجات',
+        icon: ['M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'],
+        activeColor: 'text-emerald-400',
+        activeBg: 'bg-emerald-500/10',
+        activeBorder: 'border-r-emerald-500',
+      },
+      {
+        key: 'pricing',
+        label: 'حاسبة الأسعار',
+        icon: ['M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'],
+        activeColor: 'text-cyan-400',
+        activeBg: 'bg-cyan-500/10',
+        activeBorder: 'border-r-cyan-500',
+        printingOnly: true,
+      },
+      {
+        key: 'analytics',
+        label: 'التحليلات',
+        icon: ['M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z'],
+        activeColor: 'text-pink-400',
+        activeBg: 'bg-pink-500/10',
+        activeBorder: 'border-r-pink-500',
+      },
+    ],
   },
+  // ── Group: العملاء (contacts / segments / broadcast) ──
   {
-    key: 'pricing',
-    label: 'حاسبة الأسعار',
-    icon: ['M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'],
-    activeColor: 'text-cyan-400',
-    activeBg: 'bg-cyan-500/10',
-    activeBorder: 'border-r-cyan-500',
-    printingOnly: true,
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'brain',
-    label: 'ذاكرة الـ AI',
-    icon: ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
-    activeColor: 'text-purple-400',
-    activeBg: 'bg-purple-500/10',
-    activeBorder: 'border-r-purple-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'employees',
-    label: 'الموظفون',
-    icon: ['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z'],
-    activeColor: 'text-amber-400',
-    activeBg: 'bg-amber-500/10',
-    activeBorder: 'border-r-amber-500',
-    roles: ['owner'],
-  },
-  {
-    key: 'llm-usage',
-    label: 'استهلاك الذكاء',
-    icon: ['M13 10V3L4 14h7v7l9-11h-7z'],
-    activeColor: 'text-rose-400',
-    activeBg: 'bg-rose-500/10',
-    activeBorder: 'border-r-rose-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'training',
-    label: 'تدريب البوت',
-    icon: ['M12 14l9-5-9-5-9 5 9 5z', 'M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z'],
-    activeColor: 'text-fuchsia-400',
-    activeBg: 'bg-fuchsia-500/10',
-    activeBorder: 'border-r-fuchsia-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'customer-segments',
-    label: 'تصنيف العملاء',
+    key: 'grp-customers',
+    label: 'العملاء',
     icon: ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'],
     activeColor: 'text-orange-500',
     activeBg: 'bg-orange-500/10',
     activeBorder: 'border-r-orange-500',
     roles: ['owner', 'manager'],
+    children: [
+      {
+        key: 'contacts',
+        label: 'جهات الاتصال',
+        icon: ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z'],
+        activeColor: 'text-cyan-500',
+        activeBg: 'bg-cyan-500/10',
+        activeBorder: 'border-r-cyan-500',
+      },
+      {
+        key: 'customer-segments',
+        label: 'تصنيف العملاء',
+        icon: ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'],
+        activeColor: 'text-orange-500',
+        activeBg: 'bg-orange-500/10',
+        activeBorder: 'border-r-orange-500',
+      },
+      {
+        key: 'broadcast',
+        label: 'رسالة جماعية',
+        icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
+        activeColor: 'text-rose-400',
+        activeBg: 'bg-rose-500/10',
+        activeBorder: 'border-r-rose-500',
+      },
+    ],
   },
+  // ── Group: الذكاء الاصطناعي (training / brain / usage) ──
   {
-    key: 'contacts',
-    label: 'جهات الاتصال',
-    icon: ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z'],
-    activeColor: 'text-cyan-500',
-    activeBg: 'bg-cyan-500/10',
-    activeBorder: 'border-r-cyan-500',
+    key: 'grp-ai',
+    label: 'الذكاء الاصطناعي',
+    icon: ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
+    activeColor: 'text-purple-400',
+    activeBg: 'bg-purple-500/10',
+    activeBorder: 'border-r-purple-500',
     roles: ['owner', 'manager'],
+    children: [
+      {
+        key: 'training',
+        label: 'تدريب البوت',
+        icon: ['M12 14l9-5-9-5-9 5 9 5z', 'M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z'],
+        activeColor: 'text-fuchsia-400',
+        activeBg: 'bg-fuchsia-500/10',
+        activeBorder: 'border-r-fuchsia-500',
+      },
+      {
+        key: 'brain',
+        label: 'ذاكرة الـ AI',
+        icon: ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
+        activeColor: 'text-purple-400',
+        activeBg: 'bg-purple-500/10',
+        activeBorder: 'border-r-purple-500',
+      },
+      {
+        key: 'llm-usage',
+        label: 'استهلاك الذكاء',
+        icon: ['M13 10V3L4 14h7v7l9-11h-7z'],
+        activeColor: 'text-rose-400',
+        activeBg: 'bg-rose-500/10',
+        activeBorder: 'border-r-rose-500',
+      },
+    ],
   },
+  // ── Group: التعليقات (inbox / automation) ──
   {
-    key: 'broadcast',
-    label: 'رسالة جماعية',
-    icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
-    activeColor: 'text-rose-400',
-    activeBg: 'bg-rose-500/10',
-    activeBorder: 'border-r-rose-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'integrations',
-    label: 'التكاملات',
-    icon: ['M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1'],
-    activeColor: 'text-indigo-400',
-    activeBg: 'bg-indigo-500/10',
-    activeBorder: 'border-r-indigo-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'channels',
-    label: 'القنوات',
-    icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
-    activeColor: 'text-sky-400',
-    activeBg: 'bg-sky-500/10',
-    activeBorder: 'border-r-sky-500',
-    roles: ['owner', 'manager'],
-  },
-  {
-    key: 'comment-inbox',
-    label: 'صندوق التعليقات',
+    key: 'grp-comments',
+    label: 'التعليقات',
     icon: ['M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'],
     activeColor: 'text-pink-400',
     activeBg: 'bg-pink-500/10',
     activeBorder: 'border-r-pink-500',
-    roles: ['owner', 'manager', 'agent'],
-  },
-  {
-    key: 'comment-automation',
-    label: 'أتمتة التعليقات',
-    icon: ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
-    activeColor: 'text-fuchsia-400',
-    activeBg: 'bg-fuchsia-500/10',
-    activeBorder: 'border-r-fuchsia-500',
-    roles: ['owner', 'manager'],
+    children: [
+      {
+        key: 'comment-inbox',
+        label: 'صندوق التعليقات',
+        icon: ['M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'],
+        activeColor: 'text-pink-400',
+        activeBg: 'bg-pink-500/10',
+        activeBorder: 'border-r-pink-500',
+        roles: ['owner', 'manager', 'agent'],
+      },
+      {
+        key: 'comment-automation',
+        label: 'أتمتة التعليقات',
+        icon: ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'],
+        activeColor: 'text-fuchsia-400',
+        activeBg: 'bg-fuchsia-500/10',
+        activeBorder: 'border-r-fuchsia-500',
+        roles: ['owner', 'manager'],
+      },
+    ],
   },
   {
     key: 'whatsapp-group',
@@ -266,6 +279,44 @@ const NAV_ITEMS: Array<{
         activeBorder: 'border-r-green-500',
       },
     ],
+  },
+  // ── Group: القنوات والتكاملات (integrations / channels) ──
+  {
+    key: 'grp-channels',
+    label: 'القنوات والتكاملات',
+    icon: ['M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1'],
+    activeColor: 'text-indigo-400',
+    activeBg: 'bg-indigo-500/10',
+    activeBorder: 'border-r-indigo-500',
+    roles: ['owner', 'manager'],
+    children: [
+      {
+        key: 'integrations',
+        label: 'التكاملات',
+        icon: ['M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1'],
+        activeColor: 'text-indigo-400',
+        activeBg: 'bg-indigo-500/10',
+        activeBorder: 'border-r-indigo-500',
+      },
+      {
+        key: 'channels',
+        label: 'القنوات',
+        icon: ['M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'],
+        activeColor: 'text-sky-400',
+        activeBg: 'bg-sky-500/10',
+        activeBorder: 'border-r-sky-500',
+      },
+    ],
+  },
+  // ── Bottom: owner-only admin items (kept flat) ──
+  {
+    key: 'employees',
+    label: 'الموظفون',
+    icon: ['M16 7a4 4 0 11-8 0 4 4 0 018 0z', 'M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z'],
+    activeColor: 'text-amber-400',
+    activeBg: 'bg-amber-500/10',
+    activeBorder: 'border-r-amber-500',
+    roles: ['owner'],
   },
   {
     key: 'support-access',
@@ -444,7 +495,9 @@ export default function StoreDashboard() {
     )
   }
 
-  const activeItem = NAV_ITEMS.find(n => n.key === activeKey)!
+  const activeItem =
+    NAV_ITEMS.find(n => n.key === activeKey) ??
+    NAV_ITEMS.flatMap(n => n.children ?? []).find(c => c.key === activeKey)
 
   return (
     <div className="flex min-h-screen bg-background" dir="rtl">
@@ -517,7 +570,11 @@ export default function StoreDashboard() {
             .filter(canSee)
             .map(item => {
               if (item.children) {
-                const isGroupActive = item.children.some(c => c.key === activeKey)
+                const visibleChildren = item.children
+                  .filter(c => !c.printingOnly || storeType === 'printing')
+                  .filter(canSee)
+                if (visibleChildren.length === 0) return null
+                const isGroupActive = visibleChildren.some(c => c.key === activeKey)
                 const isOpen        = openGroups.has(item.key) || isGroupActive
                 const toggle = () => setOpenGroups(prev => {
                   const next = new Set(prev)
@@ -554,7 +611,7 @@ export default function StoreDashboard() {
                     {/* Children */}
                     {isOpen && (
                       <div className="border-r-2 border-default-100 mr-5 mb-0.5">
-                        {item.children.map(child => {
+                        {visibleChildren.map(child => {
                           const isActive = child.key === activeKey
                           return (
                             <button
