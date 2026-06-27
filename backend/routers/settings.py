@@ -510,18 +510,27 @@ async def meta_connect_pages(store_id: str, request: Request):
         # Comment automation defaults — opt-in via the Automation panel.
         "comments_fb_enabled": config.get("comments_fb_enabled", False),
     })
+    # If this Page has a linked Instagram account, save ig_id so that Instagram
+    # DMs (delivered via the Page subscription + instagram_manage_messages field)
+    # can be routed to this store. Does NOT overwrite a manually-set ig_id.
+    if ig_id and not config.get("ig_id"):
+        config["ig_id"]             = ig_id
+        config["ig_username"]       = page.get("ig_username", "")
+        config["instagram_enabled"] = True
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
 
     await audit(request, "meta_pages_connect", target_store=store_id,
-                details={"page_id": page_id, "subscribed": subscribed})
+                details={"page_id": page_id, "ig_id": ig_id, "subscribed": subscribed})
 
+    ig_note = f" وإنستقرام (@{page.get('ig_username', ig_id)})" if ig_id and not existing.get("ig_id") else ""
     return {
         "status":            "connected",
         "page_id":           page_id,
         "page_name":         page.get("name", ""),
+        "ig_id":             ig_id,
         "webhook_subscribed": subscribed,
-        "message": ("✅ تم ربط ماسنجر بنجاح"
+        "message": (f"✅ تم ربط ماسنجر{ig_note} بنجاح"
                     + ("" if subscribed else " (لكن تعذّر اشتراك الـ webhook تلقائياً)")),
     }
 
