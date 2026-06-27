@@ -1331,3 +1331,41 @@ async def tiktok_disconnect(store_id: str, request: Request):
     await db.remove_integration(store_id, "tiktok")
     print(f"[integrations] 🔌 TikTok disconnected: store={store_id}")
     return {"message": "تم فصل TikTok"}
+
+
+@router.post("/integrations/tiktok/webhook")
+async def tiktok_webhook(request: Request):
+    """TikTok webhook receiver (POST). This is the URL for the app's *Webhooks*
+    config — NOT the OAuth redirect (which is GET /integrations/tiktok/callback).
+    TikTok's "Test URL" button just POSTs a sample event and expects HTTP 200.
+
+    We mainly ack with 200; we also handle de-authorization by dropping the
+    stored integration for the affected open_id (mirrors the Zid uninstall flow).
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    event   = str(payload.get("event", "") or "")
+    content = payload.get("content")
+    if isinstance(content, str):
+        try:
+            content = _json.loads(content)
+        except Exception:
+            content = {}
+    open_id = str(payload.get("user_openid", "") or (content or {}).get("open_id", "") or "")
+    print(f"[tiktok_webhook] event={event!r} open_id={open_id[:8]}…")
+
+    # User revoked the app's access → remove the link so the UI shows it gone.
+    if "authorization.removed" in event and open_id:
+        try:
+            store_id = await db.find_store_by_tiktok_open_id(open_id)
+            if store_id:
+                await db.remove_integration(store_id, "tiktok")
+                print(f"[tiktok_webhook] ✅ de-authorized → removed integration store={store_id}")
+        except Exception as e:
+            print(f"[tiktok_webhook] revoke handling failed: {e}")
+
+    # Always 200 so TikTok's Test URL passes and deliveries aren't retried forever.
+    return {"received": True, "event": event}
