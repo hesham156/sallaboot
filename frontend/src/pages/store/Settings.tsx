@@ -410,6 +410,22 @@ export default function Settings({ storeId }: Props) {
     } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
   }
 
+  async function addWaNumberManual() {
+    if (!waPhoneId.trim() || !waToken.trim()) {
+      setWaMsg('❌ أدخل Phone Number ID والـ Access Token'); return
+    }
+    setWaSaving(true); setWaMsg('')
+    try {
+      await api.waAddNumber(storeId, {
+        phone_id: waPhoneId.trim(), token: waToken.trim(), waba_id: waWabaId.trim(),
+      })
+      setWaMsg('✅ تم إضافة الرقم')
+      setWaToken(''); setWaPhoneId(''); setWaWabaId(''); setWaManual(false)
+      load()
+    } catch (e: unknown) { setWaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+    finally { setWaSaving(false) }
+  }
+
   async function removeWaNumber(phoneId: string) {
     if (!confirm('إلغاء ربط هذا الرقم؟ (تبقى بقية الأرقام مربوطة)')) return
     setWaRemoving(phoneId); setWaMsg('')
@@ -1194,13 +1210,17 @@ export default function Settings({ storeId }: Props) {
                       placeholder="987654321098765" dir="ltr"
                       hint="مطلوب لإدارة القوالب — من Meta › WhatsApp › API Setup بجانب الرقم" />
                     <TextField label="Access Token" type="password" value={waToken} onChange={setWaToken}
-                      placeholder={cfg.whatsapp_token ? '•••••••• (محفوظ)' : 'EAAG...'} dir="ltr"
-                      hint={cfg.whatsapp_token ? 'محفوظ — اتركه فارغاً للإبقاء' : 'من Meta'} />
+                      placeholder="EAAG..." dir="ltr"
+                      hint="توكن دائم من Meta › WhatsApp › API Setup" />
                     <InlineAlert text={waMsg} />
-                    <Button color="success" isLoading={waSaving} onPress={saveWhatsApp}
-                      className="w-full font-bold h-10">
-                      {waSaving ? '' : 'حفظ'}
+                    <Button color="success" isLoading={waSaving} onPress={addWaNumberManual}
+                      className="w-full font-bold h-10"
+                      startContent={waSaving ? undefined : <Icon d="M12 5v14M5 12h14" size={15} />}>
+                      {waSaving ? '' : 'إضافة الرقم'}
                     </Button>
+                    <p className="text-[11px] text-default-400 text-center">
+                      يمكنك إضافة أكثر من رقم — كل رقم يرد منه البوت تلقائياً.
+                    </p>
                   </div>
                 )}
 
