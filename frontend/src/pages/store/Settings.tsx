@@ -344,17 +344,22 @@ export default function Settings({ storeId }: Props) {
     finally { setWaSaving(false) }
   }
 
-  async function startEmbeddedSignup() {
+  function startEmbeddedSignup() {
     if (!window.FB) { setWaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة أو استخدم الإدخال اليدوي'); return }
     setWaConnecting(true); setWaMsg('')
-    window.FB.login(async (res: { authResponse?: { accessToken: string } }) => {
+    // FB SDK requires a PLAIN (non-async) callback — an async one throws
+    // "Expression is of type asyncfunction, not function". Do the async work in
+    // an IIFE inside the sync callback.
+    window.FB.login((res: { authResponse?: { accessToken: string } }) => {
       if (!res.authResponse) { setWaConnecting(false); setWaMsg('❌ تم إلغاء ربط واتساب'); return }
-      try {
-        const data = await api.waConnect(storeId, { user_token: res.authResponse.accessToken })
-        await handleConnectResponse(data)
-      } catch (e: unknown) {
-        setWaMsg(e instanceof Error ? e.message : '❌ فشل الاتصال')
-      } finally { setWaConnecting(false) }
+      void (async () => {
+        try {
+          const data = await api.waConnect(storeId, { user_token: res.authResponse!.accessToken })
+          await handleConnectResponse(data)
+        } catch (e: unknown) {
+          setWaMsg(e instanceof Error ? e.message : '❌ فشل الاتصال')
+        } finally { setWaConnecting(false) }
+      })()
     }, {
       scope: 'whatsapp_business_management,business_management',
       extras: { feature: 'whatsapp_embedded_signup', setup: {} },
