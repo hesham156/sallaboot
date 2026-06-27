@@ -449,8 +449,8 @@ export default function Settings({ storeId }: Props) {
     setMetaConnecting(true); setMetaMsg('')
 
     // Messaging + page subscription scopes + comment-automation scopes.
-    // Instagram permissions removed — Instagram now connected separately (manually).
-    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,pages_read_user_content,pages_manage_engagement,business_management'
+    // instagram_manage_messages enables Instagram DM delivery via the linked Page.
+    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,pages_read_user_content,pages_manage_engagement,instagram_basic,instagram_manage_messages,business_management'
 
     function doConnect(token: string) {
       api.metaConnectPages(storeId, { user_token: token })
