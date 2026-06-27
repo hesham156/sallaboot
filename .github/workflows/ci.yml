@@ -30,7 +30,12 @@ jobs:
   backend-tests:
     name: Backend tests (pytest + Postgres)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 552 tests run serially against a real Postgres; 10 min was too tight
+    # and the job was cancelled at the cap on every run (main included),
+    # never actually reporting pass/fail. 20 gives headroom; the per-test
+    # --timeout below ensures a genuine hang fails loud instead of eating
+    # the whole budget.
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -108,7 +113,11 @@ jobs:
         working-directory: backend
         # -ra surfaces SKIP / XFAIL reasons in the run summary so a
         # silently-skipping integration test doesn't masquerade as green.
-        run: pytest -v -ra --tb=short --color=yes
+        # --timeout caps any single test at 120s; --timeout-method=thread
+        # works even when a test blocks in a C call or on a DB lock (the
+        # default signal method can't interrupt those). A hung test now
+        # fails with a traceback naming it instead of cancelling the job.
+        run: pytest -v -ra --tb=short --color=yes --timeout=120 --timeout-method=thread
 
       - name: Verify no tests were silently skipped
         working-directory: backend
