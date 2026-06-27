@@ -1858,11 +1858,14 @@ async def handle_messenger_message(msg: dict):
         await cs.restore_to_memory(session_id)
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}
-        if not info.get("channel"):
-            await cs.set_customer_info(session_id, {
-                "name":    msg.get("name", "") or info.get("name", ""),
-                "channel": channel,
-            })
+        # The webhook payload carries only the PSID/IGSID — never a name. Resolve a
+        # display name from the Graph API (best-effort) so the admin inbox shows the
+        # customer instead of "جلسة <id>". Retried each message until one resolves;
+        # set_customer_info ignores an empty name, so a failed lookup is harmless.
+        if not (info.get("name") or "").strip():
+            name = (msg.get("name", "") or "").strip() or await ms.get_user_profile(
+                token, sender, channel=channel, instagram_login=ig_login)
+            await cs.set_customer_info(session_id, {"name": name, "channel": channel})
 
         # CSAT response intercept — if the most-recent bot msg was a CSAT survey,
         # treat the reply as a rating (mirrors WhatsApp/Telegram) instead of
@@ -2196,9 +2199,12 @@ async def handle_telegram_message(msg: dict):
         await cs.restore_to_memory(session_id)
         cs.get_or_create(session_id, store_id)
         info = cs.get_customer_info(session_id) or {}
-        if not info.get("channel"):
+        # Telegram updates carry the sender's name on every message; backfill it
+        # while missing so the admin inbox shows the customer, not "جلسة <id>"
+        # (also fixes older sessions created before names were captured).
+        if not (info.get("name") or "").strip():
             await cs.set_customer_info(session_id, {
-                "name":    msg.get("name", "") or info.get("name", ""),
+                "name":    msg.get("name", ""),
                 "channel": "telegram",
             })
 

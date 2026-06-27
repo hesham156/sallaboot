@@ -184,21 +184,41 @@ async def claim_thread_control(token: str, psid: str) -> bool:
     return False
 
 
-async def get_sender_name(token: str, psid: str) -> str:
+async def get_user_profile(token: str, user_id: str, *, channel: str = "messenger",
+                           instagram_login: bool = False) -> str:
     """
-    Best-effort profile-name lookup for a Messenger PSID. Instagram does not
-    expose this for IGSIDs in most cases, so callers should treat "" as normal.
+    Best-effort display-name lookup for a sender. Webhook payloads carry only the
+    PSID/IGSID, never a name, so the admin inbox would otherwise show "جلسة <id>".
+
+      • Messenger (PSID)         → graph.facebook.com/{psid}?fields=name
+      • Instagram via Page       → graph.facebook.com/{igsid}?fields=name,username
+      • Instagram Login (IGSID)  → graph.instagram.com/{igsid}?fields=name,username
+
+    Returns the profile name, or "@username" for Instagram when only the handle is
+    exposed, or "" when nothing is resolvable (callers treat "" as normal).
     """
-    if not (token and psid):
+    if not (token and user_id):
         return ""
-    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{psid}"
+    if channel == "instagram":
+        host   = "graph.instagram.com" if instagram_login else "graph.facebook.com"
+        fields = "name,username"
+    else:
+        host   = "graph.facebook.com"
+        fields = "name"
+    url = f"https://{host}/{GRAPH_VERSION}/{user_id}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(url, params={"fields": "name", "access_token": token})
+            r = await client.get(url, params={"fields": fields, "access_token": token})
             if r.status_code == 200:
-                return (r.json().get("name") or "").strip()
-    except Exception:
-        pass
+                data   = r.json()
+                name   = (data.get("name") or "").strip()
+                if name:
+                    return name
+                handle = (data.get("username") or "").strip()
+                return f"@{handle}" if handle else ""
+            print(f"[{channel}] profile lookup {r.status_code}: {r.text[:200]}")
+    except Exception as exc:
+        print(f"[{channel}] get_user_profile error: {exc}")
     return ""
 
 
