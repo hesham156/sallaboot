@@ -1456,17 +1456,18 @@ def _verify_meta_signature(body: bytes, headers) -> tuple[bool, str]:
     configured app means the request did NOT come from Meta — i.e. a forged
     inbound WhatsApp / Messenger / Instagram event (finding C-3).
     """
-    # The unified webhook receives events from potentially TWO different Meta
-    # apps: the Messenger/Instagram/comments app (META_APP_SECRET) and a
-    # separate WhatsApp Business / BSP app (WHATSAPP_APP_SECRET). They sign with
-    # their own app secret, so we accept a signature that matches ANY configured
-    # secret. (Set WHATSAPP_APP_SECRET only if WhatsApp is on a different app.)
+    # The unified webhook may receive events from up to THREE different Meta
+    # apps — each signs with its own App Secret:
+    #   META_APP_SECRET       → main app  (Messenger + Facebook comments)
+    #   INSTAGRAM_APP_SECRET  → Instagram sub-app (IG Direct + IG comments)
+    #   WHATSAPP_APP_SECRET   → WhatsApp Business / BSP app
+    # A signature matching ANY configured secret is accepted. Omit the vars
+    # that share the same app as META_APP_SECRET (no need to duplicate).
     # .strip() each secret: a stray trailing newline/space in the Railway env
-    # value (an extremely common copy-paste mistake) would otherwise be folded
-    # into the HMAC key and make EVERY signature mismatch even when the secret is
-    # otherwise correct.
+    # value is a common copy-paste mistake that makes every signature fail.
     secrets = [s for s in (
         os.getenv("META_APP_SECRET", "").strip(),
+        os.getenv("INSTAGRAM_APP_SECRET", "").strip(),
         os.getenv("WHATSAPP_APP_SECRET", "").strip(),
     ) if s]
     if not secrets:
