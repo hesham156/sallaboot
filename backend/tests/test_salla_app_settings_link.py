@@ -91,9 +91,12 @@ class _SMStub:
 @pytest.fixture
 def patched(monkeypatch):
     def _apply(db_stub, sm_stub):
-        monkeypatch.setattr(w, "db", db_stub)
-        monkeypatch.setattr(w, "sm", sm_stub)
-        monkeypatch.setattr(w, "_log_event", lambda *a, **k: None)
+        # The handler + linker live in the webhooks.salla submodule after the
+        # package split, so patch the dependency aliases there (not on the
+        # re-exporting package, whose names are separate bindings).
+        monkeypatch.setattr(w.salla, "db", db_stub)
+        monkeypatch.setattr(w.salla, "sm", sm_stub)
+        monkeypatch.setattr(w.salla, "_log_event", lambda *a, **k: None)
         return db_stub, sm_stub
     return _apply
 
