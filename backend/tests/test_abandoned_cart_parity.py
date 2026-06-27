@@ -80,10 +80,12 @@ def patched(monkeypatch):
     async def _coupon(store_id, cfg):
         return ""
 
-    monkeypatch.setattr(w, "_log_event", lambda *a, **k: None)
+    # record_abandoned_cart + these helpers live in the webhooks._base submodule
+    # after the package split; patch them where they're defined and called.
+    monkeypatch.setattr(w._base, "_log_event", lambda *a, **k: None)
     monkeypatch.setattr(w._notif, "notify", _notify)
-    monkeypatch.setattr(w, "_wa_send", _wa)
-    monkeypatch.setattr(w, "_recovery_coupon_line", _coupon)
+    monkeypatch.setattr(w._base, "_wa_send", _wa)
+    monkeypatch.setattr(w._base, "_recovery_coupon_line", _coupon)
     monkeypatch.setattr(w.sm, "get_ai_config", lambda sid: {})
     monkeypatch.setattr(w.sm, "get_store_info", lambda sid: {"store_name": "متجر"})
     return calls

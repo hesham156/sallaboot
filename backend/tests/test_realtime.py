@@ -158,8 +158,10 @@ class TestRealtimeFanout:
         than a missed live update."""
         import realtime
         import database as db
-        # Force db.available() → False
-        monkeypatch.setattr(db, "_pool", None)
+        # Force db.available() → False. After the database package split the pool
+        # lives on database._core; patch it there (patching the re-exporting
+        # package would shadow the live __getattr__ forwarding for later tests).
+        monkeypatch.setattr(db._core, "_pool", None)
         # Should complete without exception.
         await realtime.publish("test:noop", "ev", {"d": 1})
 

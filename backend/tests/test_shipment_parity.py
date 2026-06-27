@@ -19,8 +19,10 @@ def wa(monkeypatch):
     async def _wa(store_id, cfg, phone, text):
         sent.append({"store_id": store_id, "phone": phone, "text": text})
 
-    monkeypatch.setattr(w, "_log_event", lambda *a, **k: None)
-    monkeypatch.setattr(w, "_wa_send", _wa)
+    # _handle_shopify_fulfillment lives in the webhooks.shopify submodule after
+    # the package split; patch the helper names in that module's namespace.
+    monkeypatch.setattr(w.shopify, "_log_event", lambda *a, **k: None)
+    monkeypatch.setattr(w.shopify, "_wa_send", _wa)
     monkeypatch.setattr(w.sm, "get_ai_config", lambda sid: {})
     monkeypatch.setattr(w.sm, "get_store_info", lambda sid: {"store_name": "متجري"})
     return sent
