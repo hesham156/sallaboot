@@ -145,12 +145,17 @@ export default function Settings({ storeId }: Props) {
   const fbLoaded = fbStatus === 'ready'
   const [waManual, setWaManual] = useState(false)
 
-  /* Messenger + Instagram (Facebook Page) — connection status read from `cfg` */
+  /* Messenger (Facebook Page) — connection status read from `cfg` */
   const [metaConnecting, setMetaConnecting] = useState(false)
   const [metaMsg, setMetaMsg]               = useState('')
   const [metaPendingToken, setMetaPendingToken] = useState('')
   const [metaPageOptions, setMetaPageOptions]   = useState<{id:string;name?:string;ig_username?:string}[]>([])
   const fbRef = useRef(false)
+
+  /* Instagram — manual connection */
+  const [igIdInput, setIgIdInput]     = useState('')
+  const [igSaving, setIgSaving]       = useState(false)
+  const [igMsg, setIgMsg]             = useState('')
 
   /* Notifications */
   const DEF_NOTIF: NotificationSettings = {
@@ -437,17 +442,14 @@ export default function Settings({ storeId }: Props) {
     finally { setWaRemoving('') }
   }
 
-  // ── Messenger + Instagram connect (Facebook Page) ──
+  // ── Messenger connect (Facebook Page) ──
   function startPagesConnect() {
     if (!window.FB) { setMetaMsg('❌ لم يتم تحميل Facebook SDK بعد — انتظر لحظة وحاول'); return }
     setMetaConnecting(true); setMetaMsg('')
 
-    // Messaging + page subscription scopes, PLUS comment-automation scopes:
-    //   pages_read_user_content  → receive/read comments on the page's posts
-    //   pages_manage_engagement  → reply to / hide comments
-    //   instagram_manage_comments→ read + reply IG comments
-    // Without these Meta does not deliver `feed`/`comments` webhook events.
-    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,pages_read_user_content,pages_manage_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,business_management'
+    // Messaging + page subscription scopes + comment-automation scopes.
+    // Instagram permissions removed — Instagram now connected separately (manually).
+    const REQUIRED_SCOPE = 'pages_messaging,pages_show_list,pages_manage_metadata,pages_read_user_content,pages_manage_engagement,business_management'
 
     function doConnect(token: string) {
       api.metaConnectPages(storeId, { user_token: token })
@@ -505,11 +507,31 @@ export default function Settings({ storeId }: Props) {
   }
 
   async function disconnectPages() {
-    if (!confirm('هل تريد فصل ماسنجر وإنستقرام؟')) return
+    if (!confirm('هل تريد فصل ماسنجر؟')) return
     try {
       await api.metaDisconnectPages(storeId)
-      setMetaMsg('✅ تم الفصل'); load()
+      setMetaMsg('✅ تم فصل ماسنجر'); load()
     } catch (e: unknown) { setMetaMsg(e instanceof Error ? e.message : '❌ خطأ') }
+  }
+
+  // ── Instagram manual connect ──
+  async function saveInstagram() {
+    const id = igIdInput.trim()
+    if (!id) { setIgMsg('❌ أدخل معرّف حساب إنستقرام'); return }
+    setIgSaving(true); setIgMsg('')
+    try {
+      const r = await api.metaSetInstagram(storeId, { ig_id: id })
+      setIgMsg(r.message || '✅ تم الربط'); setIgIdInput(''); load()
+    } catch (e: unknown) { setIgMsg(e instanceof Error ? e.message : '❌ فشل الحفظ') }
+    finally { setIgSaving(false) }
+  }
+
+  async function disconnectInstagram() {
+    if (!confirm('هل تريد فصل إنستقرام؟')) return
+    try {
+      await api.metaDisconnectInstagram(storeId)
+      setIgMsg('✅ تم فصل إنستقرام'); load()
+    } catch (e: unknown) { setIgMsg(e instanceof Error ? e.message : '❌ خطأ') }
   }
 
   async function saveNotif() {
@@ -1247,27 +1269,22 @@ export default function Settings({ storeId }: Props) {
 
             </div>
 
-            {/* ── ماسنجر + إنستقرام ── */}
+            {/* ── ماسنجر ── */}
             <div className="rounded-xl border border-divider bg-content2 p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Icon d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" size={14} className="text-primary" />
-                <h3 className="text-sm font-bold text-foreground">ماسنجر + إنستقرام</h3>
+                <h3 className="text-sm font-bold text-foreground">ماسنجر</h3>
               </div>
               <p className="text-xs text-default-500 leading-relaxed">
-                اربط صفحة فيسبوك (وحساب إنستقرام المرتبط بها) ليرد البوت تلقائياً على رسائل
-                ماسنجر وإنستقرام دايركت — بنفس ذكاء بوت المتجر.
+                اربط صفحة فيسبوك ليرد البوت تلقائياً على رسائل ماسنجر.
               </p>
 
               {cfg.page_id ? (
                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2">
                   <p className="text-sm font-bold text-emerald-600">✅ متصل: {cfg.page_name || cfg.page_id}</p>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-default-600">
-                    <span>ماسنجر: {cfg.messenger_enabled ? 'مفعّل ✓' : 'متوقف'}</span>
-                    <span className="text-default-300">•</span>
-                    <span>إنستقرام: {cfg.instagram_enabled ? `مفعّل ✓ ${cfg.ig_username ? '(@' + cfg.ig_username + ')' : ''}` : 'غير مرتبط'}</span>
-                  </div>
+                  <p className="text-xs text-default-500">ماسنجر: {cfg.messenger_enabled ? 'مفعّل ✓' : 'متوقف'}</p>
                   <Button size="sm" color="danger" variant="flat" onPress={disconnectPages} className="mt-1">
-                    فصل ماسنجر وإنستقرام
+                    فصل ماسنجر
                   </Button>
                 </div>
               ) : metaPageOptions.length > 0 ? (
@@ -1277,33 +1294,66 @@ export default function Settings({ storeId }: Props) {
                     <button key={p.id} onClick={() => pickPage(p.id)}
                       className="w-full text-right rounded-xl border border-divider bg-content2 p-3 hover:border-primary/40 transition-all">
                       <p className="text-sm font-bold text-foreground">{p.name || p.id}</p>
-                      {p.ig_username && <p className="text-[11px] text-default-400 mt-0.5">إنستقرام: @{p.ig_username}</p>}
                     </button>
                   ))}
                 </div>
               ) : fbStatus === 'unavailable' ? (
-                /* Backend hasn't configured META_APP_ID, so the Facebook
-                   Login popup can't be opened. Be explicit about the
-                   reason — endless "loading" silently is worse than a
-                   clear unavailable state with a path to resolution. */
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 leading-relaxed">
-                  <p className="font-bold mb-1">ربط ماسنجر/إنستقرام غير متاح حالياً</p>
+                  <p className="font-bold mb-1">ربط ماسنجر غير متاح حالياً</p>
                   <p>
                     يحتاج إعداد <code className="px-1 py-0.5 bg-amber-100 rounded">META_APP_ID</code> + <code className="px-1 py-0.5 bg-amber-100 rounded">META_APP_SECRET</code> على
-                    الخادم، وتسجيل تطبيق Facebook في{' '}
-                    <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener noreferrer"
-                       className="font-bold underline">Meta Developers</a>.
-                    تواصل مع المدير العام لتفعيل التكامل.
+                    الخادم. تواصل مع المدير العام لتفعيل التكامل.
                   </p>
                 </div>
               ) : (
                 <Button color="primary" isLoading={metaConnecting} isDisabled={!fbLoaded}
                   onPress={startPagesConnect}
                   className="font-bold h-10">
-                  {fbLoaded ? 'ربط ماسنجر + إنستقرام' : 'جارٍ تحميل Facebook…'}
+                  {fbLoaded ? 'ربط ماسنجر' : 'جارٍ تحميل Facebook…'}
                 </Button>
               )}
               <InlineAlert text={metaMsg} />
+            </div>
+
+            {/* ── إنستقرام (يدوي) ── */}
+            <div className="rounded-xl border border-divider bg-content2 p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Icon d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" size={14} className="text-primary" />
+                <h3 className="text-sm font-bold text-foreground">إنستقرام</h3>
+              </div>
+              <p className="text-xs text-default-500 leading-relaxed">
+                أدخل معرّف حساب إنستقرام Business يدوياً ليرد البوت على رسائل دايركت.
+              </p>
+
+              {cfg.instagram_enabled && cfg.ig_id ? (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2">
+                  <p className="text-sm font-bold text-emerald-600">
+                    ✅ مفعّل{cfg.ig_username ? ` (@${cfg.ig_username})` : ''}
+                  </p>
+                  <p className="text-[11px] text-default-400 font-mono dir-ltr">{cfg.ig_id}</p>
+                  <Button size="sm" color="danger" variant="flat" onPress={disconnectInstagram} className="mt-1">
+                    فصل إنستقرام
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    dir="ltr"
+                    placeholder="17841415872706624"
+                    value={igIdInput}
+                    onChange={e => setIgIdInput(e.target.value)}
+                    className="w-full rounded-lg border border-divider bg-content1 px-3 py-2 text-sm font-mono text-foreground placeholder:text-default-400 focus:outline-none focus:border-primary"
+                  />
+                  <p className="text-[11px] text-default-400">
+                    ابحث عن المعرّف في: Meta Business Suite → الإعدادات → الحسابات → Instagram
+                  </p>
+                  <Button color="primary" size="sm" isLoading={igSaving} onPress={saveInstagram} className="font-bold">
+                    حفظ
+                  </Button>
+                </div>
+              )}
+              <InlineAlert text={igMsg} />
             </div>
           </div>
         )}

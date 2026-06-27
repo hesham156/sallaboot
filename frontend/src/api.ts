@@ -310,6 +310,10 @@ export const api = {
       `/admin/${storeId}/meta/connect-pages`, body),
   metaDisconnectPages: (storeId: string) =>
     del<{ status: string; message: string }>(`/admin/${storeId}/meta/connect-pages`),
+  metaSetInstagram: (storeId: string, body: { ig_id: string }) =>
+    put<{ status?: string; ig_id?: string; message?: string }>(`/admin/${storeId}/meta/instagram`, body),
+  metaDisconnectInstagram: (storeId: string) =>
+    del<{ status: string; message: string }>(`/admin/${storeId}/meta/instagram`),
 
   // Pricing calculator settings
   getPricing: (storeId: string) =>

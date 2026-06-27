@@ -506,47 +506,78 @@ async def meta_connect_pages(store_id: str, request: Request):
         "page_name":         page.get("name", ""),
         "page_token":        page_token,
         "messenger_enabled": True,
-        "ig_id":             ig_id,
-        "ig_username":       page.get("ig_username", ""),
-        "instagram_enabled": bool(ig_id),
         # Comment automation defaults — opt-in via the Automation panel.
         "comments_fb_enabled": config.get("comments_fb_enabled", False),
-        "comments_ig_enabled": config.get("comments_ig_enabled", False),
     })
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
 
     await audit(request, "meta_pages_connect", target_store=store_id,
-                details={"page_id": page_id, "ig_id": ig_id, "subscribed": subscribed})
+                details={"page_id": page_id, "subscribed": subscribed})
 
     return {
         "status":            "connected",
         "page_id":           page_id,
         "page_name":         page.get("name", ""),
-        "instagram_enabled": bool(ig_id),
-        "ig_username":       page.get("ig_username", ""),
         "webhook_subscribed": subscribed,
-        "message": ("✅ تم ربط ماسنجر" + ("وإنستقرام" if ig_id else "") + " بنجاح"
+        "message": ("✅ تم ربط ماسنجر بنجاح"
                     + ("" if subscribed else " (لكن تعذّر اشتراك الـ webhook تلقائياً)")),
     }
 
 
 @router.delete("/admin/{store_id}/meta/connect-pages")
 async def meta_disconnect_pages(store_id: str, request: Request):
-    """Remove Messenger/Instagram credentials from ai_config."""
+    """Remove Messenger credentials from ai_config (keeps Instagram ig_id intact)."""
     if not sm.is_registered(store_id):
         raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
     config = dict(sm.get_ai_config(store_id))
-    for k in ("page_id", "page_name", "page_token", "ig_id", "ig_username"):
+    for k in ("page_id", "page_name", "page_token"):
         config.pop(k, None)
     config["messenger_enabled"]   = False
-    config["instagram_enabled"]   = False
     config["comments_fb_enabled"] = False
-    config["comments_ig_enabled"] = False
     await sm.set_ai_config(store_id, config)
     await db.save_ai_config(store_id, config)
     await audit(request, "meta_pages_disconnect", target_store=store_id)
-    return {"status": "disconnected", "message": "تم فصل ماسنجر وإنستقرام"}
+    return {"status": "disconnected", "message": "تم فصل ماسنجر"}
+
+
+@router.put("/admin/{store_id}/meta/instagram")
+async def meta_set_instagram_manual(store_id: str, request: Request):
+    """Manually save an Instagram Business Account ID for webhook routing."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    body = await request.json()
+    ig_id = (body.get("ig_id") or "").strip()
+    if not ig_id:
+        raise HTTPException(400, "ig_id مطلوب")
+    if not ig_id.isdigit():
+        raise HTTPException(400, "ig_id يجب أن يكون رقماً — ابحث عنه في Meta Business Suite أو إعدادات تطبيق فيسبوك")
+
+    config = dict(sm.get_ai_config(store_id))
+    config["ig_id"]             = ig_id
+    config["instagram_enabled"] = True
+    await sm.set_ai_config(store_id, config)
+    await db.save_ai_config(store_id, config)
+    await audit(request, "meta_instagram_manual_connect", target_store=store_id,
+                details={"ig_id": ig_id})
+    return {"status": "connected", "ig_id": ig_id,
+            "message": f"✅ تم ربط إنستقرام (معرّف: {ig_id})"}
+
+
+@router.delete("/admin/{store_id}/meta/instagram")
+async def meta_disconnect_instagram(store_id: str, request: Request):
+    """Remove Instagram credentials only (keeps Messenger page_token connected)."""
+    if not sm.is_registered(store_id):
+        raise HTTPException(404, f"المتجر '{store_id}' غير مسجّل")
+    config = dict(sm.get_ai_config(store_id))
+    config.pop("ig_id",       None)
+    config.pop("ig_username", None)
+    config["instagram_enabled"]   = False
+    config["comments_ig_enabled"] = False
+    await sm.set_ai_config(store_id, config)
+    await db.save_ai_config(store_id, config)
+    await audit(request, "meta_instagram_disconnect", target_store=store_id)
+    return {"status": "disconnected", "message": "تم فصل إنستقرام"}
 
 
 @router.delete("/admin/{store_id}/whatsapp/connect")
