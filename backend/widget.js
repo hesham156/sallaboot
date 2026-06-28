@@ -30,6 +30,10 @@
     storeName:      "متجر الطباعة",
     welcomeMessage: "مرحباً! 👋 أنا مساعد متجرنا للطباعة. كيف أقدر أساعدك اليوم؟",
     placeholder:    "اكتب سؤالك هنا...",
+    greetingTitle:    "هلا والله 👋",
+    greetingSubtitle: "كيف يمكننا مساعدتك؟",
+    communityUrl:     "",   // optional: shows a link row on the Home tab
+    communityText:    "",
     maxFileSizeMB:  20,
   };
   var CONFIG = Object.assign({}, _defaults, _ext);
@@ -54,6 +58,8 @@
   var isOpen = false;
   var isLoading = false;
   var historyLoaded = false;      // guards one-time re-render of past messages
+  var chatStarted = false;        // welcome/quick-actions injected into chat view
+  var currentView = "home";       // home | messages | news | tickets
   var botEnabled = true;          // tracks whether AI bot is handling this session
   var pollTimer = null;           // setInterval handle for admin message polling
   var humanBannerShown = false;   // prevent duplicate "human took over" banners
@@ -488,10 +494,114 @@
     #salla-chat-messages .order-status-card .os-track:hover { opacity: .88 !important; }
   `;
 
+  // ── Theme helper: derive a gradient from the primary color ───────────────────
+  function shade(hex, percent) {
+    var h = String(hex || "#1a56db").replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var num = parseInt(h, 16);
+    if (isNaN(num)) return hex;
+    var r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+    function adj(c) { return Math.max(0, Math.min(255, Math.round(c + (percent / 100) * 255))); }
+    return "#" + ((1 << 24) + (adj(r) << 16) + (adj(g) << 8) + adj(b)).toString(16).slice(1);
+  }
+
+  // ── Extra styles: tabbed home shell layered over the existing chat ────────────
+  var extraStyles = `
+    #salla-chat-widget {
+      --sb-primary: ${CONFIG.primaryColor};
+      --sb-grad-from: ${shade(CONFIG.primaryColor, 8)};
+      --sb-grad-to: ${shade(CONFIG.primaryColor, -22)};
+    }
+    #salla-chat-panel { width: 384px; height: 600px; max-height: calc(100vh - 120px); border-radius: 22px; }
+
+    .sb-views { flex: 1; min-height: 0; display: flex; }
+    .sb-view { display: none; flex-direction: column; flex: 1; min-height: 0; width: 100%; }
+    .sb-view.active { display: flex; }
+
+    /* Messages view: gradient header + back button (reuses #salla-chat-* nodes) */
+    #salla-chat-panel #salla-chat-header { background: linear-gradient(155deg, var(--sb-grad-from), var(--sb-grad-to)); }
+    #salla-msg-back { background: rgba(255,255,255,0.18); border: none; color: #fff; cursor: pointer;
+      width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 20px; line-height: 1; padding: 0; transition: background 0.15s; }
+    #salla-msg-back:hover { background: rgba(255,255,255,0.32); }
+
+    /* Home */
+    #salla-home-header {
+      background: linear-gradient(155deg, var(--sb-grad-from), var(--sb-grad-to));
+      color: #fff; padding: 20px 22px 30px; flex-shrink: 0;
+    }
+    #salla-home-header .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; }
+    #salla-home-header .avatars { display: flex; }
+    #salla-home-header .avatars .av {
+      width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.9);
+      border: 2px solid rgba(255,255,255,0.55); margin-right: -10px;
+      display: flex; align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+    .sb-close { background: rgba(255,255,255,0.18); border: none; color: #fff; cursor: pointer;
+      width: 30px; height: 30px; border-radius: 50%; font-size: 17px; line-height: 1;
+      display: flex; align-items: center; justify-content: center; transition: background 0.15s; }
+    .sb-close:hover { background: rgba(255,255,255,0.32); }
+    #salla-home-header h1 { margin: 0; font-size: 23px; font-weight: 800; line-height: 1.55; }
+    #salla-home-header h1 .sub { color: rgba(255,255,255,0.8); }
+
+    #salla-home-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; background: #f5f6f8;
+      display: flex; flex-direction: column; gap: 12px; margin-top: -16px; }
+    #salla-home-body::-webkit-scrollbar { width: 5px; }
+    #salla-home-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+    .sb-cta { background: #14181f; color: #fff; border: none; cursor: pointer; width: 100%; border-radius: 14px;
+      padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; font-size: 15px;
+      font-weight: 700; box-shadow: 0 6px 18px rgba(0,0,0,0.12); transition: transform 0.15s; }
+    .sb-cta:hover { transform: translateY(-1px); }
+    .sb-cta svg { width: 18px; height: 18px; fill: #fff; }
+
+    .sb-card { background: #fff; border: 1px solid #eef0f3; border-radius: 14px; padding: 14px 16px; cursor: pointer;
+      transition: box-shadow 0.15s, transform 0.15s; text-align: right; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .sb-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.08); transform: translateY(-1px); }
+    .sb-card .card-label { font-size: 11px; color: #9aa3af; font-weight: 700; margin-bottom: 8px; }
+    .sb-card .card-row { display: flex; align-items: center; gap: 10px; }
+    .sb-card .card-icon { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; display: flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      background: color-mix(in srgb, var(--sb-primary) 14%, #fff); }
+    .sb-card .card-main { flex: 1; min-width: 0; }
+    .sb-card .card-title { font-size: 14px; font-weight: 700; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sb-card .card-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sb-card .card-time { font-size: 11px; color: #b0b8c1; flex-shrink: 0; }
+
+    .sb-row-link { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: #fff;
+      border: 1px solid #eef0f3; border-radius: 14px; color: #475569; font-size: 13px; font-weight: 600;
+      text-decoration: none; cursor: pointer; }
+    .sb-row-link:hover { border-color: #d6dae0; }
+    .sb-row-link svg { width: 16px; height: 16px; fill: var(--sb-primary); flex-shrink: 0; }
+
+    /* News / tickets placeholders */
+    .sb-empty { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 30px; background: #f5f6f8; gap: 10px; }
+    .sb-empty .ico { width: 64px; height: 64px; border-radius: 20px; display: flex; align-items: center; justify-content: center;
+      font-size: 30px; background: color-mix(in srgb, var(--sb-primary) 12%, #fff); }
+    .sb-empty .t { font-size: 16px; font-weight: 800; color: #1e293b; }
+    .sb-empty .d { font-size: 13px; color: #94a3b8; line-height: 1.6; max-width: 240px; }
+    .sb-empty .soon { font-size: 11px; font-weight: 700; color: var(--sb-primary);
+      background: color-mix(in srgb, var(--sb-primary) 12%, #fff); padding: 4px 12px; border-radius: 999px; }
+    .sb-view-header { padding: 16px 18px 12px; background: #fff; border-bottom: 1px solid #eef0f3; flex-shrink: 0; }
+    .sb-view-header .h { font-size: 17px; font-weight: 800; color: #1e293b; }
+
+    /* Bottom nav */
+    #salla-bottom-nav { display: flex; background: #fff; border-top: 1px solid #eef0f3; flex-shrink: 0; padding: 6px 4px 8px; }
+    #salla-chat-panel[data-view="messages"] #salla-bottom-nav { display: none; }
+    .sb-tab { flex: 1; background: none; border: none; cursor: pointer; padding: 6px 2px; position: relative;
+      display: flex; flex-direction: column; align-items: center; gap: 3px; color: #9aa3af; transition: color 0.15s; }
+    .sb-tab svg { width: 22px; height: 22px; fill: currentColor; }
+    .sb-tab span { font-size: 10.5px; font-weight: 700; }
+    .sb-tab.active { color: var(--sb-primary); }
+    .sb-tab .tab-badge { position: absolute; top: 0; left: 50%; margin-left: 4px; background: #ef4444; color: #fff;
+      font-size: 9px; font-weight: 800; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+      display: none; align-items: center; justify-content: center; }
+  `;
+
   // ── DOM Builder ───────────────────────────────────────────────────────────────
   function buildWidget() {
     var styleEl = document.createElement("style");
-    styleEl.textContent = styles;
+    styleEl.textContent = styles + "\n" + extraStyles;
     document.head.appendChild(styleEl);
 
     var wrapper = document.createElement("div");
@@ -504,41 +614,231 @@
           <path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zm-2 11H6v-2h12v2zm0-3H6V8h12v2z"/>
         </svg>
       </button>
-      <div id="salla-chat-panel" role="dialog" aria-label="نافذة المحادثة">
-        <div id="salla-chat-header">
-          <div class="avatar">🖨️</div>
-          <div class="info">
-            <div class="name" id="salla-store-name"></div>
-            <div class="status" id="salla-status-text">متاح الآن</div>
+      <div id="salla-chat-panel" role="dialog" aria-label="نافذة المحادثة" data-view="home">
+        <div class="sb-views">
+
+          <!-- ── HOME ── -->
+          <div class="sb-view active" id="view-home">
+            <div id="salla-home-header">
+              <div class="top">
+                <div class="avatars"><div class="av">🧑🏻‍💼</div><div class="av">👩🏻‍💻</div><div class="av">🧑🏻‍🔧</div></div>
+                <button class="sb-close" data-close aria-label="إغلاق">✕</button>
+              </div>
+              <h1><span id="salla-greet-title"></span><br><span class="sub" id="salla-greet-sub"></span></h1>
+            </div>
+            <div id="salla-home-body">
+              <button class="sb-cta" data-go="messages">
+                <span>أرسل لنا رسالة</span>
+                <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+              </button>
+              <div id="salla-home-recent"></div>
+              <div class="sb-card" data-go="tickets">
+                <div class="card-label">التذاكر</div>
+                <div class="card-row">
+                  <div class="card-icon">🎫</div>
+                  <div class="card-main">
+                    <div class="card-title">طلبات الدعم</div>
+                    <div class="card-sub">تابع طلبات مساعدتك في مكان واحد</div>
+                  </div>
+                </div>
+              </div>
+              <div id="salla-home-community"></div>
+            </div>
           </div>
-          <span id="salla-cart-badge" title="السلة">🛒 <span id="salla-cart-count">0</span></span>
-          <button id="salla-chat-close" aria-label="إغلاق">✕</button>
-        </div>
-        <div id="salla-human-banner">
-          <div class="dot"></div>
-          <span>جارٍ التواصل مع فريق الدعم... سيرد عليك أحد المتخصصين قريباً</span>
-        </div>
-        <div id="salla-chat-messages"></div>
-        <div id="salla-rating-bar" style="display:none"></div>
-        <div id="salla-chat-footer">
-          <div id="salla-file-preview" style="display:none"></div>
-          <div id="salla-chat-input-row">
-            <button class="chat-attach-btn" id="salla-attach-btn" title="إرفاق ملف تصميم">
-              <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 01-8 0V5a2.5 2.5 0 015 0v10.5a1 1 0 01-2 0V6H10v9.5a2.5 2.5 0 005 0V5a4 4 0 00-8 0v12.5a5.5 5.5 0 0011 0V6h-1.5z"/></svg>
-            </button>
-            <textarea id="salla-chat-input" rows="1" placeholder="${CONFIG.placeholder}" dir="rtl"></textarea>
-            <button id="salla-chat-send" disabled aria-label="إرسال">
-              <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
-            </button>
+
+          <!-- ── MESSAGES (chat) ── -->
+          <div class="sb-view" id="view-messages">
+            <div id="salla-chat-header">
+              <button id="salla-msg-back" data-go="home" aria-label="رجوع">‹</button>
+              <div class="avatar">🖨️</div>
+              <div class="info">
+                <div class="name" id="salla-store-name"></div>
+                <div class="status" id="salla-status-text">متاح الآن</div>
+              </div>
+              <span id="salla-cart-badge" title="السلة">🛒 <span id="salla-cart-count">0</span></span>
+              <button id="salla-chat-close" aria-label="إغلاق">✕</button>
+            </div>
+            <div id="salla-human-banner">
+              <div class="dot"></div>
+              <span>جارٍ التواصل مع فريق الدعم... سيرد عليك أحد المتخصصين قريباً</span>
+            </div>
+            <div id="salla-chat-messages"></div>
+            <div id="salla-rating-bar" style="display:none"></div>
+            <div id="salla-chat-footer">
+              <div id="salla-file-preview" style="display:none"></div>
+              <div id="salla-chat-input-row">
+                <button class="chat-attach-btn" id="salla-attach-btn" title="إرفاق ملف تصميم">
+                  <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 01-8 0V5a2.5 2.5 0 015 0v10.5a1 1 0 01-2 0V6H10v9.5a2.5 2.5 0 005 0V5a4 4 0 00-8 0v12.5a5.5 5.5 0 0011 0V6h-1.5z"/></svg>
+                </button>
+                <textarea id="salla-chat-input" rows="1" placeholder="${CONFIG.placeholder}" dir="rtl"></textarea>
+                <button id="salla-chat-send" disabled aria-label="إرسال">
+                  <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+                </button>
+              </div>
+              <input type="file" id="salla-file-input"
+                accept=".pdf,.ai,.eps,.psd,.png,.jpg,.jpeg,.svg,.tiff,.tif,.cdr,.zip">
+            </div>
           </div>
-          <input type="file" id="salla-file-input"
-            accept=".pdf,.ai,.eps,.psd,.png,.jpg,.jpeg,.svg,.tiff,.tif,.cdr,.zip">
+
+          <!-- ── NEWS ── -->
+          <div class="sb-view" id="view-news">
+            <div class="sb-view-header"><div class="h">الأخبار</div></div>
+            <div class="sb-empty">
+              <div class="ico">📰</div>
+              <div class="t">لا توجد أخبار بعد</div>
+              <div class="d">سنعرض هنا آخر العروض والتحديثات من المتجر.</div>
+              <div class="soon">قريباً</div>
+            </div>
+          </div>
+
+          <!-- ── TICKETS ── -->
+          <div class="sb-view" id="view-tickets">
+            <div class="sb-view-header"><div class="h">التذاكر</div></div>
+            <div class="sb-empty">
+              <div class="ico">🎫</div>
+              <div class="t">لا توجد تذاكر</div>
+              <div class="d">ستظهر هنا طلبات الدعم التي تتابعها. ابدأ محادثة لطلب المساعدة.</div>
+              <div class="soon">قريباً</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── BOTTOM NAV ── -->
+        <div id="salla-bottom-nav">
+          <button class="sb-tab active" data-go="home">
+            <svg viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1V10.5z"/></svg>
+            <span>الرئيسية</span>
+          </button>
+          <button class="sb-tab" data-go="messages">
+            <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>
+            <span>الرسائل</span>
+          </button>
+          <button class="sb-tab" data-go="news">
+            <span class="tab-badge" id="salla-news-badge"></span>
+            <svg viewBox="0 0 24 24"><path d="M4 4h13a1 1 0 011 1v13a2 2 0 002 2H6a2 2 0 01-2-2V4zm3 4v2h7V8H7zm0 4v2h7v-2H7z"/></svg>
+            <span>الأخبار</span>
+          </button>
+          <button class="sb-tab" data-go="tickets">
+            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v3a2 2 0 000 4v3a2 2 0 01-2 2H5a2 2 0 01-2-2v-3a2 2 0 000-4V7z"/></svg>
+            <span>التذاكر</span>
+          </button>
         </div>
       </div>
     `;
 
     document.body.appendChild(wrapper);
+    applyTheme();
     document.getElementById("salla-store-name").textContent = CONFIG.storeName || "";
+    refreshGreeting();
+    renderCommunity();
+  }
+
+  // ── Theme + home helpers ──────────────────────────────────────────────────────
+  function applyTheme() {
+    var w = document.getElementById("salla-chat-widget");
+    if (!w) return;
+    w.style.setProperty("--sb-primary", CONFIG.primaryColor);
+    w.style.setProperty("--sb-grad-from", shade(CONFIG.primaryColor, 8));
+    w.style.setProperty("--sb-grad-to", shade(CONFIG.primaryColor, -22));
+  }
+
+  function refreshGreeting() {
+    var t = document.getElementById("salla-greet-title");
+    var s = document.getElementById("salla-greet-sub");
+    if (t) t.textContent = CONFIG.greetingTitle || "";
+    if (s) s.textContent = CONFIG.greetingSubtitle || "";
+  }
+
+  function renderCommunity() {
+    var holder = document.getElementById("salla-home-community");
+    if (!holder) return;
+    if (!CONFIG.communityUrl) { holder.innerHTML = ""; return; }
+    holder.innerHTML =
+      '<a class="sb-row-link" href="' + esc(CONFIG.communityUrl) + '" target="_blank" rel="noreferrer">' +
+        '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
+        esc(CONFIG.communityText || "تابع جديد المتجر") +
+      '</a>';
+  }
+
+  function timeAgo(ts) {
+    if (!ts) return "";
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return "";
+    var s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return "الآن";
+    var m = Math.floor(s / 60); if (m < 60) return m + " دقيقة";
+    var h = Math.floor(m / 60); if (h < 24) return h + " ساعة";
+    var dd = Math.floor(h / 24); if (dd < 30) return dd + " يوم";
+    return Math.floor(dd / 30) + " شهر";
+  }
+
+  // Show one of the four tabbed views and sync the bottom nav.
+  function showView(name) {
+    currentView = name;
+    var panel = document.getElementById("salla-chat-panel");
+    if (panel) panel.setAttribute("data-view", name);
+    var map = { home: "view-home", messages: "view-messages", news: "view-news", tickets: "view-tickets" };
+    Object.keys(map).forEach(function (k) {
+      var el = document.getElementById(map[k]);
+      if (el) el.classList.toggle("active", k === name);
+    });
+    var tabs = document.querySelectorAll("#salla-bottom-nav .sb-tab");
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle("active", tabs[i].getAttribute("data-go") === name);
+    }
+    if (name === "messages") {
+      ensureChatReady();
+      var input = document.getElementById("salla-chat-input");
+      if (input) setTimeout(function () { input.focus(); }, 60);
+    } else if (name === "home") {
+      refreshHomeRecent();
+    }
+  }
+
+  // Home "last message" card — built from the saved session's history.
+  async function refreshHomeRecent() {
+    var holder = document.getElementById("salla-home-recent");
+    if (!holder) return;
+    if (!sessionId) { holder.innerHTML = ""; return; }
+    try {
+      var res = await fetch(CONFIG.apiUrl + "/chat/history?session_id=" + encodeURIComponent(sessionId));
+      if (!res.ok) { holder.innerHTML = ""; return; }
+      var data = await res.json();
+      var msgs = (data && data.messages) || [];
+      if (!msgs.length) { holder.innerHTML = ""; return; }
+      var last = msgs[msgs.length - 1];
+      var snippet = (last.content || "").replace(/\s+/g, " ").trim();
+      if (snippet.length > 48) snippet = snippet.slice(0, 48) + "…";
+      var awaitingYou = last.role === "user";
+      holder.innerHTML =
+        '<div class="sb-card" data-go="messages">' +
+          '<div class="card-label">الرسالة الأخيرة</div>' +
+          '<div class="card-row">' +
+            '<div class="card-icon">💬</div>' +
+            '<div class="card-main">' +
+              '<div class="card-title">' + esc(snippet || "محادثتك السابقة") + '</div>' +
+              '<div class="card-sub">' + (awaitingYou ? "في انتظار ردنا" : "اضغط لمتابعة المحادثة") + '</div>' +
+            '</div>' +
+            (timeAgo(last.ts) ? '<div class="card-time">' + esc(timeAgo(last.ts)) + '</div>' : '') +
+          '</div>' +
+        '</div>';
+    } catch (e) { holder.innerHTML = ""; }
+  }
+
+  // One-time chat bootstrap (history + welcome + quick actions). Safe to call
+  // repeatedly — guarded by chatStarted.
+  async function ensureChatReady() {
+    if (chatStarted) return;
+    chatStarted = true;
+    var msgsEl = document.getElementById("salla-chat-messages");
+    if (!historyLoaded && sessionId) {
+      await loadHistory();
+    }
+    if (msgsEl && msgsEl.children.length === 0) {
+      appendMessage("bot", CONFIG.welcomeMessage);
+      appendQuickActions();
+    }
   }
 
   // ── Message Rendering ─────────────────────────────────────────────────────────
@@ -1364,29 +1664,37 @@
     // Show badge on load
     badge.classList.add("show");
 
-    // Toggle panel
+    // Toggle panel — opens onto the Home tab.
     btn.addEventListener("click", async function () {
       isOpen = !isOpen;
       panel.classList.toggle("open", isOpen);
       badge.classList.remove("show");
       if (isOpen) {
-        var msgsEl = document.getElementById("salla-chat-messages");
-        // Resume a returning visitor's previous conversation first.
+        showView(currentView);
+        // Resume a returning visitor's live thread in the background so realtime
+        // is connected and the Home "last message" card is populated, even if
+        // they never open the Messages tab.
         if (!historyLoaded && sessionId) {
           await loadHistory();
         }
-        // Only greet when there's no prior conversation to restore.
-        if (msgsEl.children.length === 0) {
-          appendMessage("bot", CONFIG.welcomeMessage);
-          appendQuickActions();
-        }
-        input.focus();
+        refreshHomeRecent();
       }
     });
 
     closeBtn.addEventListener("click", function () {
       isOpen = false;
       panel.classList.remove("open");
+    });
+
+    // Tab / CTA / back / home-close navigation (event delegation).
+    panel.addEventListener("click", function (e) {
+      if (e.target.closest("[data-close]")) {
+        isOpen = false;
+        panel.classList.remove("open");
+        return;
+      }
+      var goEl = e.target.closest("[data-go]");
+      if (goEl) showView(goEl.getAttribute("data-go"));
     });
 
     // Input handling
