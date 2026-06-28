@@ -745,6 +745,21 @@ export const api = {
   tiktokDisconnect: (storeId: string) =>
     req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/tiktok`),
 
+  // ── Custom store (self-built / custom-coded — pushes catalog + events) ──────
+  customStatus: (storeId: string) =>
+    get<CustomIntegrationStatus>(`/admin/${storeId}/integrations/custom`),
+
+  customConnect: (storeId: string) =>
+    post<{ message: string; signing_secret: string; endpoints: CustomEndpoints }>(
+      `/admin/${storeId}/integrations/custom/connect`, {}),
+
+  customRegenerateSecret: (storeId: string) =>
+    post<{ signing_secret: string; endpoints: CustomEndpoints }>(
+      `/admin/${storeId}/integrations/custom/regenerate-secret`, {}),
+
+  customDisconnect: (storeId: string) =>
+    req<{ message: string }>('DELETE', `/admin/${storeId}/integrations/custom`),
+
   // ── Channels (messaging surfaces the AI auto-replies on) ───────────────────
   listChannels: (storeId: string) =>
     get<{ channels: Record<string, ChannelData> }>(`/admin/${storeId}/channels`),
@@ -1392,6 +1407,19 @@ export interface IntegrationData {
   plan_name?:    string
   currency?:     string
   access_token?: string
+}
+
+export interface CustomEndpoints {
+  catalog: string
+  events:  string
+}
+
+export interface CustomIntegrationStatus {
+  connected:       boolean
+  secret_set?:     boolean
+  endpoints:       CustomEndpoints
+  products_count?: number
+  last_sync?:      string
 }
 
 // Per-channel status returned by GET /admin/:storeId/channels. Token-free —

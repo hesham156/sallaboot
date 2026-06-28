@@ -88,6 +88,12 @@ async def _process_inbox_row(row: dict) -> None:
         # Payload was already unwrapped to the bare resource at ingest time.
         await _webhooks_router.process_zid_event(event, store_id, payload)
         return
+    if source == "custom":
+        event    = row.get("event_type") or ""
+        store_id = row.get("store_id") or ""
+        # Custom-store push: payload is the bare event `data` object.
+        await _webhooks_router.process_custom_event(event, store_id, payload)
+        return
     if source == "whatsapp":
         await _webhooks_router.handle_whatsapp_message(payload)
         return
