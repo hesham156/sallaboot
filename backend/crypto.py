@@ -193,6 +193,8 @@ AI_CONFIG_SECRET_FIELDS = (
 INTEGRATION_SECRET_FIELDS = (
     "access_token",
     "refresh_token",
+    "signing_secret",   # custom-store HMAC webhook secret — same blast radius
+                        # as an OAuth token, so encrypt it at rest too.
 )
 
 

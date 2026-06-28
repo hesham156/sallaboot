@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Chip, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Input, Spinner } from '@heroui/react'
-import { api, IntegrationData } from '../../api'
+import { api, IntegrationData, CustomIntegrationStatus } from '../../api'
 import { BrandLogo, PageHeader, StatusPill } from '../../components/ui'
 
 interface Props { storeId: string }
@@ -42,6 +42,7 @@ const INTEGRATIONS_DEF: Omit<IntegrationDef, 'status' | 'data'>[] = [
   { id: 'salla',       name: 'سلّة',       nameEn: 'Salla',       category: 'ecommerce', logo: <BrandLogo domain="salla.sa"        fallbackColor="#6B3FA0" fallbackLabel="س"   />, description: 'متجرك على سلّة — الطلبات والمنتجات والعملاء تظهر مباشرةً في المحادثات.' },
   { id: 'shopify',     name: 'شوبيفاي',    nameEn: 'Shopify',     category: 'ecommerce', logo: <BrandLogo domain="shopify.com"     fallbackColor="#96BF48" fallbackLabel="S"   />, description: 'اربط متجر شوبيفاي لإدارة الطلبات والمنتجات من لوحة تحكم واحدة.' },
   { id: 'zid',         name: 'زد',         nameEn: 'Zid',         category: 'ecommerce', logo: <BrandLogo domain="zid.sa"          fallbackColor="#1C3553" fallbackLabel="ز"   />, description: 'اربط متجرك على منصة زد — الطلبات والمنتجات والعملاء تظهر في المحادثات.' },
+  { id: 'custom',      name: 'متجر مبرمَج خاص', nameEn: 'Custom',  category: 'ecommerce', logo: <BrandLogo domain="" fallbackColor="#475569" fallbackLabel="API" />, description: 'متجرك مبني ببرمجة خاصة؟ اربطه بحياك عبر API موقّع — ادفع المنتجات والطلبات والسلات المتروكة مباشرةً.' },
   { id: 'woocommerce', name: 'ووكومرس',    nameEn: 'WooCommerce', category: 'ecommerce', logo: <BrandLogo domain="woocommerce.com" fallbackColor="#7F54B3" fallbackLabel="Woo" />, description: 'ربط موقع ووردبريس/ووكومرس لمتابعة الطلبات.', comingSoon: true },
   { id: 'tiktok',      name: 'تيك توك',     nameEn: 'TikTok',      category: 'social',    logo: <BrandLogo domain="tiktok.com"     fallbackColor="#000000" fallbackLabel="TT"  />, description: 'اربط حساب تيك توك (الأساس: تسجيل الدخول وعرض الحساب). الرد على الرسائل والتعليقات غير متاح بعد عبر واجهة تيك توك الرسمية.' },
   { id: 'myfatoorah',  name: 'ماي فاتوره', nameEn: 'MyFatoorah',  category: 'payment',   logo: <BrandLogo domain="myfatoorah.com" fallbackColor="#00B0A6" fallbackLabel="MF"  />, description: 'إرسال روابط دفع مباشرة للعميل داخل المحادثة.', comingSoon: true },
@@ -56,12 +57,14 @@ function IntegrationCard({
   onConnect,
   onDisconnect,
   onSync,
+  onManage,
   connecting,
 }: {
   integration: IntegrationDef
   onConnect:    (id: string) => void
   onDisconnect: (id: string) => void
   onSync?:      (id: string) => void
+  onManage?:    (id: string) => void
   connecting?:  boolean
 }) {
   const connected  = integration.status === 'connected'
@@ -105,6 +108,12 @@ function IntegrationCard({
               <button onClick={() => onSync(integration.id)}
                 className="flex-1 py-2 text-xs font-semibold rounded-xl border border-emerald-200 text-emerald-600 hover:bg-emerald-50 transition-colors">
                 مزامنة
+              </button>
+            )}
+            {onManage && (
+              <button onClick={() => onManage(integration.id)}
+                className="flex-1 py-2 text-xs font-semibold rounded-xl border border-divider text-foreground hover:bg-content2 transition-colors">
+                إعدادات الربط
               </button>
             )}
             <button onClick={() => onDisconnect(integration.id)}
@@ -231,6 +240,160 @@ function SallaConnectModal({ isOpen, onClose, storeId, onToast }: {
   )
 }
 
+/* ── Custom store connect modal (self-built stores push catalog + events) ── */
+function CopyRow({ label, value, onToast }: {
+  label: string
+  value: string
+  onToast: (msg: string, type: 'success' | 'error' | 'info') => void
+}) {
+  function copy() {
+    if (!value) return
+    navigator.clipboard?.writeText(value).then(
+      () => onToast('تم النسخ', 'success'),
+      () => onToast('تعذّر النسخ', 'error'),
+    )
+  }
+  return (
+    <div>
+      <label className="block text-[11px] font-semibold text-default-500 mb-1.5">{label}</label>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 px-3 py-2.5 bg-content2 border border-divider rounded-xl text-[11px] font-mono text-foreground break-all select-all" dir="ltr">
+          {value || '—'}
+        </code>
+        <button onClick={copy} disabled={!value}
+          className="px-3 py-2.5 text-xs font-bold rounded-xl border border-divider text-foreground hover:bg-content2 transition-colors flex-shrink-0 disabled:opacity-50">
+          نسخ
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CustomConnectModal({ isOpen, onClose, storeId, onToast, onChanged }: {
+  isOpen: boolean
+  onClose: () => void
+  storeId: string
+  onToast: (msg: string, type: 'success' | 'error' | 'info') => void
+  onChanged: () => void
+}) {
+  const [status, setStatus]   = useState<CustomIntegrationStatus | null>(null)
+  const [secret, setSecret]   = useState('')   // revealed once after connect/regen
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy]       = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) { setSecret(''); setStatus(null); return }
+    let cancelled = false
+    setLoading(true)
+    api.customStatus(storeId)
+      .then(res => { if (!cancelled) setStatus(res) })
+      .catch(() => onToast('تعذّر جلب حالة الربط', 'error'))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, storeId])
+
+  async function activate() {
+    setBusy(true)
+    try {
+      const res = await api.customConnect(storeId)
+      setSecret(res.signing_secret)
+      setStatus({ connected: true, secret_set: true, endpoints: res.endpoints })
+      onToast('تم تفعيل الربط مع متجرك', 'success')
+      onChanged()
+    } catch {
+      onToast('تعذّر تفعيل الربط', 'error')
+    } finally { setBusy(false) }
+  }
+
+  async function regen() {
+    setBusy(true)
+    try {
+      const res = await api.customRegenerateSecret(storeId)
+      setSecret(res.signing_secret)
+      onToast('تم توليد مفتاح جديد — حدّث متجرك به', 'success')
+    } catch {
+      onToast('تعذّر توليد مفتاح جديد', 'error')
+    } finally { setBusy(false) }
+  }
+
+  const connected = status?.connected
+
+  return (
+    <Modal isOpen={isOpen} onOpenChange={(o) => { if (!o) onClose() }} placement="center" backdrop="blur" size="lg">
+      <ModalContent>
+        {(close) => (
+          <>
+            <ModalHeader dir="rtl">
+              <div className="flex items-center gap-3">
+                <BrandLogo domain="" fallbackColor="#475569" fallbackLabel="API" size={30} />
+                <div>
+                  <p className="text-sm font-bold">ربط متجر مبرمَج خاص</p>
+                  <p className="text-xs font-normal text-default-500">متجرك يدفع البيانات إلى حياك عبر API موقّع</p>
+                </div>
+              </div>
+            </ModalHeader>
+            <ModalBody dir="rtl">
+              {loading ? (
+                <div className="flex justify-center py-8"><Spinner color="primary" /></div>
+              ) : !connected ? (
+                <>
+                  <p className="text-xs text-default-600 leading-relaxed">
+                    فعّل الربط لتوليد <span className="font-semibold text-foreground">مفتاح توقيع</span> ونقاط الإرسال (endpoints).
+                    بعدها يُرسل متجرك المنتجات والطلبات والسلات المتروكة إلى حياك ليعمل عليها المساعد الذكي.
+                  </p>
+                  <button onClick={activate} disabled={busy}
+                    className="w-full py-2.5 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center justify-center gap-2">
+                    {busy ? <><Spinner size="sm" color="white" /> جارٍ التفعيل...</> : 'تفعيل الربط'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {secret ? (
+                    <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-3">
+                      <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400 mb-2">
+                        ⚠️ مفتاح التوقيع — يظهر مرة واحدة فقط. انسخه الآن واحفظه بأمان.
+                      </p>
+                      <CopyRow label="Signing Secret" value={secret} onToast={onToast} />
+                    </div>
+                  ) : (
+                    <div className="bg-content2 rounded-xl p-3 text-[11px] text-default-500 leading-relaxed">
+                      مفتاح التوقيع محفوظ ومخفي لأمانك. لو فقدته، ولّد مفتاحاً جديداً (يُلغي القديم فوراً).
+                    </div>
+                  )}
+
+                  <CopyRow label="رفع الكتالوج (POST)" value={status?.endpoints.catalog || ''} onToast={onToast} />
+                  <CopyRow label="إرسال الأحداث (POST)" value={status?.endpoints.events || ''} onToast={onToast} />
+
+                  {typeof status?.products_count === 'number' && status.products_count > 0 && (
+                    <p className="text-[11px] text-emerald-500 font-semibold">
+                      آخر مزامنة: {status.products_count} منتج
+                    </p>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1">
+                    <button onClick={regen} disabled={busy}
+                      className="text-[11px] font-semibold text-default-400 hover:text-red-500 transition-colors disabled:opacity-50">
+                      {busy ? 'جارٍ التوليد…' : 'توليد مفتاح توقيع جديد (يُلغي القديم)'}
+                    </button>
+                    <a href="/docs/custom-store" target="_blank" rel="noreferrer"
+                      className="text-[11px] font-semibold text-violet-600 hover:underline">
+                      دليل المطوّر ←
+                    </a>
+                  </div>
+                </>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <button onClick={close} className="px-4 py-2 text-xs text-default-500 hover:text-foreground">إغلاق</button>
+            </ModalFooter>
+          </>
+        )}
+      </ModalContent>
+    </Modal>
+  )
+}
+
 /* ══════════════════════════════════ MAIN PAGE ══════════════════════════════════ */
 export default function Integrations({ storeId }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -251,6 +414,8 @@ export default function Integrations({ storeId }: Props) {
 
   // Salla connect modal — Salla links ONLY via the App-Settings API key.
   const [sallaModal, setSallaModal]     = useState(false)
+  // Custom-store connect modal (self-built stores push catalog + events).
+  const [customModal, setCustomModal]   = useState(false)
   // "تحديث الربط" button busy state.
   const [refreshingLink, setRefreshingLink] = useState(false)
 
@@ -371,7 +536,7 @@ export default function Integrations({ storeId }: Props) {
     }
   }
 
-  const ECOMMERCE_IDS = ['salla', 'shopify', 'zid', 'woocommerce']
+  const ECOMMERCE_IDS = ['salla', 'shopify', 'zid', 'custom', 'woocommerce']
 
   function handleConnect(id: string) {
     // Enforce one ecommerce platform per account
@@ -387,6 +552,7 @@ export default function Integrations({ storeId }: Props) {
     if (id === 'shopify') { setShopDomain(''); setInstallError(''); setShopifyModal(true) }
     else if (id === 'salla') { setSallaModal(true) }   // API-key linking is the only Salla method
     else if (id === 'zid') { handleZidConnect() }
+    else if (id === 'custom') { setCustomModal(true) }
     else if (id === 'tiktok') { handleTiktokConnect() }
     else showToast('هذا التكامل قيد التطوير وسيُتاح قريباً', 'info')
   }
@@ -458,6 +624,7 @@ export default function Integrations({ storeId }: Props) {
       if (disconnectTarget === 'shopify') await api.shopifyDisconnect(storeId)
       else if (disconnectTarget === 'salla') await api.sallaDisconnect(storeId)
       else if (disconnectTarget === 'zid') await api.zidDisconnect(storeId)
+      else if (disconnectTarget === 'custom') await api.customDisconnect(storeId)
       else if (disconnectTarget === 'tiktok') await api.tiktokDisconnect(storeId)
       await loadIntegrations()
       showToast('تم قطع الاتصال بنجاح', 'success')
@@ -536,6 +703,7 @@ export default function Integrations({ storeId }: Props) {
                         onConnect={handleConnect}
                         onDisconnect={handleDisconnect}
                         onSync={SYNCABLE_IDS.includes(integration.id) ? handleSync : undefined}
+                        onManage={integration.id === 'custom' ? () => setCustomModal(true) : undefined}
                         connecting={(integration.id === 'zid' && connectingZid) || (integration.id === 'tiktok' && connectingTiktok)}
                       />
                     ))}
@@ -567,6 +735,15 @@ export default function Integrations({ storeId }: Props) {
         onClose={() => setSallaModal(false)}
         storeId={storeId}
         onToast={showToast}
+      />
+
+      {/* ── Custom store connect modal (push-based API integration) ── */}
+      <CustomConnectModal
+        isOpen={customModal}
+        onClose={() => setCustomModal(false)}
+        storeId={storeId}
+        onToast={showToast}
+        onChanged={loadIntegrations}
       />
 
       {/* ── Shopify install modal ── */}

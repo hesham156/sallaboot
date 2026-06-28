@@ -16,6 +16,7 @@ const AuditLog       = lazy(() => import('./pages/AuditLog'))
 const PrivacyPolicy  = lazy(() => import('./pages/PrivacyPolicy'))
 const TermsOfService = lazy(() => import('./pages/TermsOfService'))
 const DataDeletion   = lazy(() => import('./pages/DataDeletion'))
+const CustomStoreDocs = lazy(() => import('./pages/CustomStoreDocs'))
 const BlogList       = lazy(() => import('./pages/BlogList'))
 const BlogPost       = lazy(() => import('./pages/BlogPost'))
 const AdminBlog      = lazy(() => import('./pages/AdminBlog'))
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />
           <Route path="/data-deletion" element={<DataDeletion />} />
+          <Route path="/docs/custom-store" element={<CustomStoreDocs />} />
 
           {/* Public Blog — SEO-targeted content */}
           <Route path="/blog" element={<BlogList />} />

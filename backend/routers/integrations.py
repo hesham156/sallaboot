@@ -187,6 +187,89 @@ async def regenerate_api_key(store_id: str, request: Request):
     return {"api_key": key}
 
 
+# ── Custom store (self-built / custom-coded) ──────────────────────────────────
+# For merchants not on Salla/Zid/Shopify. Their backend PUSHES catalog + events
+# to us, signed with an HMAC secret we hand out here. Ingest lives in
+# routers/webhooks/custom.py; merchant spec in docs/custom_store_integration.md.
+
+def _custom_endpoints(store_id: str) -> dict:
+    base = f"{BASE_URL}/webhooks/custom/{store_id}"
+    return {"catalog": f"{base}/catalog", "events": f"{base}/events"}
+
+
+def _new_signing_secret() -> str:
+    return "whsec_" + secrets.token_urlsafe(24)
+
+
+@router.post("/admin/{store_id}/integrations/custom/connect")
+async def custom_connect(store_id: str, request: Request):
+    """Enable the custom-store integration and return the (one-time-visible)
+    signing secret plus the push endpoints the merchant codes against."""
+    require_store_owner(request, store_id)
+    secret = _new_signing_secret()
+    try:
+        await db.save_integration(store_id, "custom", {
+            "signing_secret": secret,
+            "connected":      True,
+            "created_at":     int(time.time()),
+        })
+    except Exception as e:
+        print(f"[integrations] ❌ custom save_integration failed: {e}")
+        raise HTTPException(500, "تعذّر تفعيل الربط")
+    print(f"[integrations] ✅ Custom store connected: store={store_id}")
+    return {
+        "message":        "تم تفعيل الربط مع متجرك",
+        "signing_secret": secret,   # shown once — the stored copy is masked
+        "endpoints":      _custom_endpoints(store_id),
+    }
+
+
+@router.get("/admin/{store_id}/integrations/custom")
+async def custom_status(store_id: str, request: Request):
+    """Connection status — endpoints + masked secret + last catalog sync."""
+    require_store_owner(request, store_id)
+    data   = await db.get_integrations(store_id)
+    custom = data.get("custom") or {}
+    if not custom:
+        return {"connected": False, "endpoints": _custom_endpoints(store_id)}
+    cache = sm.get_cache(store_id) or {}
+    return {
+        "connected":      True,
+        "secret_set":     bool(custom.get("signing_secret")),
+        "endpoints":      _custom_endpoints(store_id),
+        "products_count": cache.get("products_count", 0) if cache.get("platform") == "custom" else 0,
+        "last_sync":      cache.get("last_sync", "") if cache.get("platform") == "custom" else "",
+    }
+
+
+@router.post("/admin/{store_id}/integrations/custom/regenerate-secret")
+async def custom_regenerate_secret(store_id: str, request: Request):
+    """Rotate the signing secret. Invalidates the old one immediately."""
+    require_store_owner(request, store_id)
+    data = await db.get_integrations(store_id)
+    if not data.get("custom"):
+        raise HTTPException(400, "لا يوجد ربط نشط مع متجر مخصص")
+    secret = _new_signing_secret()
+    try:
+        await db.save_integration(store_id, "custom", {
+            "signing_secret": secret,
+            "connected":      True,
+            "created_at":     int(time.time()),
+        })
+    except Exception as e:
+        print(f"[integrations] ❌ custom regenerate failed: {e}")
+        raise HTTPException(500, "تعذّر توليد مفتاح جديد")
+    return {"signing_secret": secret, "endpoints": _custom_endpoints(store_id)}
+
+
+@router.delete("/admin/{store_id}/integrations/custom")
+async def custom_disconnect(store_id: str, request: Request):
+    """Disconnect — remove the integration so future pushes are rejected (404)."""
+    require_store_owner(request, store_id)
+    await db.remove_integration(store_id, "custom")
+    return {"message": "تم قطع الاتصال مع المتجر المخصص"}
+
+
 # ── Salla App-Settings Validation URL ─────────────────────────────────────────
 # Registered in the Salla Partner Portal as the app's "رابط التحقق من الإعدادات".
 # When the merchant saves the app's settings form (their 7ayak email + API key),
