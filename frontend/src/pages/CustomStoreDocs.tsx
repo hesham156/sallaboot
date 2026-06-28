@@ -64,6 +64,30 @@ const sig  = crypto.createHmac("sha256", SIGNING_SECRET)
                    .update(body).digest("hex");
 // header → X-Hayyak-Signature: sha256=\${sig}`
 
+const WIDGET_HTML = `<!-- حياك — فقاعة المحادثة -->
+<script>
+  window.SallaChatConfig = {
+    storeId: "YOUR_HAYYAK_STORE_ID",   // نفس store_id المستخدم في الـ webhooks
+    apiUrl: "https://7ayak.app",
+    primaryColor: "#12c2a0",
+    storeName: "اسم متجرك"
+  };
+</script>
+<script src="https://7ayak.app/widget.js" async></script>`
+
+const WIDGET_NEXT = `import Script from "next/script"
+
+// داخل <body> في src/app/layout.tsx:
+<Script id="hayyak-config" strategy="afterInteractive">
+  {\`window.SallaChatConfig = {
+    storeId: "YOUR_HAYYAK_STORE_ID",
+    apiUrl: "https://7ayak.app",
+    primaryColor: "#12c2a0",
+    storeName: "اسم متجرك"
+  };\`}
+</Script>
+<Script src="https://7ayak.app/widget.js" strategy="afterInteractive" />`
+
 const CURL = `SECRET="whsec_..."
 STORE_ID="abc123"
 BODY='{"event":"order.created","data":{"id":"5012","total":360,"currency":"SAR","customer_phone":"0501234567","customer_name":"سارة"}}'
@@ -209,6 +233,28 @@ export default function CustomStoreDocs() {
               <li>وقّع <b>نفس البايتات</b> التي ترسلها بالضبط (لا تُعِد تنسيق JSON بعد التوقيع).</li>
               <li>أرقام الجوال السعودية تُطبَّع تلقائياً إلى E.164 (<code dir="ltr">05x…</code> → <code dir="ltr">+9665x…</code>).</li>
               <li>رسائل الواتساب تُرسَل فقط إذا كان الواتساب مُفعّلاً في إعدادات المتجر.</li>
+            </ul>
+          </Card>
+
+          {/* Optional website widget */}
+          <Card>
+            <div className="absolute top-0 left-0 w-2 h-full bg-gradient-to-b from-cyan-500 to-teal-500" />
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 mb-2 flex items-center gap-2">
+              <span className="text-cyan-500 text-xl">💬</span> الويدجت على الموقع (اختياري)
+            </h2>
+            <p className="text-slate-600 text-sm leading-relaxed mb-3">
+              كل ما سبق يعمل عبر واتساب بدون أي شيء على موقعك. لو أردت <b>فقاعة محادثة</b>
+              {' '}تظهر على صفحات متجرك (المساعد الذكي يردّ داخل الموقع نفسه)، ركّبها بسطرين —
+              وهي مستقلة عن مفتاح التوقيع وعن الـ webhooks (تستخدم نقاط <code dir="ltr">/chat</code>
+              {' '}العامة المقيّدة بالـ <code>storeId</code>).
+            </p>
+            <Code>{WIDGET_HTML}</Code>
+            <p className="text-slate-600 text-sm font-bold mt-4 mb-2">React / Next.js (App Router):</p>
+            <Code>{WIDGET_NEXT}</Code>
+            <ul className="text-slate-600 text-xs leading-relaxed list-disc mr-5 space-y-1 mt-4">
+              <li><code>storeId</code> هو نفسه المستخدم في الـ webhooks — تجده في رابط اللوحة <code dir="ltr">…/store/&#123;storeId&#125;/…</code>.</li>
+              <li><code>apiUrl</code> اختياري؛ يُستنتج تلقائياً من مصدر السكربت.</li>
+              <li>إعدادات الترحيب واللون تُقرأ أيضاً من لوحة حياك، فتعديلها ينعكس دون تغيير الكود.</li>
             </ul>
           </Card>
 
